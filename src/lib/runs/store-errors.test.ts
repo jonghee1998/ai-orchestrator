@@ -33,3 +33,14 @@ test("buildPgConfig adds CA without weakening verification; disable only via exp
   assert.ok((c.ssl as { ca: string }).ca.includes("\nAAA\n"));
   assert.equal(buildPgConfig("postgresql://u:p@h/db", { DATABASE_SSL: "disable" }).ssl, false);
 });
+
+test("buildPgConfig bundles Supabase CA only for Supabase hosts, verification on", async () => {
+  const { SUPABASE_ROOT_CA_2021 } = await import("./supabase-ca");
+  const a = buildPgConfig("postgresql://u:p@aws-0-ap.pooler.supabase.com:6543/db", {});
+  assert.equal((a.ssl as { rejectUnauthorized?: boolean }).rejectUnauthorized, true);
+  assert.equal(a.ssl && (a.ssl as { ca?: string }).ca, SUPABASE_ROOT_CA_2021);
+  const b = buildPgConfig("postgresql://u:p@evil.example.com/db", {});
+  assert.equal((b.ssl as { ca?: string }).ca, undefined);
+  const c = buildPgConfig("postgresql://u:p@notsupabase.com/db", {});
+  assert.equal((c.ssl as { ca?: string }).ca, undefined);
+});

@@ -3,6 +3,7 @@
 import type { StoreData, RunStore } from "./store";
 
 export interface SqlTx { query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> }
+import { SUPABASE_ROOT_CA_2021, isSupabaseHost } from "./supabase-ca";
 export interface SqlPool { withTransaction<T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> }
 
 // Must match db/migrations/001_orchestrator_state.sql (checked by pg-store.integration.test). Kept as a
@@ -32,7 +33,9 @@ export class PgRunStore implements RunStore {
 export function buildPgConfig(connectionString: string, env: Readonly<Record<string, string | undefined>> = process.env) {
   let cs = connectionString;
   try { const u = new URL(connectionString); for (const k of ["sslmode", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"]) u.searchParams.delete(k); cs = u.toString(); } catch { /* let pg report an invalid URL */ }
-  const ca = env.DATABASE_SSL_CA?.replace(/\\n/g, "\n").trim();
+  let host = ""; try { host = new URL(connectionString).hostname; } catch { /* ignore */ }
+  // Explicit DATABASE_SSL_CA wins; otherwise bundled official Supabase CA for Supabase hosts only. Verification stays on.
+  const ca = env.DATABASE_SSL_CA?.replace(/\\n/g, "\n").trim() || (isSupabaseHost(host) ? SUPABASE_ROOT_CA_2021 : undefined);
   const ssl = env.DATABASE_SSL === "disable" ? false : { rejectUnauthorized: true as const, ...(ca ? { ca } : {}) };
   return { connectionString: cs, max: 3, connectionTimeoutMillis: 8000, ssl };
 }
