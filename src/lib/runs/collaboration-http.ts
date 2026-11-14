@@ -8,11 +8,11 @@ import { submitQueued, type DispatchAdapter } from "./dispatcher";
 import { RunStoreConfigurationError, type RunStore } from "./store";
 
 type Env = Readonly<Record<string, string | undefined>>;
-interface Dependencies { store: () => RunStore; github: CollaborationGitHub; adapter: DispatchAdapter; env: Env; nowMs: number }
-interface Reply { status: number; body: string; signature?: string }
+export interface Dependencies { store: () => RunStore; github: CollaborationGitHub; adapter: DispatchAdapter; env: Env; nowMs: number }
+export interface Reply { status: number; body: string; signature?: string }
 const reply = (status: number, data: unknown): Reply => ({ status, body: JSON.stringify(data) });
 const at = (d: Dependencies) => new Date(d.nowMs).toISOString();
-async function deliver(d: Dependencies, w: { dispatchId?: string; stage: string }) {
+export async function deliver(d: Dependencies, w: { dispatchId?: string; stage: string }) {
   if (!w.dispatchId || !["claude", "codex"].includes(w.stage)) return null;
   // Durable one-shot authorization also prevents duplicate submissions after a lost HTTP response.
   return submitQueued(d.store(), d.adapter, w.dispatchId, at(d));
@@ -37,7 +37,7 @@ export async function handleCollaboration(method: string, headers: Headers, raw:
     return reply(200, { workflow: w, submission: await deliver(d, w) });
   } catch (e) { return failure(e); }
 }
-function failure(e: unknown): Reply {
+export function failure(e: unknown): Reply {
   if (e instanceof CollaborationConflict) return reply(409, { error: e.message });
   if (e instanceof RunStoreConfigurationError) return reply(503, { error: "store_unconfigured" });
   if (e instanceof CollaborationGitHubError) return reply(502, { error: e.message });

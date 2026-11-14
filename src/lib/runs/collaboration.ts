@@ -30,6 +30,16 @@ export interface ExecutionResult {
   cleanup: CleanupProof;
 }
 export interface CleanupProof { processGroupsEmpty: true; groups: number }
+/**
+ * #55: who claimed a run. "runner" = the HMAC subscription-worker (can attest process-group cleanup).
+ * "session" = a provider routine session authenticated by a proxy-injected static header (session-auth.ts). A session
+ * cannot prove process cleanup, so its runs NEVER become provablyQuiescent, and each channel may only drive its own runs.
+ */
+export type RunOrigin = "runner" | "session";
+/** Session self-report: same shape as ExecutionResult but MUST NOT carry a cleanup claim. */
+export type SessionExecutionResult = Omit<ExecutionResult, "cleanup">;
+const originOf = (r: DispatchRecord): RunOrigin => r.runOrigin ?? "runner";
+function sameOrigin(r: DispatchRecord, origin: RunOrigin) { if (originOf(r) !== origin) conflict("origin_mismatch"); }
 export class CollaborationConflict extends Error {}
 function conflict(reason: string): never { throw new CollaborationConflict(reason); }
 export function validAssignment(a: Assignment): boolean {
@@ -128,12 +138,16 @@ export async function assignCollaboration(store: RunStore, github: Collaboration
  * authorized-but-unacknowledged state (queued + submitAuthorizedAt, no outcome yet) is claimable in the same
  * single transaction; recordSubmission later only annotates the claimed record and never re-runs or fails it.
  */
-export async function claimCollaboration(store: RunStore, id: string, agent: string, runId: string, at: string) {
+export async function claimCollaboration(store: RunStore, id: string, agent: string, runId: string, at: string,
+  opts: { origin?: RunOrigin; targetSha?: string } = {}) {
+  const origin = opts.origin ?? "runner";
   return store.transact(d => {
     const r = d.records[id];
     const pendingAck = r?.status === "queued" && r.submission === undefined;
     const acked = r?.status === "dispatched" && ["accepted", "unknown"].includes(r.submission ?? "");
     if (!r?.collaboration || r.agent !== agent || !r.submitAuthorizedAt || r.held || !(pendingAck || acked)) conflict("not_claimable");
+    // #55: a session claim is bound to the exact task HEAD it was told to start from; any other SHA is stale.
+    if (origin === "session" && (r.collaboration.step !== "claude" || opts.targetSha !== r.collaboration.targetSha)) conflict("stale_target_sha");
     const w = workflow(d, r.collaboration.workflowId);
     if (w.dispatchId !== id || w.stage !== r.collaboration.step) conflict("stale_step");
     const gate = evaluateGate(d.control, agent, Date.parse(at));
@@ -142,7 +156,7 @@ export async function claimCollaboration(store: RunStore, id: string, agent: str
     // #41 P1 fence: never start a second writer on workBranch while an earlier claimed writer may still push.
     // Enforced here (not only in decide) so no recovery path (revise, refresh -> review -> revise) can bypass it.
     if (r.collaboration.step === "claude" && unquiescedWriters(d, w, id).length) conflict("prior_execution_not_quiesced");
-    d.records[id] = { ...r, status: "running", runId, ackAt: at, startedAt: at, lastHeartbeatAt: at, source: "agent-callback" };
+    d.records[id] = { ...r, status: "running", runId, runOrigin: origin, ackAt: at, startedAt: at, lastHeartbeatAt: at, source: "agent-callback" };
     note(w, at, pendingAck ? "claimed_before_submission_ack" : "claimed");
     return structuredClone(d.records[id]);
   });
@@ -152,10 +166,11 @@ export async function claimCollaboration(store: RunStore, id: string, agent: str
  * running for this runId, e.g. timed out, superseded or finished) tells the runner to kill its CLI process group.
  * Deliberately not gated by OFF: an already running worker drains, and revocation must always be readable.
  */
-export async function leaseCollaboration(store: RunStore, id: string, agent: string, runId: string, at: string) {
+export async function leaseCollaboration(store: RunStore, id: string, agent: string, runId: string, at: string, origin: RunOrigin = "runner") {
   return store.transact(d => {
     const r = d.records[id];
     if (!r?.collaboration || r.agent !== agent) conflict("dispatch_mismatch");
+    if (r.runId === runId) sameOrigin(r, origin);
     const w = d.collaborations?.[r.collaboration.workflowId];
     if (r.runId !== runId || r.status !== "running" || !w || w.dispatchId !== id || w.stage !== r.collaboration.step) return { lease: "revoked" as const, status: r.status };
     d.records[id] = { ...r, lastHeartbeatAt: at, lastActivityAt: at };
@@ -179,6 +194,7 @@ export async function quiesceCollaboration(store: RunStore, id: string, agent: s
     const r = d.records[id];
     if (!r?.collaboration || r.agent !== agent) conflict("dispatch_mismatch");
     if (!r.runId || r.runId !== runId) conflict("run_mismatch");
+    sameOrigin(r, "runner"); // #55: only the runner that owns the process groups can attest they are empty
     if (r.quiescence?.runId === runId || r.execution?.cleanup) return structuredClone(r);
     const quiescence = { at, runId, reason: q.reason, signal: q.signal };
     if (isTerminal(r.status)) d.records[id] = { ...r, quiescence };
@@ -208,6 +224,7 @@ export async function reportCleanupFailure(store: RunStore, id: string, agent: s
     const r = d.records[id];
     if (!r?.collaboration || r.agent !== agent) conflict("dispatch_mismatch");
     if (!r.runId || r.runId !== runId) conflict("run_mismatch");
+    sameOrigin(r, "runner");
     if (r.cleanupFailure?.runId === runId || r.execution || r.quiescence?.runId === runId) return structuredClone(r);
     const cleanupFailure = { at, runId, reason: f.reason, groups: f.groups, unproven: f.unproven };
     if (isTerminal(r.status)) d.records[id] = { ...r, cleanupFailure };
@@ -228,13 +245,21 @@ function matches(w: Collaboration, p: PullSnapshot) {
     (p.open && p.headBranch === a.workBranch && p.baseBranch === a.baseBranch));
 }
 /** Completion advances the next step in the SAME transaction as the execution result. Labels are not completion. */
-const executionOf = (r: ExecutionResult) => ({ exitCode: r.exitCode, headSha: r.headSha, summary: r.summary, tests: structuredClone(r.tests),
-  cleanup: { processGroupsEmpty: true as const, groups: r.cleanup.groups } });
-export async function finishCollaboration(store: RunStore, github: CollaborationGitHub, id: string, agent: string, runId: string, result: ExecutionResult, at: string) {
-  if (!validExecution(result)) conflict("invalid_result");
+const executionOf = (r: ExecutionResult | SessionExecutionResult, origin: RunOrigin) => origin === "session"
+  ? { exitCode: r.exitCode, headSha: r.headSha, summary: r.summary, tests: structuredClone(r.tests), attestation: "external_session_self_report" as const }
+  : { exitCode: r.exitCode, headSha: r.headSha, summary: r.summary, tests: structuredClone(r.tests),
+    cleanup: { processGroupsEmpty: true as const, groups: (r as ExecutionResult).cleanup.groups } };
+/** #55: a session result is validated like a runner result except it must NOT claim cleanup (it cannot prove it). */
+export function validSessionExecution(r: SessionExecutionResult): boolean {
+  return !!r && typeof r === "object" && !("cleanup" in r) && validExecution({ ...r, cleanup: { processGroupsEmpty: true, groups: 0 } });
+}
+export async function finishCollaboration(store: RunStore, github: CollaborationGitHub, id: string, agent: string, runId: string,
+  result: ExecutionResult | SessionExecutionResult, at: string, origin: RunOrigin = "runner") {
+  if (origin === "session" ? !validSessionExecution(result) : !validExecution(result as ExecutionResult)) conflict("invalid_result");
   const before = await store.read();
   const rec = before.records[id];
   if (!rec?.collaboration || rec.agent !== agent) conflict("dispatch_mismatch");
+  if (rec.runId === runId) sameOrigin(rec, origin);
   const prior = workflow(before, rec.collaboration.workflowId);
   // Only successful results need PR evidence. Failures still persist actual exit code and block the loop.
   const ok = result.exitCode === 0 && result.tests.length > 0 && result.tests.every(t => t.exitCode === 0);
@@ -245,13 +270,14 @@ export async function finishCollaboration(store: RunStore, github: Collaboration
   return store.transact(d => {
     const r = d.records[id], w = workflow(d, prior.id);
     if (r.runId !== runId || r.agent !== agent) conflict("run_mismatch");
+    sameOrigin(r, origin);
     if (isTerminal(r.status)) {
-      if (JSON.stringify(r.execution) === JSON.stringify(executionOf(result))) return structuredClone(w);
+      if (JSON.stringify(r.execution) === JSON.stringify(executionOf(result, origin))) return structuredClone(w);
       conflict("already_finished");
     }
     if (r.status !== "running" || w.dispatchId !== id || w.stage !== r.collaboration?.step) conflict("stale_step");
     d.records[id] = { ...r, status: ok ? "succeeded" : "failed", finishedAt: at, lastActivityAt: at,
-      execution: executionOf(result),
+      execution: executionOf(result, origin),
       lastError: ok ? undefined : "execution or required tests failed", evidence: p ? [...r.evidence, { kind: "pr", url: p.url, at }] : r.evidence };
     if (p) w.latest = p;
     note(w, at, ok ? "completed" : "execution_failed", result.summary);

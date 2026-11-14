@@ -19,7 +19,11 @@ export interface Evidence { kind: EvidenceKind; url: string; at: string }
 export interface DispatchRecord {
   collaboration?: { workflowId: string; cycle: number; step: "claude" | "codex"; repo: string; baseBranch: string; baseSha: string; workBranch: string; targetSha: string; prNumber?: number; instructions: string };
   /** `cleanup` is the runner's signed proof that every process group of the run was empty (#49); required for new results. */
-  execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[]; cleanup?: { processGroupsEmpty: true; groups: number } };
+  execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[]; cleanup?: { processGroupsEmpty: true; groups: number };
+    /** #55: set for session-origin results; marks tests/summary as unverified self-report (never cleanup proof). */
+    attestation?: "external_session_self_report" };
+  /** #55: channel that claimed runId. Absent = "runner" (HMAC subscription-worker; all records before #55). */
+  runOrigin?: "runner" | "session";
   dispatchId: string;
   issueNumber: number;
   agent: string;
