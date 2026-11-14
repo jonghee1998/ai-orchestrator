@@ -33,6 +33,9 @@ export interface DispatchRecord {
   evidence: Evidence[];
   /** 상태 근거: agent 콜백만 "verified". 그 외는 추정 금지. */
   source: "none" | "agent-callback";
+  /** provider submission outcome; "unknown" = possible lost ACK (never auto-retried) */
+  submission?: "accepted" | "rejected_not_accepted" | "unknown";
+  lastActivityAt?: string;
 }
 
 export interface Timeouts { ackMs: number; heartbeatMs: number }
