@@ -17,6 +17,8 @@ export type EvidenceKind = "pr" | "commit" | "test" | "comment" | "other";
 export interface Evidence { kind: EvidenceKind; url: string; at: string }
 
 export interface DispatchRecord {
+  collaboration?: { workflowId: string; cycle: number; step: "claude" | "codex"; repo: string; baseBranch: string; baseSha: string; workBranch: string; targetSha: string; prNumber?: number; instructions: string };
+  execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[] };
   dispatchId: string;
   issueNumber: number;
   agent: string;

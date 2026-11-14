@@ -54,3 +54,4 @@ npm run build      # 프로덕션 빌드
 - [AGENTS.md](./AGENTS.md) — 에이전트 역할·연동 규약·협업 원칙
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 시스템 구조와 설계 결정
 - [docs/ROADMAP.md](./docs/ROADMAP.md) — 단계별 로드맵
+- [docs/ISSUE36.md](./docs/ISSUE36.md) — PM 브랜치/SHA 고정, 구독 CLI 협업 인계와 실행 검증

@@ -1,0 +1,189 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { assignCollaboration, claimCollaboration, finishCollaboration, decideCollaboration, refreshCollaboration, type Assignment, type ExecutionResult } from "./collaboration";
+import { GitHubEvidenceReader, type CollaborationGitHub, type PullSnapshot } from "./collaboration-github";
+import { MemoryRunStore, FileRunStore } from "./store";
+import { submitQueued, type DispatchAdapter } from "./dispatcher";
+import { handleCollaboration, handleCollaborationWorker } from "./collaboration-http";
+import { signCallback } from "./callback-auth";
+import { applyCallback } from "./service";
+const NOW = "2026-01-01T00:00:00.000Z", MS = Date.parse(NOW), A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
+const assignment: Assignment = { repo: "o/r", issueNumber: 36, baseBranch: "claude/base", baseSha: A, sourcePr: 35, workBranch: "claude/issue-36", claudeAgent: "claude-sonnet", instructions: "Implement the PM task", reviewCompletedPr: true };
+const original: PullSnapshot = { number: 35, repo: "o/r", headBranch: assignment.baseBranch, headSha: A, baseBranch: "main", url: "https://github.com/o/r/pull/35", open: true };
+const result = (sha = A, pr = 35): ExecutionResult => ({ exitCode: 0, summary: "Actual review findings", headSha: sha, tests: [{ command: "npm test", exitCode: 0 }], prNumber: pr });
+async function setup() {
+  const store = new MemoryRunStore();
+  await store.transact(d => { d.control.agents.codex = true; d.control.agents["claude-sonnet"] = true; d.control.claudeProvider = true; });
+  const pulls = new Map<number, PullSnapshot>([[35, original]]);
+  const github: CollaborationGitHub = { branch: async () => A, pull: async (_repo, n) => structuredClone(pulls.get(n)!), descendsFrom: async () => true };
+  const calls: string[] = [];
+  const adapter: DispatchAdapter = { supports: a => a !== "gpt", submit: async r => { calls.push(r.dispatchId); return { outcome: "accepted" }; } };
+  const w = await assignCollaboration(store, github, assignment, NOW);
+  const claim = async (id: string, agent: string, run = "run-00001") => { await submitQueued(store, adapter, id, NOW); return claimCollaboration(store, id, agent, run, NOW); };
+  return { store, pulls, github, calls, adapter, w, claim };
+}
+test("PM assignment verifies exact branch and completed PR SHA before creating durable work", async () => {
+  const s = await setup();
+  assert.equal(s.w.stage, "codex");
+  const rec = (await s.store.read()).records[s.w.dispatchId!];
+  assert.equal(rec.collaboration?.baseSha, A); assert.equal(rec.collaboration?.targetSha, A);
+  await assert.rejects(assignCollaboration(new MemoryRunStore(), s.github, { ...assignment, baseSha: B }, NOW), /baseline_mismatch/);
+  await assert.rejects(assignCollaboration(s.store, s.github, assignment, NOW), /assignment_exists/);
+  await assert.rejects(assignCollaboration(s.store, s.github, { ...assignment, workBranch: "main" }, NOW), /invalid_assignment/);
+});
+test("parallel submission and parallel claims execute a step once", async () => {
+  const s = await setup(), id = s.w.dispatchId!;
+  const send = await Promise.all(Array.from({ length: 8 }, () => submitQueued(s.store, s.adapter, id, NOW)));
+  assert.equal(send.filter(r => r.ok).length, 1); assert.equal(s.calls.length, 1);
+  const claims = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => claimCollaboration(s.store, id, "codex", `run-0000${i}`, NOW)));
+  assert.equal(claims.filter(r => r.status === "fulfilled").length, 1);
+});
+test("OFF holds queued steps, blocks claims, never reroutes assigned actor", async () => {
+  const s = await setup(), id = s.w.dispatchId!;
+  await s.store.transact(d => { d.control.agents.codex = false; d.control.allowReroute = true; });
+  assert.equal((await submitQueued(s.store, s.adapter, id, NOW)).ok, false);
+  assert.equal(s.calls.length, 0); assert.equal(Object.keys((await s.store.read()).records).length, 1);
+  await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", NOW));
+  await s.store.transact(d => { d.control.agents.codex = true; });
+  await submitQueued(s.store, s.adapter, id, NOW);
+  await s.store.transact(d => { d.control.agents.codex = false; });
+  await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", NOW), /agent_disabled/);
+});
+test("Claude completion -> Codex -> GPT PM -> Claude revision -> Codex -> PM approval, no merge", async () => {
+  const s = await setup(); await s.claim(s.w.dispatchId!, "codex");
+  let w = await finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW);
+  assert.equal(w.stage, "pm");
+  w = await decideCollaboration(s.store, s.github, w.id, A, "revise", "Fix the review findings", NOW);
+  assert.equal(w.stage, "claude"); assert.equal(w.cycle, 2);
+  await s.claim(w.dispatchId!, "claude-sonnet");
+  const pr: PullSnapshot = { ...original, number: 38, headBranch: assignment.workBranch, headSha: B, baseBranch: assignment.baseBranch, url: "https://github.com/o/r/pull/38" };
+  s.pulls.set(38, pr);
+  w = await finishCollaboration(s.store, s.github, w.dispatchId!, "claude-sonnet", "run-00001", result(B, 38), NOW);
+  assert.equal(w.stage, "codex");
+  const reviewId = w.dispatchId!;
+  await s.claim(reviewId, "codex");
+  w = await finishCollaboration(s.store, s.github, reviewId, "codex", "run-00001", result(B, 38), NOW);
+  assert.equal(w.stage, "pm");
+  w = await decideCollaboration(s.store, s.github, w.id, B, "approve", "Reviewed and accepted", NOW);
+  assert.equal(w.stage, "approved"); assert.equal(s.calls.length, 3);
+  const rec = (await s.store.read()).records[reviewId];
+  assert.equal(rec.execution?.tests[0].exitCode, 0); assert.equal(rec.execution?.headSha, B);
+  await assert.rejects(decideCollaboration(s.store, s.github, w.id, B, "revise", "duplicate", NOW), /not_awaiting_pm/);
+});
+test("new PR HEAD before PM judgment invalidates review and queues the new SHA", async () => {
+  const s = await setup(); await s.claim(s.w.dispatchId!, "codex");
+  let w = await finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW);
+  // Subsequent work PR is now the review target.
+  const p = { ...original, number: 38, headBranch: assignment.workBranch, baseBranch: assignment.baseBranch, headSha: B };
+  await s.store.transact(d => { d.collaborations![w.id].latest = p; });
+  s.pulls.set(38, { ...p, headSha: C });
+  w = await decideCollaboration(s.store, s.github, w.id, B, "approve", "old judgment", NOW);
+  assert.equal(w.stage, "codex"); assert.equal(w.latest?.headSha, C);
+  assert.equal((await s.store.read()).records[w.dispatchId!].collaboration?.targetSha, C);
+});
+test("stale/wrong-repository/wrong-base PR and wrong run results cannot advance", async () => {
+  const s = await setup(); await s.claim(s.w.dispatchId!, "codex");
+  await assert.rejects(finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "other-run", result(), NOW), /run_mismatch/);
+  s.pulls.set(35, { ...original, headSha: B });
+  await assert.rejects(finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(B), NOW), /stale_or_unrelated_pr/);
+  s.pulls.set(35, { ...original, repo: "evil/fork" });
+  await assert.rejects(finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW), /stale_or_unrelated_pr/);
+  assert.equal((await s.store.read()).collaborations![s.w.id].stage, "codex");
+});
+test("a PR with unrelated history cannot replace the PM baseline", async () => {
+  const s = await setup(); await s.claim(s.w.dispatchId!, "codex");
+  s.github.descendsFrom = async () => false;
+  await assert.rejects(finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW), /baseline_not_ancestor/);
+});
+test("failed tests or zero tests are recorded as blocked, never successful execution", async () => {
+  for (const tests of [[], [{ command: "npm test", exitCode: 1 }]]) {
+    const s = await setup(); await s.claim(s.w.dispatchId!, "codex");
+    const w = await finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", { ...result(), tests }, NOW);
+    assert.equal(w.stage, "blocked"); assert.equal((await s.store.read()).records[s.w.dispatchId!].status, "failed");
+    await assert.rejects(decideCollaboration(s.store, s.github, w.id, A, "approve", "ignore failures", NOW), /not_awaiting_pm/);
+    const revision = await decideCollaboration(s.store, s.github, w.id, A, "revise", "Fix failed tests", NOW);
+    assert.equal(revision.stage, "claude"); assert.equal(revision.cycle, 2);
+  }
+});
+test("refresh supersedes an active stale review once, and refuses its late completion", async () => {
+  const s = await setup();
+  const p = { ...original, number: 38, headBranch: assignment.workBranch, baseBranch: assignment.baseBranch, headSha: B };
+  await s.store.transact(d => {
+    const w = d.collaborations![s.w.id]; w.latest = p;
+    d.records[w.dispatchId!].collaboration!.targetSha = B;
+    d.records[w.dispatchId!].collaboration!.prNumber = 38;
+  });
+  await s.claim(s.w.dispatchId!, "codex");
+  s.pulls.set(38, { ...p, headSha: C });
+  const rs = await Promise.allSettled([refreshCollaboration(s.store, s.github, s.w.id, NOW), refreshCollaboration(s.store, s.github, s.w.id, NOW)]);
+  assert.ok(rs.some(r => r.status === "fulfilled"));
+  const w = (await s.store.read()).collaborations![s.w.id];
+  assert.equal(w.cycle, 2); assert.equal(w.latest?.headSha, C);
+  assert.equal(Object.keys((await s.store.read()).records).length, 2);
+  await refreshCollaboration(s.store, s.github, s.w.id, NOW);
+  assert.equal(Object.keys((await s.store.read()).records).length, 2);
+  await assert.rejects(finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(B, 38), NOW), /stale_or_unrelated_pr/);
+});
+test("duplicate completion is a no-op; legacy callback cannot bypass structured completion or claim", async () => {
+  const s = await setup(); await s.claim(s.w.dispatchId!, "codex");
+  await finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW);
+  await finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW);
+  assert.equal(Object.keys((await s.store.read()).records).length, 1);
+  const r = await applyCallback(s.store, "bypass-001", s.w.dispatchId!, "codex", { type: "finished", at: NOW, runId: "run-00001", ok: true }, NOW);
+  assert.deepEqual(r, { ok: false, reason: "collaboration_callback_required" });
+});
+test("lost label ACK is not resubmitted, but one signed worker can claim the authorized dispatch", async () => {
+  const s = await setup();
+  let count = 0;
+  const unknown: DispatchAdapter = { supports: () => true, submit: async () => { count++; return { outcome: "unknown" }; } };
+  await submitQueued(s.store, unknown, s.w.dispatchId!, NOW);
+  await submitQueued(s.store, unknown, s.w.dispatchId!, NOW);
+  assert.equal(count, 1);
+  assert.equal((await claimCollaboration(s.store, s.w.dispatchId!, "codex", "run-00001", NOW)).status, "running");
+});
+test("file snapshot preserves workflow/results; fresh store instances serialize requests", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "collab-"));
+  try {
+    const file = path.join(dir, "state.json"), s = await setup();
+    await fs.writeFile(file, JSON.stringify(await s.store.read()));
+    await Promise.all(Array.from({ length: 10 }, () => new FileRunStore(file).transact(d => { d.blocked.test = (d.blocked.test ?? 0) + 1; })));
+    const fresh = await new FileRunStore(file).read();
+    assert.equal(fresh.blocked.test, 10); assert.equal(fresh.collaborations![s.w.id].assignment.baseSha, A);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+test("HTTP: read/admin auth, per-agent signed identity, issue binding, replay and signed claim response", async () => {
+  const s = await setup(); await submitQueued(s.store, s.adapter, s.w.dispatchId!, NOW);
+  const env = { CONTROL_ADMIN_TOKEN: "admin".repeat(5), CONTROL_READ_TOKEN: "reader".repeat(5), RUN_CALLBACK_SECRET_CODEX: "codex-secret", RUN_CALLBACK_SECRET_CLAUDE_SONNET: "claude-secret", GITHUB_REPO: "o/r" };
+  const d = { ...s, store: () => s.store, env, nowMs: MS };
+  assert.equal((await handleCollaboration("GET", new Headers(), "", d)).status, 401);
+  assert.equal((await handleCollaboration("POST", new Headers({ "x-admin-token": env.CONTROL_READ_TOKEN }), "{}", d)).status, 401);
+  const body = { v: 2, agent: "codex", action: "claim", issueNumber: 36, dispatchId: s.w.dispatchId!, runId: "run-00001" };
+  const request = (b: object, secret = "codex-secret", eventId = "worker-0001") => {
+    const raw = JSON.stringify(b), h = new Headers({ "x-agent-key": "codex", "x-timestamp": String(MS), "x-event-id": eventId, "x-signature": signCallback(secret, String(MS), eventId, raw) });
+    return handleCollaborationWorker(h, raw, d);
+  };
+  assert.equal((await request(body, "claude-secret")).status, 401);
+  assert.equal((await request({ ...body, issueNumber: 37 })).status, 409);
+  assert.equal((await request({ ...body, agent: "claude-sonnet" })).status, 400);
+  const r = await request(body); assert.equal(r.status, 200); assert.ok(r.signature);
+  assert.equal(JSON.parse(r.body).record.collaboration.targetSha, A);
+  assert.equal((await request(body)).status, 409);
+});
+test("GitHub evidence reader rejects forks, does not trust arbitrary URLs, fails closed on HTTP failures", async () => {
+  const payload = { number: 35, head: { sha: A, ref: "claude/base", repo: { full_name: "o/r" } }, base: { ref: "main", repo: { full_name: "o/r" } }, html_url: "https://evil.invalid", state: "open" };
+  const urls: string[] = [];
+  const reader = new GitHubEvidenceReader("o/r", "secret", (async (u: string) => { urls.push(u); return Response.json(payload); }) as typeof fetch);
+  assert.equal((await reader.pull("o/r", 35)).url, "https://github.com/o/r/pull/35");
+  assert.equal(urls[0], "https://api.github.com/repos/o/r/pulls/35");
+  payload.head.repo.full_name = "evil/fork";
+  await assert.rejects(reader.pull("o/r", 35), /invalid_pr_evidence/);
+  await assert.rejects(reader.pull("other/repo", 35), /github_unconfigured/);
+  const denied = new GitHubEvidenceReader("o/r", "secret", (async () => new Response("secret", { status: 403 })) as typeof fetch);
+  await assert.rejects(denied.pull("o/r", 35), /github_evidence_unavailable/);
+  const compare = new GitHubEvidenceReader("o/r", "secret", (async () => Response.json({ status: "ahead", merge_base_commit: { sha: A } })) as typeof fetch);
+  assert.equal(await compare.descendsFrom("o/r", A, B), true);
+  assert.equal(await compare.descendsFrom("o/r", C, B), false);
+});

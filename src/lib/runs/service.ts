@@ -29,6 +29,8 @@ export async function requestDispatch(store: RunStore, issueNumber: number, agen
   return store.transact((d) => {
     const blocked = gateOrBlock(d, agent, now, `request issue=#${issueNumber}`); // disabled agent never creates a record
     if (blocked) return { ok: false as const, reason: "disabled" as const, gate: blocked };
+    if (Object.values(d.collaborations ?? {}).some(w => w.assignment.issueNumber === issueNumber && w.stage !== "approved"))
+      return { ok: false as const, reason: "active_dispatch_exists" as const };
     const mine = Object.values(d.records).filter((r) => r.issueNumber === issueNumber && r.agent === agent);
     if (mine.some((r) => !isTerminal(r.status) || r.status === "succeeded")) {
       return { ok: false as const, reason: mine.some((r) => r.status === "succeeded") ? "not_retryable" as const : "already_exists" as const };
@@ -46,6 +48,7 @@ export async function retryDispatchRecord(store: RunStore, issueNumber: number, 
     const blocked = gateOrBlock(d, agent, now, `retry issue=#${issueNumber}`); // retries are gated like first attempts
     if (blocked) return { ok: false as const, reason: "disabled" as const, gate: blocked };
     const mine = Object.values(d.records).filter((r) => r.issueNumber === issueNumber && r.agent === agent);
+    if (mine.some(r => r.collaboration)) return { ok: false as const, reason: "not_retryable" as const }; // PM revision creates a new pinned cycle
     if (mine.some((r) => !isTerminal(r.status))) return { ok: false as const, reason: "active_dispatch_exists" as const };
     if (mine.length === 0 || mine.some((r) => r.status === "succeeded")) return { ok: false as const, reason: "not_retryable" as const };
     const last = mine.reduce((a, b) => (a.attempt > b.attempt ? a : b));
@@ -74,7 +77,7 @@ export async function authorizeSubmission(store: RunStore, dispatchId: string, n
   return store.transact((d): SubmitAuth => {
     const r = d.records[dispatchId];
     if (!r) return { ok: false, reason: "unknown_dispatch" };
-    if (r.status !== "queued") return { ok: false, reason: "not_queued" };
+    if (r.status !== "queued" || r.submitAuthorizedAt) return { ok: false, reason: "not_queued" };
     const blocked = gateOrBlock(d, r.agent, now, `submit ${dispatchId}`);
     if (!blocked) {
       const next = { ...r, held: undefined, submitAuthorizedAt: now };
@@ -82,7 +85,8 @@ export async function authorizeSubmission(store: RunStore, dispatchId: string, n
       return { ok: true, record: next };
     }
     const cap = r.capability as Capability | undefined;
-    const target = d.control.allowReroute && cap ? routeTarget(d.control, cap, Date.parse(now), r.agent as AgentKey) : null;
+    // A collaboration step is bound to its assigned reviewer/developer. Never silently change actor.
+    const target = !r.collaboration && d.control.allowReroute && cap ? routeTarget(d.control, cap, Date.parse(now), r.agent as AgentKey) : null;
     if (target) {
       const to = { ...createDispatch(r.issueNumber, target, now, 1), capability: cap, dispatchId: `${r.dispatchId}>${target}` };
       const from: DispatchRecord = { ...r, status: "failed", submission: "rejected_not_accepted", finishedAt: now, held: undefined, lastError: `rerouted to ${target} (${blocked})` };
@@ -115,7 +119,7 @@ export async function recordSubmission(store: RunStore, dispatchId: string, outc
 
 export type CallbackResult =
   | { ok: true; duplicate: boolean; record?: DispatchRecord }
-  | { ok: false; reason: "unknown_dispatch" | "agent_mismatch" };
+  | { ok: false; reason: "unknown_dispatch" | "agent_mismatch" | "collaboration_callback_required" };
 
 /** Idempotent, atomic callback application. Replayed event IDs are no-ops. */
 export async function applyCallback(store: RunStore, eventId: string, dispatchId: string, agent: string, ev: RunEvent, now: string): Promise<CallbackResult> {
@@ -124,6 +128,7 @@ export async function applyCallback(store: RunStore, eventId: string, dispatchId
     const r = d.records[dispatchId];
     if (!r) return { ok: false as const, reason: "unknown_dispatch" as const };
     if (r.agent !== agent) return { ok: false as const, reason: "agent_mismatch" as const };
+    if (r.collaboration && ev.type !== "heartbeat") return { ok: false as const, reason: "collaboration_callback_required" as const };
     d.events[eventId] = now;
     const next = { ...applyEvent(r, ev), lastActivityAt: now };
     d.records[dispatchId] = next;

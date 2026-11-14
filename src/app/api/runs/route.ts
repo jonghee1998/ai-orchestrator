@@ -16,6 +16,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       status: displayStatus(r), verified: r.source === "agent-callback", submission: r.submission ?? null,
       lastActivityAt: r.lastActivityAt ?? r.lastHeartbeatAt ?? r.dispatchedAt ?? r.requestedAt,
       lastError: r.lastError ?? null, evidence: r.evidence, latency: latencies(r),
+      collaboration: r.collaboration ?? null, execution: r.execution ?? null,
     }));
     return NextResponse.json({ mode: "live", runs }, { headers: H });
   } catch (e) {

@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui";
 
-type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[] };
+type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[];
+  collaboration?: { baseBranch: string; baseSha: string; targetSha: string; step: string; cycle: number } | null;
+  execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[] } | null };
 type State = { kind: "loading" } | { kind: "unconfigured" } | { kind: "error" } | { kind: "ok"; runs: Run[] };
 
 export default function RunsPanel() {
@@ -26,6 +28,9 @@ export default function RunsPanel() {
         <Card key={r.dispatchId}>
           <p className="text-sm">#{r.issueNumber} · {r.agent} · <b>{r.status}</b>{r.status === "unknown" ? " (수신 미확인)" : r.verified ? " (agent 확인)" : ""}</p>
           <p className="text-xs text-text-faint">최근 활동 {r.lastActivityAt}{r.lastError ? ` · ${r.lastError}` : ""}</p>
+          {r.collaboration && <p className="break-all text-xs text-text-faint">PM 기준 {r.collaboration.baseBranch}@{r.collaboration.baseSha.slice(0, 12)} · {r.collaboration.step} #{r.collaboration.cycle} · 대상 {r.collaboration.targetSha.slice(0, 12)}</p>}
+          {r.execution && <div className="text-xs"><p>{r.execution.summary}</p><p>실행 종료 코드 {r.execution.exitCode} · 커밋 {r.execution.headSha.slice(0, 12)}</p>
+            {r.execution.tests.map((t, i) => <p key={i}>{t.command} · 종료 코드 {t.exitCode}</p>)}</div>}
           {r.evidence.map((e) => <a key={e.url} href={e.url} className="block text-xs underline">{e.kind}: {e.url}</a>)}
         </Card>
       ))}

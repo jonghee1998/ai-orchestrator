@@ -3,9 +3,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DispatchRecord } from "./run-tracking";
+import type { Collaboration } from "./collaboration";
 import { defaultControl, type AuditEntry, type ControlState } from "../control/model";
 
 export interface StoreData {
+  /** Optional for snapshots created before Issue #36. Shares the dispatch transaction/PG lock. */
+  collaborations?: Record<string, Collaboration>;
   records: Record<string, DispatchRecord>;
   /** processed callback event IDs -> processed-at ISO (replay/idempotency) */
   events: Record<string, string>;
@@ -54,7 +57,17 @@ export class MemoryRunStore extends SerialStore {
 
 /** Durable JSON file store: write temp + fsync + atomic rename. Point at a persistent volume. */
 export class FileRunStore extends SerialStore {
+  /** API requests construct fresh stores; share the queue across instances in this process. */
+  private static queues = new Map<string, Promise<unknown>>();
   constructor(private file: string) { super(); }
+  override transact<T>(fn: (data: StoreData) => T): Promise<T> {
+    const key = path.resolve(this.file);
+    const run = (FileRunStore.queues.get(key) ?? Promise.resolve()).then(() => super.transact(fn));
+    const tail = run.catch(() => undefined);
+    FileRunStore.queues.set(key, tail);
+    void tail.then(() => { if (FileRunStore.queues.get(key) === tail) FileRunStore.queues.delete(key); });
+    return run;
+  }
   protected async load(): Promise<StoreData> {
     try { const raw = JSON.parse(await fs.readFile(this.file, "utf8")); return { ...empty(), ...raw, control: { ...defaultControl(), ...(raw.control ?? {}) } }; }
     catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return empty(); throw e; }

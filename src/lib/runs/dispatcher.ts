@@ -19,6 +19,7 @@ export class GitHubLabelAdapter implements DispatchAdapter {
   constructor(private cfg: { token: string; repo: string; timeoutMs?: number }, private request: typeof fetch = fetch) {}
   supports(agent: string) { return agent in LABEL_OF; }
   async submit(rec: DispatchRecord, key: string): Promise<SubmitResult> {
+    if (!this.cfg.token.trim()) return { outcome: "rejected_not_accepted", error: "github token not configured" };
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(this.cfg.repo)) return { outcome: "rejected_not_accepted", error: "invalid repo config" };
     const url = `https://api.github.com/repos/${this.cfg.repo}/issues/${rec.issueNumber}/labels`;
     try {
