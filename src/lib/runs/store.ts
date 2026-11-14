@@ -3,11 +3,17 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { DispatchRecord } from "./run-tracking";
+import { defaultControl, type AuditEntry, type ControlState } from "../control/model";
 
 export interface StoreData {
   records: Record<string, DispatchRecord>;
   /** processed callback event IDs -> processed-at ISO (replay/idempotency) */
   events: Record<string, string>;
+  /** Phase 4 control plane lives in the SAME serialized store so gate checks are atomic with dispatch records. */
+  control: ControlState;
+  audit: AuditEntry[];
+  /** count of dispatches/provider calls suppressed by the gate, per agent key */
+  blocked: Record<string, number>;
 }
 
 export interface RunStore {
@@ -18,7 +24,7 @@ export interface RunStore {
 
 export class RunStoreConfigurationError extends Error {}
 
-const empty = (): StoreData => ({ records: {}, events: {} });
+const empty = (): StoreData => ({ records: {}, events: {}, control: defaultControl(), audit: [], blocked: {} });
 
 abstract class SerialStore implements RunStore {
   private chain: Promise<unknown> = Promise.resolve();
@@ -48,7 +54,7 @@ export class MemoryRunStore extends SerialStore {
 export class FileRunStore extends SerialStore {
   constructor(private file: string) { super(); }
   protected async load(): Promise<StoreData> {
-    try { return { ...empty(), ...JSON.parse(await fs.readFile(this.file, "utf8")) }; }
+    try { const raw = JSON.parse(await fs.readFile(this.file, "utf8")); return { ...empty(), ...raw, control: { ...defaultControl(), ...(raw.control ?? {}) } }; }
     catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return empty(); throw e; }
   }
   protected async save(d: StoreData): Promise<void> {

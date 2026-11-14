@@ -7,6 +7,7 @@ const items = [
   { href: "/", label: "홈", icon: "◆" },
   { href: "/projects", label: "프로젝트", icon: "▤" },
   { href: "/agents", label: "에이전트", icon: "◉" },
+  { href: "/control", label: "제어", icon: "⏻" },
   { href: "/tasks", label: "작업", icon: "☰" },
   { href: "/activity", label: "활동", icon: "↻" },
 ];

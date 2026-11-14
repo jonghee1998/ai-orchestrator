@@ -36,6 +36,10 @@ export interface DispatchRecord {
   /** provider submission outcome; "unknown" = possible lost ACK (never auto-retried) */
   submission?: "accepted" | "rejected_not_accepted" | "unknown";
   lastActivityAt?: string;
+  /** Phase 4: capability the work needs (drives reroute eligibility) */
+  capability?: string;
+  /** Phase 4: set when the gate blocked the provider call; no provider call was made. Cleared on release. */
+  held?: string;
 }
 
 export interface Timeouts { ackMs: number; heartbeatMs: number }
