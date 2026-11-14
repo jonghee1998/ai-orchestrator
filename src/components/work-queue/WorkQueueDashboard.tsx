@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui";
 import { SAMPLE_TASKS } from "./fixtures";
+import { createRequestTracker, loadQueue, type Source } from "./loader";
 import {
   AGENTS,
   buildModel,
-  parseResponse,
   type DashboardModel,
   type Phase,
   type QueueAgent,
   type TaskView,
-  type WorkQueueResponse,
 } from "./viewModel";
 
 const agentName: Record<QueueAgent, string> = {
@@ -30,37 +29,28 @@ const phaseMeta: Record<Phase, { label: string; color: string }> = {
   unknown: { label: "unknown", color: "bg-unknown/15 text-text-muted" },
 };
 
-type Source =
-  | { kind: "loading" }
-  | { kind: "live"; res: WorkQueueResponse }
-  | { kind: "unavailable"; reason: string }
-  | { kind: "sample" };
-
 export function WorkQueueDashboard() {
   const [src, setSrc] = useState<Source>({ kind: "loading" });
+  const tracker = useRef(createRequestTracker()).current;
+
+  // 마운트·재시도·샘플 종료 모두 이 함수를 사용한다. 최신 요청만 반영한다.
+  const refresh = useCallback(() => {
+    const id = tracker.next();
+    setSrc({ kind: "loading" });
+    loadQueue(fetch).then((next) => {
+      if (tracker.isCurrent(id)) setSrc(next);
+    });
+  }, [tracker]);
 
   useEffect(() => {
-    let off = false;
-    fetch("/api/work-queue", { cache: "no-store" })
-      .then(async (r) => {
-        // 502 등 오류 응답도 계약(mode:"error")을 따르므로 본문을 먼저 해석한다.
-        const body: unknown = await r.json().catch(() => null);
-        const res = parseResponse(body);
-        if (!res) throw new Error(r.ok ? "응답 형식이 계약과 다릅니다" : `HTTP ${r.status}`);
-        return res;
-      })
-      .then((res) => !off && setSrc({ kind: "live", res }))
-      .catch((e: unknown) =>
-        !off &&
-        setSrc({
-          kind: "unavailable",
-          reason: e instanceof Error ? e.message : "알 수 없는 오류",
-        }),
-      );
-    return () => {
-      off = true;
-    };
-  }, []);
+    refresh();
+    return () => tracker.invalidate();
+  }, [refresh, tracker]);
+
+  const showSample = useCallback(() => {
+    tracker.invalidate(); // 진행 중인 응답이 샘플 화면을 덮어쓰지 않도록
+    setSrc({ kind: "sample" });
+  }, [tracker]);
 
   const tasks =
     src.kind === "live"
@@ -74,7 +64,7 @@ export function WorkQueueDashboard() {
 
   return (
     <div className="space-y-4">
-      <StatusBanner src={src} onSample={() => setSrc({ kind: "sample" })} onExit={() => setSrc({ kind: "loading" })} />
+      <StatusBanner src={src} onSample={showSample} onExit={refresh} onRetry={refresh} />
       {tasks.length > 0 && <Body model={model} sample={src.kind === "sample"} />}
       {src.kind === "live" && src.res.mode === "live" && tasks.length === 0 && (
         <Card className="text-sm text-text-muted">표시할 작업이 없습니다.</Card>
@@ -87,10 +77,12 @@ function StatusBanner({
   src,
   onSample,
   onExit,
+  onRetry,
 }: {
   src: Source;
   onSample: () => void;
   onExit: () => void;
+  onRetry: () => void;
 }) {
   if (src.kind === "loading")
     return <Card className="text-sm text-text-muted">작업 큐 불러오는 중…</Card>;
@@ -117,12 +109,22 @@ function StatusBanner({
         <Card>
           <p className={`font-medium ${msg.c}`}>{msg.t}</p>
           <p className="mt-1 text-sm text-text-muted">{msg.d}</p>
-          <button onClick={onSample} className="mt-3 rounded bg-bg-raised px-3 py-1.5 text-xs text-accent">
-            샘플 모드로 레이아웃 보기
-          </button>
+          <div className="mt-3 flex gap-2">
+            <button onClick={onRetry} className="rounded bg-bg-raised px-3 py-1.5 text-xs text-accent">
+              다시 시도
+            </button>
+            <button onClick={onSample} className="rounded bg-bg-raised px-3 py-1.5 text-xs text-accent">
+              샘플 모드로 레이아웃 보기
+            </button>
+          </div>
         </Card>
       ) : (
-        <p className="text-xs text-ok">● 실시간 작업 큐 (읽기 전용)</p>
+        <p className="text-xs text-ok">
+          ● 실시간 작업 큐 (읽기 전용){" "}
+          <button onClick={onRetry} className="ml-2 text-text-muted underline">
+            새로고침
+          </button>
+        </p>
       )}
     </>
   );
