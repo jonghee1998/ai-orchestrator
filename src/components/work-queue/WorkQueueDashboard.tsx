@@ -43,9 +43,10 @@ export function WorkQueueDashboard() {
     let off = false;
     fetch("/api/work-queue", { cache: "no-store" })
       .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const res = parseResponse(await r.json());
-        if (!res) throw new Error("응답 형식이 계약과 다릅니다");
+        // 502 등 오류 응답도 계약(mode:"error")을 따르므로 본문을 먼저 해석한다.
+        const body: unknown = await r.json().catch(() => null);
+        const res = parseResponse(body);
+        if (!res) throw new Error(r.ok ? "응답 형식이 계약과 다릅니다" : `HTTP ${r.status}`);
         return res;
       })
       .then((res) => !off && setSrc({ kind: "live", res }))
