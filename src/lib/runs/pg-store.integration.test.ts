@@ -9,7 +9,7 @@ import { defaultControl } from "../control/model";
 import { requestDispatch } from "./service";
 
 const url = process.env.TEST_DATABASE_URL;
-const empty = (): StoreData => ({ records: {}, events: {}, control: defaultControl(), audit: [], blocked: {} });
+const empty = (): StoreData => ({ records: {}, events: {}, control: defaultControl(), audit: [], blocked: {}, gateChecks: {} });
 const norm = (raw: Partial<StoreData>): StoreData => ({ ...empty(), ...raw, control: { ...defaultControl(), ...(raw.control ?? {}) } });
 
 test("migration file matches PG_SCHEMA", () => {

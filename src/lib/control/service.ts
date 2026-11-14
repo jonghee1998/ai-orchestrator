@@ -1,3 +1,4 @@
+import { gateEvidence } from "../runs/external-gate";
 // Phase 4 — control plane mutations, gate for non-dispatch provider calls, cancellation, monitoring snapshot.
 // All mutations run in the shared serialized store transaction: concurrent toggles are linearized, every
 // change bumps `version` and appends an audit entry. Monitoring (snapshot) reads the store only and
@@ -116,6 +117,7 @@ export function buildSnapshot(d: StoreData, nowIso: string) {
       // orchestrator consumption only (dispatch counts we issued). Provider usage/cost: unknown unless telemetry exists.
       orchestratorDispatches: mine.length, suppressedByGate: d.blocked[key] ?? 0,
       providerUsage: { state: "unknown", reason: "no provider telemetry connected" } as const,
+      externalGate: gateEvidence(d.gateChecks?.[key], nowMs),
     };
   });
   const runs = recs.map((r) => ({

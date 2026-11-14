@@ -81,7 +81,7 @@ test("store selection: serverless forbids file fallback; DATABASE_URL selects Po
 test("PgRunStore: single locked row, SELECT FOR UPDATE, commit/rollback via pool", async () => {
   const log: string[] = []; let data = JSON.stringify({ records: {}, events: {}, audit: [], blocked: {} });
   const pool: SqlPool = { withTransaction: async (fn) => fn({ query: async (sql, p) => { log.push(sql.split(" ")[0] + (sql.includes("FOR UPDATE") ? " FOR UPDATE" : "")); if (sql.startsWith("UPDATE")) data = p![0] as string; return { rows: sql.startsWith("SELECT") ? [{ data: JSON.parse(data) }] : [] }; } }) };
-  const s = new PgRunStore(pool, () => ({ records: {}, events: {}, audit: [], blocked: {}, control: defaultControl() }), (r) => ({ records: {}, events: {}, audit: [], blocked: {}, control: defaultControl(), ...r } as never));
+  const s = new PgRunStore(pool, () => ({ records: {}, events: {}, audit: [], blocked: {}, gateChecks: {}, control: defaultControl() }), (r) => ({ records: {}, events: {}, audit: [], blocked: {}, gateChecks: {}, control: defaultControl(), ...r } as never));
   await s.transact((d) => { d.blocked.x = 1; });
   assert.equal((await s.read()).blocked.x, 1);
   assert.ok(log.includes("SELECT FOR UPDATE"));

@@ -14,7 +14,7 @@ export async function readGitHubWorkQueue(
   env: Readonly<Record<string, string | undefined>> = process.env,
   request: typeof fetch = fetch,
 ): Promise<WorkQueueTask[]> {
-  const token = env.GITHUB_TOKEN?.trim();
+  const token = (env.GITHUB_READ_TOKEN?.trim() || env.GITHUB_TOKEN?.trim()); // prefer read-only token (Issue #31)
   const target = repository(env.GITHUB_REPO?.trim() ?? "");
   if (!token || !target) {
     throw new GitHubQueueConfigurationError("GitHub work queue is not configured");

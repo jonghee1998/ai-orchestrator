@@ -1,6 +1,7 @@
 import { agents } from "@/lib/data";
 import { AgentCard } from "@/components/AgentCard";
 import { PageTitle } from "@/components/ui";
+import { SampleBanner } from "@/components/SampleBanner";
 
 export default function AgentsPage() {
   return (
@@ -9,6 +10,7 @@ export default function AgentsPage() {
         title="에이전트"
         subtitle="연결 상태·사용 한도·클라우드 실행 가능 여부"
       />
+      <SampleBanner what="에이전트 카드" />
       <div className="space-y-3">
         {agents.map((a) => (
           <AgentCard key={a.id} agent={a} />

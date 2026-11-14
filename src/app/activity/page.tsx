@@ -1,6 +1,7 @@
 import { activity } from "@/lib/data";
 import { Card, PageTitle } from "@/components/ui";
 import RunsPanel from "@/components/RunsPanel";
+import { SampleBanner } from "@/components/SampleBanner";
 import { agentLabel } from "@/lib/labels";
 import { showDate } from "@/lib/format";
 import type { ActivityKind } from "@/lib/types";
@@ -26,6 +27,8 @@ export default function ActivityPage() {
         subtitle="작업 실행 로그 및 에이전트 간 협업 기록"
       />
       <RunsPanel />
+      <h2 className="mb-2 mt-6 text-sm font-semibold text-text-muted">샘플 활동 로그</h2>
+      <SampleBanner what="아래 활동 로그" />
       <ol className="space-y-2">
         {sorted.map((e) => (
           <Card key={e.id}>

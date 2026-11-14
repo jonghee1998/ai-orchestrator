@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
 import { ScopeNotice } from "@/components/ScopeNotice";
 
-type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason: string | null; lastAck: string | null; lastHeartbeat: string | null; lastStatus: string | null; running: number; queued: number; held: number };
+type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason: string | null; lastAck: string | null; lastHeartbeat: string | null; lastStatus: string | null; externalGate?: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number }; running: number; queued: number; held: number };
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; held: string | null; lastActivityAt: string; lastError: string | null };
 type Snap = { mode: "live"; generatedAt: string; agents: Agent[]; runs: Run[]; errors: Run[]; control: { preset: string }; audit: { at: string; actor: string; action: string; detail: string }[] };
-type Ready = { items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean };
+type GH = { state: "unconfigured" | "configured_unverified" | "live" | "error"; repo: string | null; tokenSource: string; openIssues: number | null };
+type Ready = { github?: GH; items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean };
 type St = { kind: "loading" } | { kind: "notoken" } | { kind: "unauth"; reason?: string } | { kind: "unconfigured" } | { kind: "error"; detail?: string } | { kind: "ok"; snap: Snap; ready: Ready | null };
 
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
@@ -58,7 +59,8 @@ export default function OverviewDashboard() {
               <Card key={a.key} className="flex items-center justify-between gap-3">
                 <div className="min-w-0"><p className="font-medium">{NAMES[a.key] ?? a.key}</p>
                   <p className="text-xs text-text-muted">{a.effective ? "dispatch 허용" : `차단: ${a.blockedReason}`} · 실행/대기/보류 {a.running}/{a.queued}/{a.held}</p>
-                  <p className="text-[11px] text-text-faint">ACK {t(a.lastAck)} · 상태 {a.lastStatus ?? "기록 없음"}</p></div>
+                  <p className="text-[11px] text-text-faint">ACK {t(a.lastAck)} · 상태 {a.lastStatus ?? "기록 없음"}</p>
+                  <p className="text-[11px] text-text-faint">외부 루틴 게이트 증거: {!a.externalGate || a.externalGate.state === "none" ? "없음 — 외부 루틴 통제 미확인(unknown)" : `${a.externalGate.state === "fresh" ? "최근" : "오래됨"} ${t(a.externalGate.lastAt ?? null)} · ${a.externalGate.lastAllowed ? "허용" : "차단"} 응답 (${a.externalGate.count}회)`}</p></div>
                 <span className={`shrink-0 rounded-full px-2 py-1 text-xs ${a.enabled ? "bg-green-900/40 text-green-200" : "bg-bg-raised text-text-faint"}`}>{a.enabled ? "ON" : "OFF"}</span>
               </Card>
             ))}
@@ -72,6 +74,7 @@ export default function OverviewDashboard() {
             ))}
             <Link href="/activity" className="block text-xs text-accent">전체 활동 →</Link>
           </section>
+          <p className="text-xs text-text-faint" aria-label="GitHub 연결 상태">GitHub 큐: {!s.ready?.github ? "unknown (readiness 미수신)" : s.ready.github.state === "live" ? `live · ${s.ready.github.repo} (읽기 확인, 열린 이슈 ${s.ready.github.openIssues ?? "unknown"})` : s.ready.github.state === "unconfigured" ? "미설정 (unconfigured)" : "오류 — 연결 실패(unknown)"}</p>
           {s.ready && (
             <section aria-label="릴리스 준비도" className="space-y-2">
               <h2 className="text-sm font-semibold text-text-muted">릴리스 준비도 · {s.ready.releaseBlocked ? "차단됨" : "준비됨"}</h2>

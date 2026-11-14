@@ -14,6 +14,8 @@ export interface StoreData {
   audit: AuditEntry[];
   /** count of dispatches/provider calls suppressed by the gate, per agent key */
   blocked: Record<string, number>;
+  /** Issue #31: last signed gate-check evidence from external routines, per agent key (never a claim of control). */
+  gateChecks: Record<string, { at: string; allowed: boolean; reason: string | null; count: number }>;
 }
 
 export interface RunStore {
@@ -24,7 +26,7 @@ export interface RunStore {
 
 export class RunStoreConfigurationError extends Error { name = "RunStoreConfigurationError"; }
 
-const empty = (): StoreData => ({ records: {}, events: {}, control: defaultControl(), audit: [], blocked: {} });
+const empty = (): StoreData => ({ records: {}, events: {}, control: defaultControl(), audit: [], blocked: {}, gateChecks: {} });
 
 abstract class SerialStore implements RunStore {
   private chain: Promise<unknown> = Promise.resolve();

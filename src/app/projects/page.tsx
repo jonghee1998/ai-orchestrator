@@ -1,12 +1,14 @@
 import { projects, tasks } from "@/lib/data";
 import { Card, PageTitle, ProjectStatusBadge, UnknownTag } from "@/components/ui";
 import { TaskStatusBadge } from "@/components/ui";
+import { SampleBanner } from "@/components/SampleBanner";
 import { agentLabel } from "@/lib/labels";
 
 export default function ProjectsPage() {
   return (
     <div>
       <PageTitle title="프로젝트" subtitle="프로젝트별 작업과 진행 상황" />
+      <SampleBanner what="프로젝트·작업 목록" />
       <div className="space-y-3">
         {projects.map((p) => {
           const projectTasks = tasks.filter((t) => t.projectId === p.id);
