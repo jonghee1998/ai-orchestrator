@@ -5,12 +5,15 @@ import type { StoreData, RunStore } from "./store";
 export interface SqlTx { query(sql: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> }
 export interface SqlPool { withTransaction<T>(fn: (tx: SqlTx) => Promise<T>): Promise<T> }
 
+// Must match db/migrations/001_orchestrator_state.sql (checked by pg-store.integration.test). Kept as a
+// self-healing fallback; the supported path is `node scripts/migrate.mjs` before first deploy.
 export const PG_SCHEMA = `CREATE TABLE IF NOT EXISTS orchestrator_state (id smallint PRIMARY KEY CHECK (id = 1), data jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`;
 
 export class PgRunStore implements RunStore {
   constructor(private pool: SqlPool, private empty: () => StoreData, private normalize: (raw: Partial<StoreData>) => StoreData) {}
   transact<T>(fn: (d: StoreData) => T): Promise<T> {
     return this.pool.withTransaction(async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(727001)"); // CREATE TABLE IF NOT EXISTS is not concurrency-safe on its own
       await tx.query(PG_SCHEMA);
       await tx.query("INSERT INTO orchestrator_state (id, data) VALUES (1, $1::jsonb) ON CONFLICT (id) DO NOTHING", [JSON.stringify(this.empty())]);
       const { rows } = await tx.query("SELECT data FROM orchestrator_state WHERE id = 1 FOR UPDATE");

@@ -7,6 +7,6 @@
     "moduleResolution": "Node",
     "outDir": ".test-build"
   },
-  "include": ["src/lib/github/work-queue.ts", "src/lib/github/github-read-queue.ts", "src/lib/github/*.test.ts", "src/components/work-queue/loader.ts", "src/components/work-queue/loader.test.ts", "src/components/work-queue/viewModel.ts", "src/lib/runs/*.ts", "src/lib/runs/*.test.ts", "src/lib/control/*.ts"],
+  "include": ["src/lib/github/work-queue.ts", "src/lib/github/github-read-queue.ts", "src/lib/github/*.test.ts", "src/components/work-queue/loader.ts", "src/components/work-queue/loader.test.ts", "src/components/work-queue/viewModel.ts", "src/lib/runs/*.ts", "src/lib/runs/*.test.ts", "src/lib/control/*.ts", "src/lib/readiness.ts", "src/lib/readiness.test.ts"],
   "exclude": []
 }

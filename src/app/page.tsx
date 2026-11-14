@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { agents, projects, tasks } from "@/lib/data";
-import { Card, ConnectionBadge, PageTitle, UnknownTag } from "@/components/ui";
+import { Card, ConnectionBadge, UnknownTag } from "@/components/ui";
 import { roleLabel } from "@/lib/labels";
+import OverviewDashboard from "@/components/overview/OverviewDashboard";
 
 export default function HomePage() {
   const connected = agents.filter(
@@ -16,10 +17,8 @@ export default function HomePage() {
 
   return (
     <div>
-      <PageTitle
-        title="AI Orchestrator"
-        subtitle="다중 AI 에이전트를 GitHub 중심으로 관리하는 개인 대시보드"
-      />
+      <OverviewDashboard />
+      <h2 className="mb-2 mt-8 text-sm font-semibold text-text-muted">샘플 개요 (실제 데이터 아님)</h2>
 
       <div className="grid grid-cols-3 gap-2">
         <Stat label="연결 에이전트" value={`${connected}/${agents.length}`} />

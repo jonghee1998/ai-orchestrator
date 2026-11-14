@@ -18,3 +18,13 @@ export function checkRead(header: string | null, env: Env = process.env): AdminA
   if (toks.length === 0) return { ok: false, status: 503 };
   return header && toks.some((t) => same(header, t)) ? { ok: true } : { ok: false, status: 401 };
 }
+
+/** Cron/scheduler auth for GET /api/reconcile: `Authorization: Bearer <CRON_SECRET>` (Vercel Cron format) or the admin token. */
+export function checkCron(authorization: string | null, adminHeader: string | null, env: Env = process.env): AdminAuth {
+  const cron = env.CRON_SECRET && env.CRON_SECRET.length >= 16 ? env.CRON_SECRET : undefined;
+  const admin = checkAdmin(adminHeader, env);
+  if (!cron && !admin.ok && admin.status === 503) return { ok: false, status: 503 };
+  const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
+  if (cron && bearer && same(bearer, cron)) return { ok: true };
+  return admin.ok ? { ok: true } : { ok: false, status: 401 };
+}

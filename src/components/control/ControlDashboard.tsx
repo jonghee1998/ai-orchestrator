@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
+import { ScopeNotice } from "@/components/ScopeNotice";
 
 type Agent = {
   key: string; provider: string; enabled: boolean; effective: boolean; blockedReason: string | null; cancelSupported: boolean;
@@ -56,6 +57,7 @@ export default function ControlDashboard() {
   return (
     <div>
       <PageTitle title="에이전트 제어" subtitle="서버 측 dispatch 게이트 · 실제 상태만 표시" />
+      <div className="mb-3"><ScopeNotice /></div>
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">실행 저장소가 설정되지 않았습니다 (RUN_STORE_PATH). 연결되지 않은 상태이며 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p><button className="mt-2 rounded-lg border border-border px-3 py-2 text-xs" onClick={load}>다시 시도</button></Card>}
