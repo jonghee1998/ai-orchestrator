@@ -37,8 +37,27 @@ timeout/blocked 상태 전환이나 PM의 `acknowledgeUnknownExecution`은 이�
 - 그룹이 비었음을 `kill(-pgid, 0)`의 ESRCH로 확인한 뒤에만 `quiesce`를 보고한다. 확인하지 못하면 보고하지 않으므로 복구는 계속 차단된다.
 - 보고는 파일로 남겨 두며, 재전송할 때 finish-file 인자로 다시 보낼 수 있다.
 
+**#49 (PR48 P1 x2): 정리 증명 필수.**
+- runner는 실행마다 supervisor 하나를 두고, 자신이 시작한 **모든** 프로세스 그룹을 관리한다. 대상은 CLI와 각 테스트 명령(`npm run typecheck`, `npm test`)이다.
+- lease가 revoke되거나 만료되면 그 시점에 활성인 그룹(CLI 또는 테스트)을 모두 종료한다. 이후에는 새 그룹을 시작하지 않는다.
+- 모든 그룹은 리더가 정상 종료한 후에도 남은 후손을 정리하고, 그룹이 비었는지 확인한다.
+- 그룹이 비었는지는 Linux에서 `/proc`으로 확인하며, 실행할 수 없는 zombie는 제외한다. 그 밖의 환경에서는 `kill(-pgid,0)`으로 확인한다.
+- `finish`는 서명된 `result.cleanup = { processGroupsEmpty: true, groups }`가 있어야만 받는다.
+  - 서버는 cleanup 증명이 있는 execution만 quiescent로 인정한다.
+  - cleanup이 없는 기존 runner의 결과는 거부하거나 정지로 인정하지 않는다(fail closed).
+- 한 그룹이라도 비었음을 증명하지 못하면(예: 신호가 거부되어 writer가 살아 있는 경우):
+  - `finish`와 `quiesce`를 **둘 다 보내지 않는다**.
+  - 진단 파일(`cleanupUnproven`)을 남기고, 서명된 `cleanup_failed`를 보낸 뒤 종료 코드 4로 끝난다.
+  - 서버는 기록을 failed, blocked/execution_unknown으로 표시하지만 정지를 주장하지 않는다. 그래서 revise와 새 writer claim은 계속 `prior_execution_not_quiesced`로 거부된다.
+- 진단 파일을 재전송할 때는 기록된 pgid를 **probe만** 하고 신호는 보내지 않는다. pgid가 재사용되었을 수 있기 때문이다.
+  - 그룹이 아직 살아 있으면 계속 보내지 않는다.
+  - 모두 사라졌으면 `quiesce(reason: cleanup_retry)`를 보내고, 그때서야 복구할 수 있다.
+- `ORCH_TEST_DENY_GROUP_SIGNALS=1`은 회귀 테스트 전용이다. 신호만 실패시키고 probe는 실제 프로세스 테이블을 보므로 증명을 만들어 낼 수 없다.
+
 **한계:**
 - setsid/daemonize로 그룹을 벗어난 후손 프로세스는 다루지 않는다.
+- runner가 직접 실행하는 짧은 `git` 조회(status/rev-parse/remote/branch, hook 없음)는 supervisor 밖에서 실행된다.
+- 이미 저장된 기존 execution(cleanup 증명 없음)은 quiescent로 인정되지 않는다. 해당 workflow에서 새 writer를 시작하려면 PM이 수동으로 확인해야 한다.
 - 계약 밖의 경로(수동 라벨 우회, 구버전 runner)는 서버가 통제하지 못한다.
 - 원격 브랜치 보호를 이용한 쓰기 차단(GitHub fencing)은 구현하지 않았다.
 - 취소를 주장하지 않으며, 근거는 runner의 서명된 증명뿐이다.

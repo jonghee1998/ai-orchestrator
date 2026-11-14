@@ -18,7 +18,8 @@ export interface Evidence { kind: EvidenceKind; url: string; at: string }
 
 export interface DispatchRecord {
   collaboration?: { workflowId: string; cycle: number; step: "claude" | "codex"; repo: string; baseBranch: string; baseSha: string; workBranch: string; targetSha: string; prNumber?: number; instructions: string };
-  execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[] };
+  /** `cleanup` is the runner's signed proof that every process group of the run was empty (#49); required for new results. */
+  execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[]; cleanup?: { processGroupsEmpty: true; groups: number } };
   dispatchId: string;
   issueNumber: number;
   agent: string;
@@ -49,7 +50,9 @@ export interface DispatchRecord {
    * revocation/expiry or reaped after normal exit). Only this, a structured execution result, or "never claimed"
    * proves the old run can no longer write; a terminal status alone does not.
    */
-  quiescence?: { at: string; runId: string; reason: "lease_revoked" | "lease_expired"; signal: string | null };
+  quiescence?: { at: string; runId: string; reason: "lease_revoked" | "lease_expired" | "cleanup_retry"; signal: string | null };
+  /** #49: runner reported it could NOT prove its process groups empty. Diagnostic only; never counts as quiescence. */
+  cleanupFailure?: { at: string; runId: string; reason: "lease_revoked" | "lease_expired" | "normal_exit"; groups: number; unproven: number };
 }
 
 export interface Timeouts { ackMs: number; heartbeatMs: number }

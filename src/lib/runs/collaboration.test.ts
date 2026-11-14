@@ -3,7 +3,7 @@ import test from "node:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assignCollaboration, claimCollaboration, finishCollaboration, decideCollaboration, refreshCollaboration, leaseCollaboration, quiesceCollaboration, type Assignment, type ExecutionResult } from "./collaboration";
+import { assignCollaboration, claimCollaboration, finishCollaboration, decideCollaboration, refreshCollaboration, leaseCollaboration, quiesceCollaboration, reportCleanupFailure, provablyQuiescent, type Assignment, type ExecutionResult } from "./collaboration";
 import { GitHubEvidenceReader, type CollaborationGitHub, type PullSnapshot } from "./collaboration-github";
 import { MemoryRunStore, FileRunStore } from "./store";
 import { submitQueued, type DispatchAdapter } from "./dispatcher";
@@ -13,7 +13,7 @@ import { applyCallback } from "./service";
 const NOW = "2026-01-01T00:00:00.000Z", MS = Date.parse(NOW), A = "a".repeat(40), B = "b".repeat(40), C = "c".repeat(40);
 const assignment: Assignment = { repo: "o/r", issueNumber: 36, baseBranch: "claude/base", baseSha: A, sourcePr: 35, workBranch: "claude/issue-36", claudeAgent: "claude-sonnet", instructions: "Implement the PM task", reviewCompletedPr: true };
 const original: PullSnapshot = { number: 35, repo: "o/r", headBranch: assignment.baseBranch, headSha: A, baseBranch: "main", url: "https://github.com/o/r/pull/35", open: true };
-const result = (sha = A, pr = 35): ExecutionResult => ({ exitCode: 0, summary: "Actual review findings", headSha: sha, tests: [{ command: "npm test", exitCode: 0 }], prNumber: pr });
+const result = (sha = A, pr = 35): ExecutionResult => ({ exitCode: 0, summary: "Actual review findings", headSha: sha, tests: [{ command: "npm test", exitCode: 0 }], prNumber: pr, cleanup: { processGroupsEmpty: true, groups: 3 } });
 async function setup() {
   const store = new MemoryRunStore();
   await store.transact(d => { d.control.agents.codex = true; d.control.agents["claude-sonnet"] = true; d.control.claudeProvider = true; });
@@ -328,7 +328,7 @@ test("P1: old still-running writer after heartbeat timeout blocks recovery until
   const r = await supervised; lease.stop();
   assert.equal(r.fenced.reason, "lease_revoked"); assert.equal(r.fenced.processGroupEmpty, true);
   const pids: number[] = JSON.parse(await fs.readFile(branch + ".pids", "utf8"));
-  assert.ok(pids.every(p => { try { process.kill(p, 0); return false; } catch { return true; } }));
+  assert.ok(pids.every(p => !runner.groupAlive(p)), "CLI and grandchild are gone (zombies awaiting reaping cannot write)");
   await quiesceCollaboration(s.store, old, "claude-sonnet", "old-run-01", { reason: r.fenced.reason, processGroupEmpty: true, signal: r.fenced.signal }, iso());
   const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover after verified quiescence", iso(), true);
   const claimed = await s.claim(w.dispatchId!, "claude-sonnet", "new-run-01");
@@ -358,4 +358,63 @@ test("P1: a self-fenced runner ends its still-running record as blocked/unknown,
   assert.equal((await leaseCollaboration(s.store, old, "claude-sonnet", "old-run-02", NOW)).lease, "revoked");
   await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "no ack", NOW), /unknown_execution_requires_ack/);
   assert.equal((await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "ack", NOW, true)).stage, "claude");
+});
+// #49 (PR48 P1 x2): a finish is a claim of quiescence and must carry explicit cleanup proof; unproven cleanup never unblocks.
+test("#49 P1: finish without signed cleanup proof is refused; a legacy result without proof is not quiescent", async () => {
+  const s = await setup(), old = await claudeStep(s, "old-run-03");
+  const { cleanup: _drop, ...noProof } = result(B, 38);
+  await assert.rejects(finishCollaboration(s.store, s.github, old, "claude-sonnet", "old-run-03", noProof as ExecutionResult, NOW), /invalid_result/);
+  await assert.rejects(finishCollaboration(s.store, s.github, old, "claude-sonnet", "old-run-03", { ...result(B, 38), cleanup: { processGroupsEmpty: false as unknown as true, groups: 3 } }, NOW), /invalid_result/);
+  const rec = (await s.store.read()).records[old];
+  assert.equal(rec.status, "running"); assert.equal(provablyQuiescent(rec), false);
+  assert.equal(provablyQuiescent({ ...rec, status: "failed", execution: { exitCode: 1, headSha: B, summary: "legacy", tests: [] } }), false);
+  assert.equal(provablyQuiescent({ ...rec, status: "failed", execution: { exitCode: 1, headSha: B, summary: "new", tests: [], cleanup: { processGroupsEmpty: true, groups: 1 } } }), true);
+});
+test("#49 P1: cleanup_failed records a diagnosable failure, never a stop: recovery and any new writer claim stay refused until proven", async () => {
+  const s = await setup(), old = await claudeStep(s, "old-run-04");
+  const f = { reason: "normal_exit" as const, groups: 3, unproven: 1 };
+  await assert.rejects(reportCleanupFailure(s.store, old, "claude-sonnet", "old-run-04", { ...f, unproven: 0 }, NOW), /invalid_cleanup_failure/);
+  await assert.rejects(reportCleanupFailure(s.store, old, "claude-sonnet", "other-run-9", f, NOW), /run_mismatch/);
+  const rec = await reportCleanupFailure(s.store, old, "claude-sonnet", "old-run-04", f, NOW);
+  assert.equal(rec.status, "failed"); assert.equal(rec.execution, undefined); assert.equal(rec.quiescence, undefined);
+  assert.equal(rec.cleanupFailure?.unproven, 1); assert.equal(provablyQuiescent(rec), false);
+  assert.deepEqual(await reportCleanupFailure(s.store, old, "claude-sonnet", "old-run-04", f, NOW), rec, "replayed report is idempotent");
+  let d = await s.store.read();
+  assert.equal(d.collaborations![s.w.id].stage, "blocked"); assert.equal(d.collaborations![s.w.id].blockedReason, "execution_unknown");
+  assert.equal((await leaseCollaboration(s.store, old, "claude-sonnet", "old-run-04", NOW)).lease, "revoked");
+  // Neither acknowledgement nor a late finish can turn the unproven run into quiescence.
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover", NOW, true), /prior_execution_not_quiesced/);
+  await assert.rejects(finishCollaboration(s.store, s.github, old, "claude-sonnet", "old-run-04", result(B, 38), NOW), /already_finished/);
+  await s.store.transact(dd => {
+    const w = dd.collaborations![s.w.id], id = `w-${w.id}-98-claude`;
+    dd.records[id] = { ...dd.records[old], dispatchId: id, status: "dispatched", submission: "accepted", runId: undefined, finishedAt: undefined, cleanupFailure: undefined,
+      collaboration: { ...dd.records[old].collaboration!, cycle: 98 } };
+    w.stage = "claude"; w.dispatchId = id;
+  });
+  const bypass = `w-${s.w.id}-98-claude`;
+  await assert.rejects(claimCollaboration(s.store, bypass, "claude-sonnet", "new-run-04", NOW), /prior_execution_not_quiesced/);
+  await s.store.transact(dd => { delete dd.records[bypass]; const w = dd.collaborations![s.w.id]; w.stage = "blocked"; w.dispatchId = old; });
+  // Only a later signed proof (replay probe found every recorded group gone) unblocks recovery.
+  await quiesceCollaboration(s.store, old, "claude-sonnet", "old-run-04", { reason: "cleanup_retry", processGroupEmpty: true, signal: null }, NOW);
+  d = await s.store.read();
+  assert.equal(d.records[old].status, "failed"); assert.equal(d.records[old].quiescence?.reason, "cleanup_retry");
+  assert.equal((await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover after proven cleanup", NOW, true)).stage, "claude");
+});
+test("#49 HTTP: cleanup_failed is HMAC-bound to the agent, idempotent per runId and signed in the response", async () => {
+  const s = await setup(), old = await claudeStep(s, "old-run-05");
+  const env = { RUN_CALLBACK_SECRET_CLAUDE_SONNET: "claude-secret", GITHUB_REPO: "o/r" };
+  const d = { ...s, store: () => s.store, env, nowMs: MS };
+  const body = { v: 2, agent: "claude-sonnet", action: "cleanup_failed", issueNumber: 36, dispatchId: old, runId: "old-run-05", failure: { reason: "lease_revoked", groups: 2, unproven: 2 } };
+  const request = (b: object, secret = "claude-secret", eventId = "worker-0105") => {
+    const raw = JSON.stringify(b), h = new Headers({ "x-agent-key": "claude-sonnet", "x-timestamp": String(MS), "x-event-id": eventId, "x-signature": signCallback(secret, String(MS), eventId, raw) });
+    return handleCollaborationWorker(h, raw, d);
+  };
+  assert.equal((await request(body, "wrong-secret")).status, 401);
+  assert.equal((await request({ ...body, failure: { reason: "lease_revoked", groups: 2, unproven: 3 } }, undefined, "worker-0106")).status, 409);
+  const r = await request(body); assert.equal(r.status, 200); assert.ok(r.signature);
+  assert.equal(JSON.parse(r.body).record.cleanupFailure.reason, "lease_revoked");
+  // Like lease/quiesce/finish, replay is idempotent per runId (a lost response may be resent): no second state change.
+  const again = await request(body, undefined, "worker-0107"); assert.equal(again.status, 200);
+  assert.deepEqual(JSON.parse(again.body).record.cleanupFailure, JSON.parse(r.body).record.cleanupFailure);
+  assert.equal(provablyQuiescent((await s.store.read()).records[old]), false);
 });

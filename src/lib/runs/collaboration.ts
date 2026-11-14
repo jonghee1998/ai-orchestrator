@@ -22,7 +22,14 @@ export interface Collaboration {
 export type BlockedReason = "execution_failed" | "not_executed" | "execution_unknown";
 export interface ExecutionResult {
   exitCode: number; headSha: string; summary: string; tests: { command: string; exitCode: number }[]; prNumber?: number;
+  /**
+   * #49 (PR48 P1): signed runner attestation that EVERY process group it started for this run (the CLI and each test
+   * command) was confirmed empty before reporting. Required: a finish is the runner's claim of quiescence, so a
+   * result without explicit cleanup proof (older runner, or cleanup that failed) is refused and recovery stays fenced.
+   */
+  cleanup: CleanupProof;
 }
+export interface CleanupProof { processGroupsEmpty: true; groups: number }
 export class CollaborationConflict extends Error {}
 function conflict(reason: string): never { throw new CollaborationConflict(reason); }
 export function validAssignment(a: Assignment): boolean {
@@ -36,7 +43,8 @@ export function validExecution(r: ExecutionResult): boolean {
   return !!r && Number.isInteger(r.exitCode) && r.exitCode >= 0 && r.exitCode <= 255 && validSha(r.headSha) &&
     typeof r.summary === "string" && r.summary.trim().length > 0 && r.summary.length <= 4000 &&
     Array.isArray(r.tests) && r.tests.length <= 30 && r.tests.every(t => t && typeof t.command === "string" && t.command.length > 0 && t.command.length <= 500 && Number.isInteger(t.exitCode) && t.exitCode >= 0 && t.exitCode <= 255) &&
-    (r.prNumber === undefined || (Number.isSafeInteger(r.prNumber) && r.prNumber > 0));
+    (r.prNumber === undefined || (Number.isSafeInteger(r.prNumber) && r.prNumber > 0)) &&
+    !!r.cleanup && typeof r.cleanup === "object" && r.cleanup.processGroupsEmpty === true && Number.isSafeInteger(r.cleanup.groups) && r.cleanup.groups >= 0 && r.cleanup.groups <= 64;
 }
 const workflow = (d: StoreData, id: string) => d.collaborations?.[id] ?? conflict("unknown_workflow");
 function note(w: Collaboration, at: string, action: string, detail?: string) {
@@ -62,12 +70,13 @@ export function blockTerminalStep(d: StoreData, r: DispatchRecord, at: string, r
 /**
  * #41 P1 fencing. A timed-out/blocked record does NOT stop its CLI: the process may keep running and pushing.
  * A run is quiescent only with evidence: never claimed (a terminal record can no longer be claimed, so no contract
- * worker can start), a structured result (sent by the runner only after the CLI process group exited), or a signed
- * quiescence report after the runner killed and confirmed the empty process group. Anything else fails closed.
+ * worker can start), a structured result carrying the runner's signed cleanup proof that EVERY process group of the
+ * run (CLI and test commands) was confirmed empty (#49), or a signed quiescence report after the runner killed and
+ * confirmed those groups empty. A legacy result without cleanup proof, or a cleanup-failure report, does not count.
  */
 export function provablyQuiescent(r: DispatchRecord): boolean {
   if (!r.runId) return isTerminal(r.status);
-  return !!r.execution || r.quiescence?.runId === r.runId;
+  return r.execution?.cleanup?.processGroupsEmpty === true || r.quiescence?.runId === r.runId;
 }
 /** Claimed Claude (writer) runs of this workflow, other than `except`, that may still write to workBranch. */
 function unquiescedWriters(d: StoreData, w: Collaboration, except?: string) {
@@ -153,9 +162,10 @@ export async function leaseCollaboration(store: RunStore, id: string, agent: str
     return { lease: "held" as const, status: r.status };
   });
 }
-export interface QuiescenceReport { reason: "lease_revoked" | "lease_expired"; processGroupEmpty: true; signal: string | null }
+/** "cleanup_retry": a replay of a run whose cleanup was unproven, after every recorded group was probed empty. */
+export interface QuiescenceReport { reason: "lease_revoked" | "lease_expired" | "cleanup_retry"; processGroupEmpty: true; signal: string | null }
 export function validQuiescence(q: QuiescenceReport): boolean {
-  return !!q && ["lease_revoked", "lease_expired"].includes(q.reason) && q.processGroupEmpty === true &&
+  return !!q && ["lease_revoked", "lease_expired", "cleanup_retry"].includes(q.reason) && q.processGroupEmpty === true &&
     (q.signal === null || (typeof q.signal === "string" && /^SIG[A-Z0-9]{2,10}$/.test(q.signal)));
 }
 /**
@@ -169,7 +179,7 @@ export async function quiesceCollaboration(store: RunStore, id: string, agent: s
     const r = d.records[id];
     if (!r?.collaboration || r.agent !== agent) conflict("dispatch_mismatch");
     if (!r.runId || r.runId !== runId) conflict("run_mismatch");
-    if (r.quiescence?.runId === runId || r.execution) return structuredClone(r);
+    if (r.quiescence?.runId === runId || r.execution?.cleanup) return structuredClone(r);
     const quiescence = { at, runId, reason: q.reason, signal: q.signal };
     if (isTerminal(r.status)) d.records[id] = { ...r, quiescence };
     else {
@@ -181,6 +191,36 @@ export async function quiesceCollaboration(store: RunStore, id: string, agent: s
     return structuredClone(d.records[id]);
   });
 }
+export interface CleanupFailure { reason: "lease_revoked" | "lease_expired" | "normal_exit"; groups: number; unproven: number }
+export function validCleanupFailure(f: CleanupFailure): boolean {
+  return !!f && typeof f === "object" && ["lease_revoked", "lease_expired", "normal_exit"].includes(f.reason) && Number.isSafeInteger(f.groups) &&
+    Number.isSafeInteger(f.unproven) && f.unproven >= 1 && f.unproven <= f.groups && f.groups <= 64;
+}
+/**
+ * #49 (PR48 P1): the runner could NOT prove its process groups empty, so it withholds both finish and quiesce.
+ * This records a durable, diagnosable failure WITHOUT claiming any stop: no execution and no quiescence are stored,
+ * so provablyQuiescent stays false and recovery/new writer claims stay refused. A still-running record is ended as
+ * failed (lease revoked, workflow blocked/execution_unknown). Idempotent per runId; it never overrides real proof.
+ */
+export async function reportCleanupFailure(store: RunStore, id: string, agent: string, runId: string, f: CleanupFailure, at: string) {
+  if (!validCleanupFailure(f)) conflict("invalid_cleanup_failure");
+  return store.transact(d => {
+    const r = d.records[id];
+    if (!r?.collaboration || r.agent !== agent) conflict("dispatch_mismatch");
+    if (!r.runId || r.runId !== runId) conflict("run_mismatch");
+    if (r.cleanupFailure?.runId === runId || r.execution || r.quiescence?.runId === runId) return structuredClone(r);
+    const cleanupFailure = { at, runId, reason: f.reason, groups: f.groups, unproven: f.unproven };
+    if (isTerminal(r.status)) d.records[id] = { ...r, cleanupFailure };
+    else {
+      d.records[id] = { ...r, status: "failed", finishedAt: at, lastActivityAt: at, cleanupFailure,
+        lastError: `runner cleanup unproven (${f.unproven}/${f.groups} process groups); stop NOT confirmed` };
+      blockTerminalStep(d, d.records[id], at, "cleanup_unproven");
+    }
+    const w = d.collaborations?.[r.collaboration.workflowId];
+    if (w) note(w, at, "cleanup_unproven", `${id} run=${runId} ${f.reason} ${f.unproven}/${f.groups}`);
+    return structuredClone(d.records[id]);
+  });
+}
 function matches(w: Collaboration, p: PullSnapshot) {
   const a = w.assignment;
   // The original completed Claude PR is a review target, never a mutation target.
@@ -188,6 +228,8 @@ function matches(w: Collaboration, p: PullSnapshot) {
     (p.open && p.headBranch === a.workBranch && p.baseBranch === a.baseBranch));
 }
 /** Completion advances the next step in the SAME transaction as the execution result. Labels are not completion. */
+const executionOf = (r: ExecutionResult) => ({ exitCode: r.exitCode, headSha: r.headSha, summary: r.summary, tests: structuredClone(r.tests),
+  cleanup: { processGroupsEmpty: true as const, groups: r.cleanup.groups } });
 export async function finishCollaboration(store: RunStore, github: CollaborationGitHub, id: string, agent: string, runId: string, result: ExecutionResult, at: string) {
   if (!validExecution(result)) conflict("invalid_result");
   const before = await store.read();
@@ -204,12 +246,12 @@ export async function finishCollaboration(store: RunStore, github: Collaboration
     const r = d.records[id], w = workflow(d, prior.id);
     if (r.runId !== runId || r.agent !== agent) conflict("run_mismatch");
     if (isTerminal(r.status)) {
-      if (JSON.stringify(r.execution) === JSON.stringify({ exitCode: result.exitCode, headSha: result.headSha, summary: result.summary, tests: result.tests })) return structuredClone(w);
+      if (JSON.stringify(r.execution) === JSON.stringify(executionOf(result))) return structuredClone(w);
       conflict("already_finished");
     }
     if (r.status !== "running" || w.dispatchId !== id || w.stage !== r.collaboration?.step) conflict("stale_step");
     d.records[id] = { ...r, status: ok ? "succeeded" : "failed", finishedAt: at, lastActivityAt: at,
-      execution: { exitCode: result.exitCode, headSha: result.headSha, summary: result.summary, tests: structuredClone(result.tests) },
+      execution: executionOf(result),
       lastError: ok ? undefined : "execution or required tests failed", evidence: p ? [...r.evidence, { kind: "pr", url: p.url, at }] : r.evidence };
     if (p) w.latest = p;
     note(w, at, ok ? "completed" : "execution_failed", result.summary);
