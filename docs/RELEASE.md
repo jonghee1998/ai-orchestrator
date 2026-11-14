@@ -21,7 +21,7 @@
 3. Vercel 프로젝트 생성 후 환경변수(모두 Secret, 저장소/채팅에 기록 금지):
    - `DATABASE_URL` (Supabase), `CONTROL_ADMIN_TOKEN` (≥16자), `CONTROL_READ_TOKEN` (≥16자, 선택)
    - `GITHUB_TOKEN` (Issues 쓰기 fine-grained), `GITHUB_REPO=jonghee1998/ai-orchestrator`
-   - `RUN_CALLBACK_SECRET_CLAUDE` 등 에이전트별 서명 비밀, `CRON_SECRET` (≥16자; Vercel Cron이 Bearer로 전송)
+   - `RUN_CALLBACK_SECRET_CLAUDE_SONNET`·`_CLAUDE_OPUS`·`_CODEX`·`_GPT` 에이전트별 **고유** 서명 비밀(≥32자, 공유 금지 — #34), `CRON_SECRET` (≥16자; Vercel Cron이 Bearer로 전송)
 4. 외부 루틴: 라벨 기반 루틴/webhook을 비활성화하거나, 루틴 프롬프트가 `GET /api/dashboard`(읽기 토큰)로 게이트 확인 후 동작하도록 구성.
 5. 프리뷰 배포 → `/` 의 "릴리스 준비도"에서 missing 0 확인 → 소규모 라이브 스모크(승인된 1건) → 증거(콜백 ACK) 확인.
 6. 위 모두 확인 후 명시적 승인으로 main 병합/운영 배포.

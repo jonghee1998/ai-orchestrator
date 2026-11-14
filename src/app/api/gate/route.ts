@@ -1,31 +1,16 @@
 import { NextResponse } from "next/server";
-import { agentSecret, verifyCallback } from "@/lib/runs/callback-auth";
-import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
-import { checkExternalGate, signGateResponse } from "@/lib/runs/external-gate";
+import { getRunStore } from "@/lib/runs/store";
+import { handleGate } from "@/lib/runs/gate-http";
 
 export const dynamic = "force-dynamic";
-const H = { "Cache-Control": "no-store" };
+const H = { "Cache-Control": "no-store", "Content-Type": "application/json" };
 
-/**
- * Gate-first endpoint for external routines. Headers: x-agent-key (claude-sonnet|claude-opus|codex|gpt),
- * x-timestamp, x-event-id (unique per check), x-signature = HMAC-SHA256(RUN_CALLBACK_SECRET_<PROVIDER>, `${ts}.${eventId}.`).
- * Secret provider = first segment of the key (claude, codex, gpt). Any failure => do NOT run.
- */
-async function handle(req: Request): Promise<NextResponse> {
-  const key = (req.headers.get("x-agent-key") ?? "").toLowerCase();
-  const secret = agentSecret(key.split("-")[0]);
-  const eventId = req.headers.get("x-event-id");
-  const auth = verifyCallback({ secret, timestamp: req.headers.get("x-timestamp"), eventId, signature: req.headers.get("x-signature"), rawBody: "", nowMs: Date.now() });
-  if (!auth.ok) return NextResponse.json({ allow: false, error: "unauthorized" }, { status: auth.reason === "missing_secret" ? 503 : 401, headers: H });
-  try {
-    const r = await checkExternalGate(getRunStore(), key, eventId!, new Date().toISOString());
-    if (!r.ok) return NextResponse.json({ allow: false, error: r.reason }, { status: r.reason === "replay" ? 409 : 400, headers: H });
-    const body = JSON.stringify({ allow: r.allow, reason: r.reason, agent: r.agent, at: r.at, eventId: r.eventId });
-    return new NextResponse(body, { status: 200, headers: { ...H, "Content-Type": "application/json", "x-signature": signGateResponse(secret!, r.at, r.eventId, body) } });
-  } catch (e) {
-    const cfg = e instanceof RunStoreConfigurationError;
-    return NextResponse.json({ allow: false, error: cfg ? "store_unconfigured" : "store_error" }, { status: cfg ? 503 : 500, headers: H });
-  }
+/** Gate v2 (#34) for external routines — see src/lib/runs/gate-http.ts and docs/LIVE_INTEGRATION.md §3. POST only. */
+export async function POST(req: Request): Promise<NextResponse> {
+  const r = await handleGate(req.headers, await req.text(), () => getRunStore(), process.env, Date.now());
+  return new NextResponse(r.body, { status: r.status, headers: r.signature ? { ...H, "x-signature": r.signature } : H });
 }
-export const GET = handle;
-export const POST = handle;
+/** v1 GET (empty signed body) is retired: it bound neither agent nor task. Fail closed. */
+export function GET(): NextResponse {
+  return NextResponse.json({ allow: false, error: "method_not_allowed" }, { status: 405, headers: { "Cache-Control": "no-store", Allow: "POST" } });
+}

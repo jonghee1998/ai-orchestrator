@@ -1,64 +1,50 @@
-import { projects, tasks } from "@/lib/data";
-import { Card, PageTitle, ProjectStatusBadge, UnknownTag } from "@/components/ui";
-import { TaskStatusBadge } from "@/components/ui";
-import { SampleBanner } from "@/components/SampleBanner";
-import { agentLabel } from "@/lib/labels";
+"use client";
+// #34 — live project view: the configured GitHub repo's work queue (authenticated /api/work-queue). No static samples.
+import { Card, PageTitle } from "@/components/ui";
+import { useAuthedJson } from "@/components/live/useAuthedJson";
+import { LiveStatus } from "@/components/live/LiveStatus";
+import { buildModel, parseResponse, type Phase, type QueueTask } from "@/components/work-queue/viewModel";
+
+const PHASES: { id: Phase; label: string }[] = [
+  { id: "active", label: "진행 중" }, { id: "ready", label: "준비" }, { id: "review", label: "검수" },
+  { id: "blocked", label: "차단" }, { id: "unknown", label: "상태 unknown" }, { id: "done", label: "완료" },
+];
 
 export default function ProjectsPage() {
+  const { state, reload } = useAuthedJson<QueueTask[]>("/api/work-queue", (_st, b) => {
+    const r = parseResponse(b);
+    if (!r) return null;
+    if (r.mode === "unconfigured") return "unconfigured";
+    return r.mode === "live" ? r.tasks : null;
+  });
+  const model = state.kind === "ok" ? buildModel(state.data) : null;
   return (
-    <div>
-      <PageTitle title="프로젝트" subtitle="프로젝트별 작업과 진행 상황" />
-      <SampleBanner what="프로젝트·작업 목록" />
-      <div className="space-y-3">
-        {projects.map((p) => {
-          const projectTasks = tasks.filter((t) => t.projectId === p.id);
-          return (
-            <Card key={p.id}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-semibold">{p.name}</h3>
-                  <p className="mt-0.5 text-sm text-text-muted">
-                    {p.description}
-                  </p>
-                </div>
-                <ProjectStatusBadge status={p.status} />
-              </div>
-
-              <div className="mt-2 flex items-center gap-3 text-xs text-text-faint">
-                <span>작업 {p.taskCount}개</span>
-                <span>·</span>
-                <span className="flex items-center gap-1">
-                  진행률{" "}
-                  {p.progress.state === "known" ? (
-                    <span className="tabular-nums text-text-muted">
-                      {p.progress.value}%
-                    </span>
-                  ) : (
-                    <UnknownTag hint={p.progress.reason} />
-                  )}
-                </span>
-              </div>
-
-              <ul className="mt-3 space-y-2 border-t border-border-subtle pt-3">
-                {projectTasks.map((t) => (
-                  <li
-                    key={t.id}
-                    className="flex items-center justify-between gap-3"
-                  >
-                    <span className="min-w-0 truncate text-sm">{t.title}</span>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="text-xs text-text-faint">
-                        {t.assignee ? agentLabel[t.assignee] : "미배정"}
-                      </span>
-                      <TaskStatusBadge status={t.status} />
-                    </div>
-                  </li>
+    <div className="space-y-3">
+      <PageTitle title="프로젝트" subtitle="GitHub 작업 큐(GITHUB_REPO) 실제 이슈 기준 진행 상황" />
+      <LiveStatus s={state} reload={reload} what="프로젝트 작업" />
+      {model && (
+        <>
+          <Card>
+            <p className="text-sm">이슈 {model.tasks.length}개 · 진행률 {model.tasks.length ? `${Math.round((model.tasks.filter((x) => x.phase === "done").length / model.tasks.length) * 100)}% (완료 라벨 기준)` : "unknown (이슈 없음)"}</p>
+            <p className="mt-1 text-[11px] text-text-faint">진행률은 status:* 라벨만으로 계산합니다. 라벨이 없거나 모호하면 unknown 으로 분류합니다.</p>
+          </Card>
+          {PHASES.map(({ id, label }) => {
+            const rows = model.tasks.filter((x) => x.phase === id);
+            if (!rows.length) return null;
+            return (
+              <section key={id} aria-label={label} className="space-y-2">
+                <h2 className="text-sm font-semibold text-text-muted">{label} · {rows.length}</h2>
+                {rows.map((x) => (
+                  <Card key={x.id}>
+                    <a href={x.url} target="_blank" rel="noreferrer" className="block break-words text-sm">{x.id} {x.title}</a>
+                    <p className="text-[11px] text-text-faint">담당 {x.agent} · {x.status || "status 라벨 없음"}{x.waitingOn.length ? ` · 대기: ${x.waitingOn.join(", ")}` : ""}{x.missingDeps.length ? ` · 확인 불가 선행: ${x.missingDeps.join(", ")}` : ""}</p>
+                  </Card>
                 ))}
-              </ul>
-            </Card>
-          );
-        })}
-      </div>
+              </section>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }

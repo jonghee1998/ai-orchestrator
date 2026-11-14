@@ -8,7 +8,7 @@ test("empty env: required items missing, release blocked", () => {
   assert.equal(r.items.find((i) => i.id === "database")?.state, "missing");
 });
 test("fully configured env still blocked by external trigger + live smoke", () => {
-  const r = computeReadiness({ DATABASE_URL: "x", CONTROL_ADMIN_TOKEN: "a".repeat(16), CONTROL_READ_TOKEN: "b".repeat(16), GITHUB_TOKEN: "t", GITHUB_REPO: "o/r", RUN_CALLBACK_SECRET_CLAUDE: "s", CRON_SECRET: "c".repeat(16) });
+  const r = computeReadiness({ DATABASE_URL: "x", CONTROL_ADMIN_TOKEN: "a".repeat(16), CONTROL_READ_TOKEN: "b".repeat(16), GITHUB_TOKEN: "t", GITHUB_REPO: "o/r", RUN_CALLBACK_SECRET_CLAUDE_SONNET: "s".repeat(32), CRON_SECRET: "c".repeat(16) });
   assert.equal(r.items.filter((i) => i.state === "missing").length, 0);
   assert.equal(r.releaseBlocked, true);
 });

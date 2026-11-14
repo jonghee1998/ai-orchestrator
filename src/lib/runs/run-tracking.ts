@@ -40,6 +40,8 @@ export interface DispatchRecord {
   capability?: string;
   /** Phase 4: set when the gate blocked the provider call; no provider call was made. Cleared on release. */
   held?: string;
+  /** #34: set when authorizeSubmission let this record through the gate (before the provider/label call). */
+  submitAuthorizedAt?: string;
 }
 
 export interface Timeouts { ackMs: number; heartbeatMs: number }

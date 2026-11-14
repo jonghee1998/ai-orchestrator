@@ -26,7 +26,7 @@ export function verifyCallback(opts: {
   return { ok: true };
 }
 
-/** Per-agent secret: RUN_CALLBACK_SECRET_<AGENT> (e.g. RUN_CALLBACK_SECRET_CLAUDE). */
+/** Per-agent secret: RUN_CALLBACK_SECRET_<AGENT_KEY> (e.g. claude-opus => RUN_CALLBACK_SECRET_CLAUDE_OPUS). No provider-wide fallback. */
 export function agentSecret(agent: string, env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
   if (!/^[a-z0-9-]{1,32}$/.test(agent)) return undefined;
   return env[`RUN_CALLBACK_SECRET_${agent.toUpperCase().replace(/-/g, "_")}`] || undefined;

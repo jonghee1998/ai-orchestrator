@@ -77,7 +77,7 @@ export async function authorizeSubmission(store: RunStore, dispatchId: string, n
     if (r.status !== "queued") return { ok: false, reason: "not_queued" };
     const blocked = gateOrBlock(d, r.agent, now, `submit ${dispatchId}`);
     if (!blocked) {
-      const next = { ...r, held: undefined };
+      const next = { ...r, held: undefined, submitAuthorizedAt: now };
       d.records[dispatchId] = next;
       return { ok: true, record: next };
     }

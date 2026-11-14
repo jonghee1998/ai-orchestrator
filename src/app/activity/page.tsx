@@ -1,50 +1,40 @@
-import { activity } from "@/lib/data";
+"use client";
+// #34 — live activity: run records (RunsPanel) + durable audit log from the store. No static samples.
 import { Card, PageTitle } from "@/components/ui";
 import RunsPanel from "@/components/RunsPanel";
-import { SampleBanner } from "@/components/SampleBanner";
-import { agentLabel } from "@/lib/labels";
-import { showDate } from "@/lib/format";
-import type { ActivityKind } from "@/lib/types";
+import { useAuthedJson } from "@/components/live/useAuthedJson";
+import { LiveStatus } from "@/components/live/LiveStatus";
 
-const kindLabel: Record<ActivityKind, string> = {
-  task_created: "작업 생성",
-  task_assigned: "작업 배정",
-  status_changed: "상태 변경",
-  agent_connected: "에이전트 연결",
-  handoff: "협업/인계",
-  note: "메모",
-};
+type Audit = { at: string; actor: string; action: string; detail: string };
+const t = (s: string) => s.replace("T", " ").slice(0, 19) + "Z";
 
 export default function ActivityPage() {
-  const sorted = [...activity].sort(
-    (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
-  );
-
+  const { state, reload } = useAuthedJson<Audit[]>("/api/dashboard", (st, b) => {
+    const j = b as { mode?: string; audit?: unknown } | null;
+    if (j?.mode === "unconfigured") return "unconfigured";
+    return st === 200 && j?.mode === "live" && Array.isArray(j.audit) ? (j.audit as Audit[]) : null;
+  });
   return (
     <div>
-      <PageTitle
-        title="활동"
-        subtitle="작업 실행 로그 및 에이전트 간 협업 기록"
-      />
+      <PageTitle title="활동" subtitle="실행 기록 및 제어/게이트 감사 로그 (저장소 기준)" />
       <RunsPanel />
-      <h2 className="mb-2 mt-6 text-sm font-semibold text-text-muted">샘플 활동 로그</h2>
-      <SampleBanner what="아래 활동 로그" />
-      <ol className="space-y-2">
-        {sorted.map((e) => (
-          <Card key={e.id}>
-            <div className="flex items-center justify-between gap-3">
-              <span className="rounded bg-bg-raised px-2 py-0.5 text-xs text-text-muted">
-                {kindLabel[e.kind]}
-              </span>
-              <span className="text-xs text-text-faint">{showDate(e.at)}</span>
-            </div>
-            <p className="mt-2 text-sm">{e.message}</p>
-            <p className="mt-1 text-xs text-text-faint">
-              주체: {e.actor === "system" ? "시스템" : agentLabel[e.actor]}
-            </p>
-          </Card>
-        ))}
-      </ol>
+      <h2 className="mb-2 mt-6 text-sm font-semibold text-text-muted">감사 로그 (최근 30건)</h2>
+      <LiveStatus s={state} reload={reload} what="감사 로그" />
+      {state.kind === "ok" && state.data.length === 0 && <p className="text-xs text-text-faint">기록된 활동이 없습니다.</p>}
+      {state.kind === "ok" && (
+        <ol className="space-y-2">
+          {state.data.map((e, i) => (
+            <Card key={`${e.at}-${i}`}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="rounded bg-bg-raised px-2 py-0.5 text-xs text-text-muted">{e.action}</span>
+                <span className="text-xs text-text-faint">{t(e.at)}</span>
+              </div>
+              <p className="mt-2 break-words text-sm">{e.detail}</p>
+              <p className="mt-1 text-xs text-text-faint">주체: {e.actor}</p>
+            </Card>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
