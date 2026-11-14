@@ -3,7 +3,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -32,36 +32,98 @@ export function execute(command, args, cwd, env = childEnvironment(process.env),
   });
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const realIo = {
+  platform: process.platform, pid: process.pid, uid: () => process.getuid?.() ?? -1,
+  kill: (pid, sig) => process.kill(pid, sig), readdir: readdirSync, readFile: f => readFileSync(f, "utf8"), readlink: readlinkSync, stat: f => statSync(f),
+};
+const GONE = new Set(["ENOENT", "ESRCH"]); // confirmed disappearance (exit race); anything else is insufficient visibility
+/** /proc is the procfs of OUR pid namespace and does not hide other users' processes (hidepid). */
+function procTrusted(io) {
+  if (Number(io.readlink("/proc/self")) !== io.pid) return false; // a foreign/stale /proc mount
+  const mount = io.readFile("/proc/self/mountinfo").split("\n").findLast(l => l.split(" ")[4] === "/proc");
+  if (!mount || mount.split(" - ")[1]?.split(" ")[0] !== "proc") return false;
+  const hide = /(?:^|,)hidepid=([^,\s]+)/.exec(mount.split(" - ")[1] ?? "")?.[1];
+  return !hide || hide === "0" || hide === "off";
+}
 /**
- * True while any process that can still run remains in process group `pgid`. On Linux /proc is scanned and zombies
- * (state Z/X: exited, cannot execute or write, only awaiting reaping by an init that may be slow) are not counted.
- * Elsewhere, or if /proc is unreadable, falls back to kill(-pgid, 0) (signal 0 = existence probe, sends nothing),
- * which counts zombies as alive and so can only err towards "alive" (fail closed).
+ * #51 (PR50 P1 r4575537380): conservative group probe. `alive:false` (stop evidence) only when
+ *  - kill(-pgid, 0) fails with ESRCH (the kernel has no process, not even a zombie, in this group in our pid
+ *    namespace; signal 0 only probes and sends nothing), or
+ *  - on Linux the group still exists but a fully trusted /proc scan proves every member is a zombie (exited, cannot
+ *    write; zombies cannot fork, so the group cannot gain a member). Any unreadable entry (EACCES/EPERM/...), an
+ *    untrusted or hidepid /proc, a malformed stat, or zero visible members while the kernel reports the group
+ *    present keeps it ALIVE. Only ENOENT/ESRCH counts as a member that disappeared meanwhile.
+ * `io` is injectable only so tests can inject /proc faults; production always uses the real process table.
  */
-export function groupAlive(pgid) {
-  if (process.platform === "linux") {
-    try {
-      for (const pid of readdirSync("/proc")) {
-        if (!/^\d+$/.test(pid)) continue;
-        let stat; try { stat = readFileSync(`/proc/${pid}/stat`, "utf8"); } catch { continue; } // exited meanwhile
-        const f = stat.slice(stat.lastIndexOf(")") + 2).split(" "); // [state, ppid, pgrp, ...]
-        if (Number(f[2]) === pgid && f[0] !== "Z" && f[0] !== "X") return true;
-      }
-      return false;
-    } catch { /* /proc unavailable: fall back */ }
-  }
-  try { process.kill(-pgid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+export function probeGroup(pgid, io = realIo) {
+  if (!Number.isSafeInteger(pgid) || pgid <= 1) return { alive: true, basis: "invalid_pgid" };
+  try { io.kill(-pgid, 0); } catch (e) { if (e?.code === "ESRCH") return { alive: false, basis: "esrch" }; }
+  if (io.platform !== "linux") return { alive: true, basis: "signal0_present" };
+  try {
+    if (!procTrusted(io)) return { alive: true, basis: "proc_untrusted" };
+    let members = 0;
+    for (const pid of io.readdir("/proc")) {
+      if (!/^\d+$/.test(pid)) continue;
+      let stat;
+      try { stat = io.readFile(`/proc/${pid}/stat`); } catch (e) { if (GONE.has(e?.code)) continue; return { alive: true, basis: "proc_unreadable" }; }
+      const close = stat.lastIndexOf(")"), f = stat.slice(close + 2).split(" "); // [state, ppid, pgrp, ...]
+      if (close < 0 || !/^[A-Za-z]$/.test(f[0] ?? "") || !/^\d+$/.test(f[2] ?? "")) return { alive: true, basis: "proc_malformed" };
+      if (Number(f[2]) !== pgid) continue;
+      members++;
+      if (f[0] !== "Z" && f[0] !== "X") return { alive: true, basis: "running" };
+    }
+    return members ? { alive: false, basis: "zombies_only" } : { alive: true, basis: "present_invisible" };
+  } catch { return { alive: true, basis: "proc_unavailable" }; }
+}
+/** True unless the group is PROVEN to have no process that can still run (see probeGroup). */
+export function groupAlive(pgid, io = realIo) { return probeGroup(pgid, io).alive; }
+/**
+ * #51 (PR50 P1 r4575537382): identity of the process table a pgid refers to. A pgid is meaningful only in the pid
+ * namespace (and boot) where it was recorded: another host, container or pid namespace, or the same machine after a
+ * reboot, has an unrelated process table in which absence of the pgid proves nothing. Read live from the kernel
+ * (boot_id is random per boot, the pid-namespace inode/device identify the namespace); never from a copyable file or
+ * the hostname. Null when it cannot be verified (non-Linux, /proc not ours, unreadable), which blocks replay.
+ */
+export function processTableIdentity(io = realIo) {
+  if (io.platform !== "linux") return null;
+  try {
+    if (Number(io.readlink("/proc/self")) !== io.pid) return null;
+    const pidNs = io.readlink("/proc/self/ns/pid"), ns = io.stat("/proc/self/ns/pid");
+    const bootId = io.readFile("/proc/sys/kernel/random/boot_id").trim().toLowerCase();
+    if (!/^pid:\[\d+\]$/.test(pidNs) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(bootId)) return null;
+    return { v: 1, kernel: "linux", bootId, pidNs, nsDevIno: `${ns.dev}:${ns.ino}` };
+  } catch { return null; }
+}
+export function sameIdentity(a, b) {
+  return !!a && !!b && a.v === 1 && b.v === 1 && a.kernel === "linux" && b.kernel === "linux" &&
+    typeof a.bootId === "string" && a.bootId === b.bootId && a.pidNs === b.pidNs && a.nsDevIno === b.nsDevIno;
+}
+/**
+ * Replay of a cleanupUnproven diagnostic. PROBE ONLY (signal 0 / /proc reads), never a real signal: a recorded pgid
+ * may since have been recycled by an unrelated group. Returns ok:true (cleanup_retry may be reported) only when the
+ * diagnostic carries a verified identity that exactly matches the current process table AND every recorded unproven
+ * group is proven gone there. Absent (legacy), unavailable, or different identity -> blocked, whatever the probe says.
+ */
+export function replayCleanup(cleanupUnproven, { identity = processTableIdentity(), probe = groupAlive } = {}) {
+  const want = cleanupUnproven?.identity, groups = cleanupUnproven?.groups;
+  if (!want) return { ok: false, reason: "identity_absent" };
+  if (!identity) return { ok: false, reason: "identity_unavailable" };
+  if (!sameIdentity(want, identity)) return { ok: false, reason: "identity_mismatch" };
+  if (!Array.isArray(groups) || !groups.length || groups.some(g => !Number.isSafeInteger(g?.pgid) || g.pgid <= 1)) return { ok: false, reason: "malformed_groups" };
+  const alive = groups.filter(g => g.state !== "empty" && probe(g.pgid)).length;
+  return alive ? { ok: false, reason: "alive", alive } : { ok: true };
 }
 /**
  * #41 P1: stop every process in a supervised process group and PROVE the group is empty. Grandchildren (e.g. a
  * `git push` spawned by the CLI) share the group because the child is started as its leader. Throws if emptiness
  * cannot be confirmed (e.g. a signal is denied and a writer survives); the caller must then report NEITHER finish
- * NOR quiesce, so recovery stays blocked server side. `kill` is injectable only so tests can deny signals; the
- * emptiness probe always uses the real process table.
+ * NOR quiesce, so recovery stays blocked server side. `kill` is injectable only so tests can deny signals and `io`
+ * only so tests can inject /proc faults; the runner itself never injects either (production probes the real table).
  * Limitation: a descendant that deliberately leaves the group (setsid/daemonize) is not covered.
  */
-export async function stopGroup(pgid, graceMs = 10_000, confirmMs = 30_000, kill = process.kill.bind(process)) {
+export async function stopGroup(pgid, graceMs = 10_000, confirmMs = 30_000, kill = process.kill.bind(process), io = realIo) {
   let signal = null;
+  const groupAlive = g => probeGroup(g, io).alive; // conservative: unprovable emptiness counts as alive
   const send = sig => { try { kill(-pgid, sig); signal = sig; } catch { /* gone or denied: the probe below decides */ } };
   if (groupAlive(pgid)) {
     send("SIGTERM");
@@ -96,11 +158,11 @@ export function leaseController(renew, { intervalMs = 60_000, selfFenceMs = 10 *
  * `proof()` is non-null only when every group ever started was confirmed empty; a single unproven group makes the
  * whole run unproven, and the runner must then withhold both finish and quiesce.
  */
-export function createSupervisor(lease, { graceMs = 10_000, confirmMs = 30_000, kill } = {}) {
+export function createSupervisor(lease, { graceMs = 10_000, confirmMs = 30_000, kill, io } = {}) {
   const groups = new Map(); // pgid -> { stopping: Promise, state: "running" | "empty" | "unproven", signal }
   const stop = pgid => {
     const g = groups.get(pgid);
-    g.stopping ??= stopGroup(pgid, graceMs, confirmMs, kill).then(p => { g.state = "empty"; g.signal = p.signal; },
+    g.stopping ??= stopGroup(pgid, graceMs, confirmMs, kill, io).then(p => { g.state = "empty"; g.signal = p.signal; },
       e => { g.state = "unproven"; g.error = String(e?.message ?? e).slice(0, 200); g.onUnproven?.(); });
     return g.stopping;
   };
@@ -166,15 +228,16 @@ async function main() {
     const saved = JSON.parse(await readFile(resumeFile, "utf8"));
     if (saved.dispatchId !== dispatchId || saved.agent !== agent || saved.issueNumber !== Number(issue)) throw new Error("finish-file mismatch");
     if (saved.cleanupUnproven) {
-      // #49: probe only, never signal: a recorded pgid may since have been reused by an unrelated group.
-      // Still alive -> keep withholding both finish and quiesce. All gone -> quiescence is now proven.
-      const alive = saved.cleanupUnproven.groups.filter(g => g.state !== "empty" && groupAlive(g.pgid));
-      if (alive.length) {
+      // #49/#51: probe only, never signal, and only inside the exact process table where the groups were recorded.
+      const r = replayCleanup(saved.cleanupUnproven);
+      if (!r.ok) {
         await worker({ action: "cleanup_failed", failure: saved.cleanupUnproven.failure }).catch(() => {});
-        console.error(`Cleanup still unproven (${alive.length} process group(s) alive); finish/quiesce withheld.`); process.exitCode = 4; return;
+        if (r.reason === "alive") { console.error(`Cleanup still unproven (${r.alive} process group(s) alive); finish/quiesce withheld.`); process.exitCode = 4; return; }
+        console.error(`Replay cannot verify the original process table (${r.reason}); a pgid absent here is not stop evidence. ` +
+          "Replay on the original host/container/pid namespace before any reboot, or resolve manually. finish/quiesce withheld."); process.exitCode = 5; return;
       }
       await worker({ action: "quiesce", quiescence: { reason: "cleanup_retry", processGroupEmpty: true, signal: null } });
-      console.log("Process groups confirmed empty on replay; quiescence acknowledged (the unproven run stays failed)."); return;
+      console.log("Process groups confirmed empty on replay in the original process table; quiescence acknowledged (the unproven run stays failed)."); return;
     }
     if (saved.quiescence) { await worker({ action: "quiesce", quiescence: saved.quiescence }); console.log("Quiescence acknowledged; CLI was not rerun."); return; }
     await worker({ action: "finish", result: saved.result });
@@ -201,6 +264,7 @@ async function main() {
   // ORCH_TEST_DENY_GROUP_SIGNALS only makes signals fail (as EPERM would); it can never fabricate proof because the
   // emptiness probe always uses the real process table. It exists so regression tests can exercise denied cleanup.
   const deny = process.env.ORCH_TEST_DENY_GROUP_SIGNALS === "1" ? () => { throw Object.assign(new Error("denied"), { code: "EPERM" }); } : undefined;
+  const identityAtStart = processTableIdentity(); // the table every supervised pgid lives in
   const sup = createSupervisor(lease, { graceMs: ms(process.env.ORCH_FENCE_GRACE_MS, 10_000), confirmMs: ms(process.env.ORCH_FENCE_CONFIRM_MS, 30_000), kill: deny });
   let result, cliExitCode = 1;
   const tests = [];
@@ -238,7 +302,9 @@ async function main() {
     // #49 P1: cleanup NOT proven. Withhold BOTH finish and quiesce; recovery stays blocked server side. Persist a
     // diagnosable failure (replayable: a later replay only probes) and report it without claiming any stop.
     const groups = sup.diagnostics(), failure = { reason: lease.fenced ?? "normal_exit", groups: groups.length, unproven: groups.filter(g => g.state !== "empty").length };
-    await writeFile(resultPath, JSON.stringify({ ...saved, cleanupUnproven: { failure, groups } }), { mode: 0o600 });
+    // Identity only if verified now AND unchanged since start; otherwise null, which makes every replay block.
+    const now = processTableIdentity(), identity = sameIdentity(identityAtStart, now) ? now : null;
+    await writeFile(resultPath, JSON.stringify({ ...saved, cleanupUnproven: { failure, groups, identity } }), { mode: 0o600 });
     console.error(`Cleanup unproven (${failure.unproven}/${failure.groups} process groups); finish/quiesce withheld. Saved: ${resultPath}`);
     await worker({ action: "cleanup_failed", failure }).catch(e => console.error(`cleanup_failed report not acknowledged: ${e.message}`));
     process.exitCode = 4; return;

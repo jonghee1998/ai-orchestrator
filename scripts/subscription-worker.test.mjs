@@ -10,7 +10,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-import { childEnvironment, verifyResponse, leaseController, superviseChild, groupAlive, createSupervisor } from "./subscription-worker.mjs";
+import { childEnvironment, verifyResponse, leaseController, superviseChild, groupAlive, createSupervisor, stopGroup, probeGroup, processTableIdentity, sameIdentity, replayCleanup } from "./subscription-worker.mjs";
+import { spawn, execFileSync } from "node:child_process";
+import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 const exec = promisify(execFile);
 const hmac = (secret, text) => createHmac("sha256", secret).update(text).digest("hex");
 test("runner checks signed response identity/freshness and strips model keys/control secrets from child environment", () => {
@@ -185,11 +187,13 @@ async function harness({ lease = () => "held", npmEnv = {}, runnerEnv = {} } = {
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALL_LOG: path.join(root, "calls"), TEST_WRITES: writes,
     ORCH_URL: `http://127.0.0.1:${server.address().port}`, GATE_SECRET: secret, ORCH_LEASE_INTERVAL_MS: "50", ORCH_FENCE_GRACE_MS: "100", ORCH_FENCE_CONFIRM_MS: "300", ...npmEnv, ...runnerEnv };
   const run = (...extra) => exec(process.execPath, [WORKER, "codex", "36", "dispatch-1", cwd, ...extra], { env, timeout: 60_000 }).then(() => 0, e => e.code ?? 1);
+  // Same runner, started through a wrapper (e.g. into another pid namespace).
+  const runVia = (wrapper, ...extra) => exec(wrapper[0], [...wrapper.slice(1), process.execPath, WORKER, "codex", "36", "dispatch-1", cwd, ...extra], { env, timeout: 60_000 }).then(() => 0, e => e.code ?? 1);
   const savedFile = async () => path.join(cwd, ".git/orchestrator", (await fs.readdir(path.join(cwd, ".git/orchestrator"))).find(f => !f.endsWith("-agent.json")));
   const writerPids = () => fs.readFile(writes + ".pids", "utf8").then(t => t.trim().split("\n").filter(Boolean).map(Number), () => []);
   const close = async () => { for (const p of await writerPids()) killGroup(p); for (const p of await writerPids()) { try { process.kill(p, "SIGKILL"); } catch { /* gone */ } }
     server.closeAllConnections(); await new Promise(r => server.close(r)); await fs.rm(root, { recursive: true, force: true }); };
-  return { run, reports, writes, size, savedFile, writerPids, close };
+  return { run, runVia, reports, writes, size, savedFile, writerPids, close };
 }
 test("#49 P1 e2e: normal successful exit leaving npm/test background writers -> reaped and proven BEFORE finish; finish carries cleanup proof", async () => {
   const h = await harness();
@@ -235,5 +239,146 @@ test("#49 P1 e2e: denied cleanup of a surviving test writer withholds BOTH finis
     assert.equal(await h.run(saved), 0);
     assert.deepEqual(h.reports.map(r => r.action), ["cleanup_failed", "cleanup_failed", "quiesce"]);
     assert.deepEqual(h.reports[2].quiescence, { reason: "cleanup_retry", processGroupEmpty: true, signal: null });
+  } finally { await h.close(); }
+});
+
+// #51 (PR50 P1 r4575537380): unreadable /proc entries are insufficient visibility, never exit.
+const realIo = { platform: process.platform, pid: process.pid, uid: () => process.getuid(), kill: (p, s) => process.kill(p, s), readdir: readdirSync,
+  readFile: f => readFileSync(f, "utf8"), readlink: readlinkSync, stat: f => statSync(f) };
+const errno = code => Object.assign(new Error(code), { code });
+/** A real live writer in its own process group (leader + same-group grandchild, both ignoring SIGTERM). */
+async function liveWriter() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "probe-")), target = path.join(root, "w");
+  const child = spawn(process.execPath, [path.resolve("scripts/fixtures/stubborn-writer.cjs"), target], { detached: true, stdio: "ignore" });
+  for (let i = 0; !(await fs.stat(target + ".pids").catch(() => null)) || !(await fs.stat(target).catch(() => null)); i++) { assert.ok(i < 500, "writer never started"); await pause(10); }
+  const pids = JSON.parse(await fs.readFile(target + ".pids", "utf8"));
+  return { pgid: child.pid, pids, target, done: async () => { killGroup(child.pid); for (const p of pids) while (alive(p)) await pause(10); await fs.rm(root, { recursive: true, force: true }); } };
+}
+const faultStat = (pids, code) => ({ ...realIo, readFile: f => { if (pids.some(p => f === `/proc/${p}/stat`)) throw errno(code); return realIo.readFile(f); } });
+const linux = process.platform === "linux";
+test("#51 P1: EACCES/EPERM on a LIVE writer's /proc stat keeps the group alive (old scan treated it as exited)", { skip: !linux && "Linux /proc only" }, async () => {
+  const w = await liveWriter();
+  try {
+    for (const code of ["EACCES", "EPERM", "EIO"]) assert.deepEqual(probeGroup(w.pgid, faultStat(w.pids, code)), { alive: true, basis: "proc_unreadable" }, code);
+    // Even an ENOENT lie for every member cannot fabricate emptiness: the kernel still reports the group present.
+    assert.deepEqual(probeGroup(w.pgid, faultStat(w.pids, "ENOENT")), { alive: true, basis: "present_invisible" });
+    const hide = { ...realIo, readFile: f => f === "/proc/self/mountinfo" ? "22 27 0:21 / /proc rw,relatime - proc proc rw,hidepid=2\n" : realIo.readFile(f) };
+    assert.deepEqual(probeGroup(w.pgid, hide), { alive: true, basis: "proc_untrusted" });
+    const foreign = { ...realIo, readlink: f => f === "/proc/self" ? "1" : realIo.readlink(f) };
+    assert.deepEqual(probeGroup(w.pgid, foreign), { alive: true, basis: "proc_untrusted" });
+    assert.ok(await grows(w.target), "precondition: the writer is really alive");
+  } finally { await w.done(); }
+});
+test("#51 P1: supervisor with denied signals + unreadable live entries yields NO proof (fault-injected false processGroupEmpty)", { skip: !linux && "Linux /proc only" }, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "uproc-")), target = path.join(root, "w");
+  let pids = [];
+  const io = { ...realIo, readFile: f => { if (pids.some(p => f === `/proc/${p}/stat`)) throw errno("EACCES"); return realIo.readFile(f); } };
+  const lease = leaseController(async () => "held", { intervalMs: 1000 });
+  const sup = createSupervisor(lease, { graceMs: 50, confirmMs: 200, kill: deny, io });
+  try {
+    const running = sup.run(process.execPath, [path.resolve("scripts/fixtures/stubborn-writer.cjs"), target], root, process.env);
+    for (let i = 0; !pids.length; i++) { assert.ok(i < 500); pids = JSON.parse(await fs.readFile(target + ".pids", "utf8").catch(() => "[]")); await pause(10); }
+    await sup.settle(); // stop the (still running) leader's group: signals denied, entries unreadable
+    lease.stop();
+    assert.equal(sup.proof(), null, "unreadable live entries must never prove emptiness");
+    assert.equal(sup.diagnostics()[0].state, "unproven");
+    assert.ok(await grows(target), "precondition: the writer survived");
+    killGroup(pids[0]); await running;
+  } finally { lease.stop(); if (pids[0]) killGroup(pids[0]); await fs.rm(root, { recursive: true, force: true }); }
+});
+test("#51 P1: with real signals, unreadable entries do not block a genuine stop: SIGKILL + kernel ESRCH proves the group empty", { skip: !linux && "Linux /proc only" }, async () => {
+  const w = await liveWriter();
+  try {
+    const r = await stopGroup(w.pgid, 50, 2000, undefined, faultStat(w.pids, "EACCES"));
+    assert.deepEqual(r, { processGroupEmpty: true, signal: "SIGKILL" });
+    assert.deepEqual(probeGroup(w.pgid), { alive: false, basis: "esrch" });
+  } finally { await w.done(); }
+});
+test("#51 P1: confirmed exit race (ENOENT/ESRCH) is distinguished from insufficient visibility in a zombie-only group", () => {
+  const stat = (pid, state, pgrp) => `${pid} (node) ${state} 1 ${pgrp} ${pgrp} 0 -1`;
+  const io = (missing) => ({ platform: "linux", pid: 50, kill: () => {}, readlink: f => f === "/proc/self" ? "50" : "x",
+    readdir: () => ["1", "self", "200", "201", "202"],
+    readFile: f => { if (f === "/proc/self/mountinfo") return "22 27 0:21 / /proc rw - proc proc rw\n";
+      if (f === "/proc/1/stat") return stat(1, "S", 1); if (f === "/proc/200/stat") return stat(200, "Z", 200);
+      if (f === "/proc/202/stat") return stat(202, "S", 9); throw errno(missing); } });
+  assert.deepEqual(probeGroup(200, io("ENOENT")), { alive: false, basis: "zombies_only" }, "member 201 exited meanwhile");
+  assert.deepEqual(probeGroup(200, io("ESRCH")), { alive: false, basis: "zombies_only" });
+  assert.deepEqual(probeGroup(200, io("EACCES")), { alive: true, basis: "proc_unreadable" }, "201 may be a live member we cannot see");
+  assert.deepEqual(probeGroup(200, io("EPERM")), { alive: true, basis: "proc_unreadable" });
+  const gone = { ...io("ENOENT"), kill: () => { throw errno("ESRCH"); } };
+  assert.deepEqual(probeGroup(200, gone), { alive: false, basis: "esrch" });
+  const denied = { ...io("ENOENT"), platform: "darwin", kill: () => { throw errno("EPERM"); } };
+  assert.deepEqual(probeGroup(200, denied), { alive: true, basis: "signal0_present" }, "non-Linux: EPERM means present");
+  assert.equal(probeGroup(1).alive, true); assert.equal(probeGroup(0).alive, true); // never probe/accept pgid 0/1
+});
+
+// #51 (PR50 P1 r4575537382): replay is valid only in the exact process table where the groups were recorded.
+test("#51 P1: process-table identity is read live from the kernel; foreign /proc or non-Linux is unverifiable", { skip: !linux && "Linux /proc only" }, () => {
+  const id = processTableIdentity();
+  assert.ok(id && /^pid:\[\d+\]$/.test(id.pidNs) && /^[0-9a-f-]{36}$/.test(id.bootId) && /^\d+:\d+$/.test(id.nsDevIno));
+  assert.ok(sameIdentity(id, processTableIdentity()));
+  assert.equal(processTableIdentity({ ...realIo, readlink: f => f === "/proc/self" ? "1" : realIo.readlink(f) }), null);
+  assert.equal(processTableIdentity({ ...realIo, platform: "darwin" }), null);
+  assert.equal(processTableIdentity({ ...realIo, readFile: f => { if (f.endsWith("boot_id")) throw errno("EACCES"); return realIo.readFile(f); } }), null);
+  for (const k of ["bootId", "pidNs", "nsDevIno"]) assert.equal(sameIdentity(id, { ...id, [k]: id[k] + "0" }), false, k);
+  assert.equal(sameIdentity(id, null), false);
+});
+test("#51 P1: replay with absent/unavailable/different identity blocks even when the pgid is absent here; never signals", () => {
+  const id = { v: 1, kernel: "linux", bootId: "3314f6cc-4a14-4906-9d74-37fedec7978f", pidNs: "pid:[4026531836]", nsDevIno: "4:4026531836" };
+  const groups = [{ pgid: 4242, state: "unproven" }], gone = () => false, failure = { reason: "normal_exit", groups: 1, unproven: 1 };
+  assert.deepEqual(replayCleanup({ failure, groups }, { identity: id, probe: gone }), { ok: false, reason: "identity_absent" }, "legacy diagnostic");
+  assert.deepEqual(replayCleanup({ failure, groups, identity: null }, { identity: id, probe: gone }), { ok: false, reason: "identity_absent" });
+  assert.deepEqual(replayCleanup({ failure, groups, identity: id }, { identity: null, probe: gone }), { ok: false, reason: "identity_unavailable" });
+  for (const k of ["bootId", "pidNs", "nsDevIno"]) // other host / reboot / container or pid namespace
+    assert.deepEqual(replayCleanup({ failure, groups, identity: { ...id, [k]: "other" } }, { identity: id, probe: gone }), { ok: false, reason: "identity_mismatch" }, k);
+  assert.deepEqual(replayCleanup({ failure, groups: [], identity: id }, { identity: id, probe: gone }), { ok: false, reason: "malformed_groups" });
+  assert.deepEqual(replayCleanup({ failure, groups: [{ pgid: 1, state: "unproven" }], identity: id }, { identity: id, probe: gone }), { ok: false, reason: "malformed_groups" });
+  assert.deepEqual(replayCleanup({ failure, groups, identity: id }, { identity: id, probe: () => true }), { ok: false, reason: "alive", alive: 1 });
+  assert.deepEqual(replayCleanup({ failure, groups, identity: id }, { identity: id, probe: gone }), { ok: true });
+});
+test("#51 P1: probe-only replay never signals a recycled pgid now owned by an unrelated live group", { skip: !linux && "Linux /proc only" }, async () => {
+  const w = await liveWriter(); // stands in for an unrelated group that recycled the recorded pgid
+  try {
+    const sigs = [], spy = { ...realIo, kill: (p, s) => { sigs.push(s); return realIo.kill(p, s); } };
+    const r = replayCleanup({ failure: { reason: "normal_exit", groups: 1, unproven: 1 }, groups: [{ pgid: w.pgid, state: "unproven" }], identity: processTableIdentity() },
+      { probe: pg => groupAlive(pg, spy) });
+    assert.deepEqual(r, { ok: false, reason: "alive", alive: 1 }, "fail closed: cannot tell the recycled group from the original");
+    assert.ok(sigs.length && sigs.every(s => s === 0), `only signal 0 probes, got ${sigs}`);
+    assert.ok(w.pids.every(alive) && await grows(w.target), "the unrelated group was not touched");
+  } finally { await w.done(); }
+});
+test("#51 P1 e2e: diagnostic carries the verified identity; a wrong-environment replay can NEVER emit cleanup_retry (writer alive or not)", { skip: !linux && "Linux /proc only" }, async () => {
+  const h = await harness({ runnerEnv: { ORCH_TEST_DENY_GROUP_SIGNALS: "1" } });
+  try {
+    assert.equal(await h.run(), 4);
+    const [writer] = await h.writerPids(), saved = await h.savedFile(), file = JSON.parse(await fs.readFile(saved, "utf8"));
+    assert.ok(sameIdentity(file.cleanupUnproven.identity, processTableIdentity()), "identity of the original process table is persisted");
+    const variant = async (mutate) => { const f = structuredClone(file); mutate(f.cleanupUnproven); const p = saved + ".variant"; await fs.writeFile(p, JSON.stringify(f)); return p; };
+    const otherHost = await variant(c => { c.identity.bootId = "00000000-0000-4000-8000-000000000000"; });
+    const otherNs = await variant(c => { c.identity.pidNs = "pid:[1]"; c.identity.nsDevIno = "0:1"; });
+    const legacy = await variant(c => { delete c.identity; }), unverifiable = await variant(c => { c.identity = null; });
+    for (const p of [otherHost, otherNs, legacy, unverifiable]) assert.equal(await h.run(p), 5);
+    assert.ok(alive(writer) && await grows(h.writes), "the original writer is still alive and was not signalled by any replay");
+    assert.equal(await h.run(saved), 4, "original environment, writer alive: still withheld");
+    // The writer is gone here, but a mismatched/absent identity is not stop evidence.
+    process.kill(writer, "SIGKILL"); while (alive(writer)) await pause(10);
+    for (const p of [otherHost, otherNs, legacy, unverifiable]) assert.equal(await h.run(p), 5);
+    assert.ok(h.reports.every(r => r.action === "cleanup_failed"), "no quiesce/finish from an unverified environment");
+    assert.equal(await h.run(saved), 0, "only the matching process table can prove the stop");
+    assert.deepEqual(h.reports.at(-1), { ...h.reports.at(-1), action: "quiesce", quiescence: { reason: "cleanup_retry", processGroupEmpty: true, signal: null } });
+    assert.equal(h.reports.filter(r => r.action === "quiesce").length, 1);
+  } finally { await h.close(); }
+});
+const unshareOk = (() => { if (!linux) return false; try { execFileSync("unshare", ["--pid", "--fork", "--mount-proc", "true"], { stdio: "ignore" }); return true; } catch { return false; } })();
+test("#51 P1 e2e: replay inside a REAL different pid namespace (writer invisible there) is blocked while the original writer survives",
+  { skip: !unshareOk && "needs unshare --pid --mount-proc (root or user namespaces); covered by the identity-variant test" }, async () => {
+  const h = await harness({ runnerEnv: { ORCH_TEST_DENY_GROUP_SIGNALS: "1" } });
+  try {
+    assert.equal(await h.run(), 4);
+    const [writer] = await h.writerPids(), saved = await h.savedFile();
+    // In the new namespace kill(-pgid,0) is ESRCH and /proc lacks the writer: the old runner reported cleanup_retry here.
+    assert.equal(await h.runVia(["unshare", "--pid", "--fork", "--mount-proc"], saved), 5);
+    assert.deepEqual(h.reports.map(r => r.action), ["cleanup_failed", "cleanup_failed"]);
+    assert.ok(alive(writer) && await grows(h.writes), "the original writer is still alive");
   } finally { await h.close(); }
 });

@@ -52,10 +52,29 @@ timeout/blocked 상태 전환이나 PM의 `acknowledgeUnknownExecution`은 이�
 - 진단 파일을 재전송할 때는 기록된 pgid를 **probe만** 하고 신호는 보내지 않는다. pgid가 재사용되었을 수 있기 때문이다.
   - 그룹이 아직 살아 있으면 계속 보내지 않는다.
   - 모두 사라졌으면 `quiesce(reason: cleanup_retry)`를 보내고, 그때서야 복구할 수 있다.
+- **#51 (PR50 P1 r4575537380) 보수적 probe:**
+  - 그룹이 비었다고 판단하는 경우는 두 가지뿐이다. 첫째, `kill(-pgid, 0)`이 ESRCH를 반환한다(signal 0은 존재만 확인하며 신호를 보내지 않는다). 둘째, Linux에서 그룹은 남아 있지만 신뢰할 수 있는 `/proc` 전체 스캔 결과 모든 구성원이 zombie다.
+  - 개별 `/proc/<pid>/stat`에서 EACCES/EPERM 등이 나오면 가시성 부족이며 exit로 보지 않는다. 다음 경우도 모두 alive(fail closed)로 본다: 형식이 잘못된 stat, hidepid가 켜진 `/proc`, 우리 pid namespace의 것이 아닌 `/proc`(`/proc/self` ≠ pid), kernel은 그룹이 있다고 하는데 보이는 구성원이 없는 경우.
+  - ENOENT/ESRCH만 "도중에 종료됨"(race)으로 인정한다. 정리(cleanup)와 replay 모두 같은 probe를 쓴다.
+- **#51 (PR50 P1 r4575537382) namespace 바인딩 replay:**
+  - 진단 파일에 원래 프로세스 테이블의 identity를 저장한다: `{ bootId, pidNs, nsDevIno }`.
+    - `bootId`: `/proc/sys/kernel/random/boot_id`, 부팅마다 무작위로 바뀐다.
+    - `pidNs`: `/proc/self/ns/pid`의 inode와 device.
+  - identity는 kernel에서 직접 읽는다. hostname이나 복사 가능한 무작위 파일에 의존하지 않는다. 실행 시작 시점과 진단 작성 시점의 identity가 같고 검증될 때만 저장하며, 그 밖에는 `null`로 저장한다.
+  - replay는 저장된 identity가 현재 kernel의 identity와 **정확히 일치할 때만** pgid를 probe한다.
+  - 다음 경우에는 `cleanup_failed`만 다시 보내고 finish/quiesce를 보류한 채 종료 코드 5로 끝난다. probe 결과와 무관하며, 현재 환경에 pgid가 없다는 것은 정지 증거가 아니다.
+    - identity가 없음: 구버전 진단 파일 또는 `null`.
+    - 현재 identity를 검증할 수 없음: 비 Linux, 외부 `/proc`.
+    - identity가 다름: 다른 호스트, 재부팅, 다른 컨테이너 또는 pid namespace.
+  - 구버전 진단 파일은 자동으로 해제되지 않으므로 PM/owner가 수동으로 확인해야 한다.
+  - replay는 신호 0과 `/proc` 읽기만 한다. 재사용된 pgid가 다른 그룹의 것이면 alive로 보고 계속 차단하며, 그 그룹에 신호를 보내지 않는다.
 - `ORCH_TEST_DENY_GROUP_SIGNALS=1`은 회귀 테스트 전용이다. 신호만 실패시키고 probe는 실제 프로세스 테이블을 보므로 증명을 만들어 낼 수 없다.
 
 **한계:**
 - setsid/daemonize로 그룹을 벗어난 후손 프로세스는 다루지 않는다.
+- 비 Linux에서는 `kill(-pgid,0)`만 사용하므로 zombie도 alive로 본다(fail closed). 이 환경에서는 identity를 만들 수 없으므로 진단 replay가 항상 차단된다.
+- hidepid가 켜진 `/proc`에서는 zombie만 남은 그룹을 증명할 수 없다. ESRCH가 나올 때까지 alive로 보며, confirm 시간을 넘기면 unproven이 된다.
+- 같은 세션의 외부 프로세스가 `setpgid`로 그룹에 합류하는 경우와 VM 스냅샷 복원으로 boot_id가 중복되는 경우는 다루지 않는다.
 - runner가 직접 실행하는 짧은 `git` 조회(status/rev-parse/remote/branch, hook 없음)는 supervisor 밖에서 실행된다.
 - 이미 저장된 기존 execution(cleanup 증명 없음)은 quiescent로 인정되지 않는다. 해당 workflow에서 새 writer를 시작하려면 PM이 수동으로 확인해야 한다.
 - 계약 밖의 경로(수동 라벨 우회, 구버전 runner)는 서버가 통제하지 못한다.
