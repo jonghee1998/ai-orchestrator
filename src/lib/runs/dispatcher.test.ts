@@ -89,8 +89,8 @@ test("PgRunStore: single locked row, SELECT FOR UPDATE, commit/rollback via pool
 
 test("read auth: fail closed, read or admin token accepted", () => {
   const e = { CONTROL_READ_TOKEN: "r".repeat(16), CONTROL_ADMIN_TOKEN: "a".repeat(20) };
-  assert.deepEqual(checkRead("x", {}), { ok: false, status: 503 });
-  assert.deepEqual(checkRead(null, e), { ok: false, status: 401 });
+  assert.deepEqual(checkRead("x", {}), { ok: false, status: 503, reason: "not_configured" });
+  assert.deepEqual(checkRead(null, e), { ok: false, status: 401, reason: "token_missing" });
   assert.equal(checkRead("r".repeat(16), e).ok, true);
   assert.equal(checkRead("a".repeat(20), e).ok, true);
 });

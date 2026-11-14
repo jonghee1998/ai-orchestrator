@@ -8,7 +8,7 @@ type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason:
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; held: string | null; lastActivityAt: string; lastError: string | null };
 type Snap = { mode: "live"; generatedAt: string; agents: Agent[]; runs: Run[]; errors: Run[]; control: { preset: string }; audit: { at: string; actor: string; action: string; detail: string }[] };
 type Ready = { items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean };
-type St = { kind: "loading" } | { kind: "notoken" } | { kind: "unauth" } | { kind: "unconfigured" } | { kind: "error" } | { kind: "ok"; snap: Snap; ready: Ready | null };
+type St = { kind: "loading" } | { kind: "notoken" } | { kind: "unauth"; reason?: string } | { kind: "unconfigured" } | { kind: "error" } | { kind: "ok"; snap: Snap; ready: Ready | null };
 
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
 const t = (s: string | null) => (s ? s.replace("T", " ").slice(0, 19) + "Z" : "없음");
@@ -20,13 +20,13 @@ export default function OverviewDashboard() {
   const seq = useRef(0);
   useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* ignore */ } }, []);
   const load = useCallback(async () => {
-    if (!token) { setS({ kind: "notoken" }); return; }
+    if (!token.trim()) { seq.current++; setS({ kind: "notoken" }); return; }
     const my = ++seq.current;
     try {
-      const h = { "x-admin-token": token };
+      const h = { "x-admin-token": token.trim() };
       const [r, rr] = await Promise.all([fetch("/api/dashboard", { cache: "no-store", headers: h }), fetch("/api/readiness", { cache: "no-store", headers: h })]);
       if (my !== seq.current) return;
-      if (r.status === 401) return setS({ kind: "unauth" });
+      if (r.status === 401) { const e = await r.json().catch(() => ({})); if (my !== seq.current) return; return setS({ kind: "unauth", reason: e.reason }); }
       const j = await r.json().catch(() => ({}));
       if (j.mode === "unconfigured" || r.status === 503) return setS({ kind: "unconfigured" });
       if (!r.ok || j.mode !== "live") return setS({ kind: "error" });
@@ -46,7 +46,7 @@ export default function OverviewDashboard() {
       </Card>
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
       {s.kind === "notoken" && <Card><p className="text-sm">토큰을 입력하면 실제 상태를 불러옵니다. 연결 전에는 어떤 상태도 표시하지 않습니다.</p></Card>}
-      {s.kind === "unauth" && <Card><p className="text-sm">토큰이 올바르지 않습니다 (401).</p></Card>}
+      {s.kind === "unauth" && <Card><p className="text-sm">{s.reason === "token_missing" ? "토큰이 비어 있습니다 (401)." : "토큰이 올바르지 않습니다 (401). 서버에는 토큰이 설정되어 있으나 입력값과 일치하지 않습니다."}</p></Card>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">서버 저장소/인증이 설정되지 않았습니다 (DATABASE_URL, CONTROL_*_TOKEN). 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p><button className="mt-2 min-h-11 rounded-lg border border-border px-3 text-xs" onClick={load}>다시 시도</button></Card>}
       {s.kind === "ok" && (

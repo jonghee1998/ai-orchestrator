@@ -32,10 +32,10 @@ export default function ControlDashboard() {
   useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* storage unavailable */ } }, []);
 
   const load = useCallback(async () => {
-    if (!token) { setS({ kind: "error" }); return; }
+    if (!token.trim()) { seq.current++; setS({ kind: "error" }); return; }
     const my = ++seq.current; // stale-response guard
     try {
-      const r = await fetch("/api/dashboard", { cache: "no-store", headers: { "x-admin-token": token } });
+      const r = await fetch("/api/dashboard", { cache: "no-store", headers: { "x-admin-token": token.trim() } });
       const j = await r.json();
       if (my !== seq.current) return;
       setS(j.mode === "unconfigured" ? { kind: "unconfigured" } : r.ok && j.mode === "live" ? { kind: "ok", snap: j } : { kind: "error" });
@@ -46,7 +46,7 @@ export default function ControlDashboard() {
   async function send(body: Record<string, unknown>) {
     setBusy(true); setMsg(null);
     try {
-      const r = await fetch("/api/control", { method: "POST", headers: { "content-type": "application/json", "x-admin-token": token }, body: JSON.stringify(body) });
+      const r = await fetch("/api/control", { method: "POST", headers: { "content-type": "application/json", "x-admin-token": token.trim() }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       setMsg(r.ok ? "적용됨" : r.status === 401 ? "관리자 토큰이 올바르지 않습니다" : r.status === 503 ? "제어가 설정되지 않았습니다 (CONTROL_ADMIN_TOKEN)" : r.status === 409 ? `충돌/미지원: ${j.detail ?? j.error}` : `실패: ${j.error ?? r.status}`);
       await load();
