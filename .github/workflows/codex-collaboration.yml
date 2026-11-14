@@ -46,7 +46,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -f package.json
           git remote -v
-          git ls-files | head -20
+          git ls-files | sed -n '1,20p'
   review:
     needs: resolve
     if: vars.CODEX_ACTIONS_ENABLED == 'true' && github.event_name == 'workflow_dispatch'
