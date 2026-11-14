@@ -22,7 +22,7 @@ export interface RunStore {
   read(): Promise<StoreData>;
 }
 
-export class RunStoreConfigurationError extends Error {}
+export class RunStoreConfigurationError extends Error { name = "RunStoreConfigurationError"; }
 
 const empty = (): StoreData => ({ records: {}, events: {}, control: defaultControl(), audit: [], blocked: {} });
 
@@ -75,7 +75,10 @@ class LazyPgStore implements RunStore {
   private inner?: Promise<RunStore>;
   constructor(private url: string) {}
   private get(): Promise<RunStore> {
-    return (this.inner ??= Promise.all([import("./pg-store"), ]).then(async ([m]) => new m.PgRunStore(await m.createPgPool(this.url), empty, normalize)));
+    // A failed init must not be cached forever (a transient/TLS error would otherwise poison this instance).
+    const p = (this.inner ??= import("./pg-store").then(async (m) => new m.PgRunStore(await m.createPgPool(this.url), empty, normalize)));
+    p.catch(() => { if (this.inner === p) this.inner = undefined; });
+    return p;
   }
   transact<T>(fn: (d: StoreData) => T) { return this.get().then((s) => s.transact(fn)); }
   read() { return this.get().then((s) => s.read()); }

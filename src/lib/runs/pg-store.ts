@@ -26,10 +26,22 @@ export class PgRunStore implements RunStore {
   read(): Promise<StoreData> { return this.transact((d) => structuredClone(d)); }
 }
 
+/** Pure: builds pg connection options. TLS verification is ALWAYS on unless DATABASE_SSL=disable (local tests).
+ *  DATABASE_SSL_CA (PEM) adds a provider CA (e.g. Supabase pooler) while keeping rejectUnauthorized: true.
+ *  sslmode/sslrootcert query params are stripped so they cannot silently override the explicit ssl option. */
+export function buildPgConfig(connectionString: string, env: Readonly<Record<string, string | undefined>> = process.env) {
+  let cs = connectionString;
+  try { const u = new URL(connectionString); for (const k of ["sslmode", "sslrootcert", "sslcert", "sslkey", "uselibpqcompat"]) u.searchParams.delete(k); cs = u.toString(); } catch { /* let pg report an invalid URL */ }
+  const ca = env.DATABASE_SSL_CA?.replace(/\\n/g, "\n").trim();
+  const ssl = env.DATABASE_SSL === "disable" ? false : { rejectUnauthorized: true as const, ...(ca ? { ca } : {}) };
+  return { connectionString: cs, max: 3, connectionTimeoutMillis: 8000, ssl };
+}
+
 /** Real pool backed by `pg`. Loaded lazily; connection string only from env. */
 export async function createPgPool(connectionString: string): Promise<SqlPool> {
   const { Pool } = await import("pg");
-  const pool = new Pool({ connectionString, max: 3, ssl: process.env.DATABASE_SSL === "disable" ? false : { rejectUnauthorized: true } });
+  const pool = new Pool(buildPgConfig(connectionString));
+  pool.on("error", () => undefined); // idle-client errors must not crash the process
   return {
     async withTransaction(fn) {
       const c = await pool.connect();
