@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
+import { requireRead } from "../_auth";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
 import { displayStatus, latencies } from "@/lib/runs/run-tracking";
 
 export const dynamic = "force-dynamic";
 const H = { "Cache-Control": "no-store" };
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: Request): Promise<NextResponse> {
+  const denied = requireRead(req);
+  if (denied) return denied;
   try {
     const { records } = await getRunStore().read();
     const runs = Object.values(records).map((r) => ({

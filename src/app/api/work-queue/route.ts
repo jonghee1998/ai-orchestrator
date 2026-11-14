@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireRead } from "../_auth";
 import {
   GitHubQueueConfigurationError,
   readGitHubWorkQueue,
@@ -14,7 +15,9 @@ type WorkQueueResponse = {
   error?: string;
 };
 
-export async function GET(): Promise<NextResponse<WorkQueueResponse>> {
+export async function GET(req: Request): Promise<NextResponse<WorkQueueResponse> | NextResponse> {
+  const denied = requireRead(req);
+  if (denied) return denied;
   try {
     const tasks = await readGitHubWorkQueue();
     return NextResponse.json({ mode: "live", tasks }, { headers: { "Cache-Control": "no-store" } });

@@ -31,14 +31,15 @@ export default function ControlDashboard() {
   useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* storage unavailable */ } }, []);
 
   const load = useCallback(async () => {
+    if (!token) { setS({ kind: "error" }); return; }
     const my = ++seq.current; // stale-response guard
     try {
-      const r = await fetch("/api/dashboard", { cache: "no-store" });
+      const r = await fetch("/api/dashboard", { cache: "no-store", headers: { "x-admin-token": token } });
       const j = await r.json();
       if (my !== seq.current) return;
       setS(j.mode === "unconfigured" ? { kind: "unconfigured" } : r.ok && j.mode === "live" ? { kind: "ok", snap: j } : { kind: "error" });
     } catch { if (my === seq.current) setS({ kind: "error" }); }
-  }, []);
+  }, [token]);
   useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
 
   async function send(body: Record<string, unknown>) {

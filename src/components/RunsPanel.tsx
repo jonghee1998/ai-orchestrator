@@ -9,7 +9,7 @@ export default function RunsPanel() {
   const [s, setS] = useState<State>({ kind: "loading" });
   useEffect(() => {
     let live = true;
-    fetch("/api/runs", { cache: "no-store" })
+    fetch("/api/runs", { cache: "no-store", headers: { "x-admin-token": (() => { try { return sessionStorage.getItem("ctl-token") ?? ""; } catch { return ""; } })() } })
       .then((r) => r.json().then((j) => ({ r, j })))
       .then(({ r, j }) => { if (live) setS(j.mode === "unconfigured" ? { kind: "unconfigured" } : r.ok ? { kind: "ok", runs: j.runs } : { kind: "error" }); })
       .catch(() => live && setS({ kind: "error" }));

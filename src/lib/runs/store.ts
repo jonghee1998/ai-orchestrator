@@ -66,8 +66,26 @@ export class FileRunStore extends SerialStore {
   }
 }
 
+const normalize = (raw: Partial<StoreData>): StoreData => ({ ...empty(), ...raw, control: { ...defaultControl(), ...(raw.control ?? {}) } });
+
+const isServerless = (env: Readonly<Record<string, string | undefined>>) => !!(env.VERCEL || env.AWS_LAMBDA_FUNCTION_NAME || env.NETLIFY || env.K_SERVICE);
+
+/** Lazily-connected store wrapper so getRunStore stays synchronous. */
+class LazyPgStore implements RunStore {
+  private inner?: Promise<RunStore>;
+  constructor(private url: string) {}
+  private get(): Promise<RunStore> {
+    return (this.inner ??= Promise.all([import("./pg-store"), ]).then(async ([m]) => new m.PgRunStore(await m.createPgPool(this.url), empty, normalize)));
+  }
+  transact<T>(fn: (d: StoreData) => T) { return this.get().then((s) => s.transact(fn)); }
+  read() { return this.get().then((s) => s.read()); }
+}
+
+/** DATABASE_URL => Postgres. Else RUN_STORE_PATH file (NEVER in serverless: ephemeral FS). Else fail closed. */
 export function getRunStore(env: Readonly<Record<string, string | undefined>> = process.env): RunStore {
+  if (env.DATABASE_URL) return new LazyPgStore(env.DATABASE_URL);
+  if (isServerless(env)) throw new RunStoreConfigurationError("serverless runtime requires DATABASE_URL; file store is not allowed");
   const p = env.RUN_STORE_PATH;
-  if (!p) throw new RunStoreConfigurationError("RUN_STORE_PATH is not configured (durable store required)");
+  if (!p) throw new RunStoreConfigurationError("DATABASE_URL or RUN_STORE_PATH is not configured (durable store required)");
   return new FileRunStore(p);
 }
