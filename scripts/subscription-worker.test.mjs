@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { childEnvironment, verifyResponse } from "./subscription-worker.mjs";
+import { childEnvironment, verifyResponse, leaseController, superviseChild, groupAlive } from "./subscription-worker.mjs";
 const exec = promisify(execFile);
 const hmac = (secret, text) => createHmac("sha256", secret).update(text).digest("hex");
 test("runner checks signed response identity/freshness and strips model keys/control secrets from child environment", () => {
@@ -38,6 +38,7 @@ test("runner executes a claimed subscription CLI and real child test commands, p
       assert.equal(req.headers["x-signature"], hmac(secret, `${ts}.${id}.${raw}`));
       let payload;
       if (req.url === "/api/gate") payload = { allow: true, agent: "codex", issueNumber: 36, dispatchId: "dispatch-1" };
+      else if (b.action === "lease") payload = { lease: "held" };
       else if (b.action === "claim") payload = { record: { dispatchId: "dispatch-1", agent: "codex", issueNumber: 36, runId: b.runId,
         collaboration: { step: "codex", repo: "o/r", baseBranch: "claude/base", baseSha: sha, workBranch: "claude/fix", targetSha: sha, prNumber: 35, instructions: "Review" } } };
       else { finishes.push(b); payload = { workflow: { stage: "pm" } }; }
@@ -60,4 +61,47 @@ test("runner executes a claimed subscription CLI and real child test commands, p
     assert.deepEqual(finishes[1].result, finishes[0].result);
     assert.equal(await fs.readFile(log, "utf8"), "codex\nrun typecheck\ntest\n");
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+// #41 P1: a still-running old worker must be physically stopped (whole process group) before quiescence is reported.
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+async function stubborn(renew, leaseOpts) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "fence-")), target = path.join(root, "branch-writes");
+  const lease = leaseController(renew, leaseOpts);
+  const started = Date.now();
+  const r = await superviseChild(process.execPath, [path.resolve("scripts/fixtures/stubborn-writer.cjs"), target], root, process.env, lease, { graceMs: 100 });
+  lease.stop();
+  const pids = JSON.parse(await fs.readFile(target + ".pids", "utf8"));
+  const sizeAtFence = (await fs.stat(target)).size;
+  await new Promise(res => setTimeout(res, 300));
+  const sizeLater = (await fs.stat(target)).size, content = await fs.readFile(target, "utf8");
+  await fs.rm(root, { recursive: true, force: true });
+  return { r, pids, sizeAtFence, sizeLater, content, elapsed: Date.now() - started };
+}
+test("P1: server lease revocation kills a still-writing CLI and its grandchild; no write happens after quiescence", async () => {
+  let renewals = 0;
+  const { r, pids, sizeAtFence, sizeLater, content } = await stubborn(async () => (++renewals >= 3 ? "revoked" : "held"), { intervalMs: 40 });
+  assert.equal(r.fenced.reason, "lease_revoked");
+  assert.equal(r.fenced.processGroupEmpty, true);
+  assert.equal(r.fenced.signal, "SIGKILL"); // SIGTERM was ignored by both writers
+  assert.ok(content.includes("c") && content.includes("g"), "both the CLI and its grandchild were writing before the fence");
+  assert.equal(sizeLater, sizeAtFence, "old worker wrote after it was reported quiescent");
+  assert.ok(pids.every(p => !alive(p)) && !groupAlive(pids[0]));
+});
+test("P1: an unreachable orchestrator self-fences before the server heartbeat timeout", async () => {
+  const { r, pids, sizeAtFence, sizeLater } = await stubborn(async () => { throw new Error("network down"); }, { intervalMs: 30, selfFenceMs: 150 });
+  assert.equal(r.fenced.reason, "lease_expired");
+  assert.equal(sizeLater, sizeAtFence);
+  assert.ok(pids.every(p => !alive(p)));
+});
+test("P1: a normally exiting CLI still has stragglers in its process group reaped before results are reported", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "reap-")), target = path.join(root, "w");
+  const lease = leaseController(async () => "held", { intervalMs: 1000 });
+  // Leader exits immediately, leaving a background writer (e.g. a detached `git push &`) in its group.
+  const r = await superviseChild(process.execPath, [path.resolve("scripts/fixtures/exit-leaving-writer.cjs"), target], root, process.env, lease, { graceMs: 100 });
+  lease.stop();
+  assert.equal(r.fenced, null); assert.equal(r.exitCode, 0); assert.equal(r.proof.processGroupEmpty, true);
+  const a = (await fs.stat(target)).size; await new Promise(res => setTimeout(res, 200));
+  assert.equal((await fs.stat(target)).size, a);
+  await fs.rm(root, { recursive: true, force: true });
 });

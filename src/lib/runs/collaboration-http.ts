@@ -2,7 +2,7 @@ import { agentSecret, verifyCallback } from "./callback-auth";
 import { checkAdmin, checkRead } from "../control/auth";
 import { isAgentKey } from "../control/model";
 import { checkExternalGate, signGateResponse } from "./external-gate";
-import { assignCollaboration, claimCollaboration, finishCollaboration, decideCollaboration, refreshCollaboration, CollaborationConflict, type Assignment, type ExecutionResult } from "./collaboration";
+import { assignCollaboration, claimCollaboration, finishCollaboration, leaseCollaboration, quiesceCollaboration, type QuiescenceReport, decideCollaboration, refreshCollaboration, CollaborationConflict, type Assignment, type ExecutionResult } from "./collaboration";
 import { CollaborationGitHubError, type CollaborationGitHub } from "./collaboration-github";
 import { submitQueued, type DispatchAdapter } from "./dispatcher";
 import { RunStoreConfigurationError, type RunStore } from "./store";
@@ -61,6 +61,10 @@ export async function handleCollaborationWorker(headers: Headers, raw: string, d
       const gate = await checkExternalGate(d.store(), { agent, issueNumber: b.issueNumber, dispatchId: b.dispatchId }, eventId!, at(d));
       if (!gate.ok || !gate.allow) return reply(409, { error: gate.ok ? gate.reason : gate.reason });
       r = reply(200, { record: await claimCollaboration(d.store(), b.dispatchId, agent, b.runId, at(d)), eventId, at: at(d) });
+    } else if (b.action === "lease") {
+      r = reply(200, { ...(await leaseCollaboration(d.store(), b.dispatchId, agent, b.runId, at(d))), eventId, at: at(d) });
+    } else if (b.action === "quiesce") {
+      r = reply(200, { record: await quiesceCollaboration(d.store(), b.dispatchId, agent, b.runId, b.quiescence as QuiescenceReport, at(d)), eventId, at: at(d) });
     } else if (b.action === "finish") {
       // runId + terminal-result comparison makes a lost completion response safely replayable.
       const w = await finishCollaboration(d.store(), d.github, b.dispatchId, agent, b.runId, b.result as ExecutionResult, at(d));

@@ -19,6 +19,30 @@ PR #35의 per-agent HMAC, gate v2, replay/freshness 검증, agent/issue/dispatch
 
 작업 식별자는 workflow UUID + cycle + step이다. 제출 승인은 원자적으로 한 번만 획득하며, 승인 후 응답 유실/재시작 시 자동 재전송하지 않는다. worker claim도 한 번만 가능하다. 승인된 task만 claim할 수 있고, OFF 전환 시 새 claim/CLI 시작을 거부한다. 이미 실행 중인 worker는 drain하며 취소를 보장하지 않는다. 협업 작업은 다른 에이전트로 자동 reroute하지 않는다.
 
+### #41 P1: 실행 불명 복구 펜싱 (fail closed)
+
+timeout/blocked 상태 전환이나 PM의 `acknowledgeUnknownExecution`은 이미 실행 중인 CLI를 멈추지 않는다. 그래서 claim된 이전 실행이 **증명 가능하게 정지(quiescent)**하기 전에는 복구(`revise`)와 같은 workBranch의 새 Claude claim을 모두 `409 prior_execution_not_quiesced`로 거부한다. 이 검사는 claim 시점에도 적용하므로 refresh → 검수 → revise 경로로도 우회할 수 없다.
+
+정지로 인정되는 경우는 다음 세 가지뿐이다.
+1. claim되지 않은 채 종료된 step: 종료된 record는 더 이상 claim할 수 없다.
+2. 구조화된 결과(finish)가 기록된 경우: runner는 CLI 프로세스 그룹이 비었음을 확인한 다음에만 finish를 보낸다.
+3. runner가 서명해 보낸 `quiesce` 보고.
+
+**Runner 계약 (`scripts/subscription-worker.mjs`):**
+- CLI를 별도 프로세스 그룹의 리더로 실행한다.
+- 60초마다 서명된 `lease`를 갱신하며, 이것이 heartbeat를 겸한다.
+- 다음 경우에 SIGTERM을 보내고, 유예 후 SIGKILL로 그룹 전체를 종료한다.
+  - 서버가 `revoked`를 반환한 경우: timeout, superseded, 복구 등.
+  - 10분 동안 갱신에 실패한 경우: self-fence. 이 시간은 서버의 heartbeat timeout인 15분보다 짧다.
+- 그룹이 비었음을 `kill(-pgid, 0)`의 ESRCH로 확인한 뒤에만 `quiesce`를 보고한다. 확인하지 못하면 보고하지 않으므로 복구는 계속 차단된다.
+- 보고는 파일로 남겨 두며, 재전송할 때 finish-file 인자로 다시 보낼 수 있다.
+
+**한계:**
+- setsid/daemonize로 그룹을 벗어난 후손 프로세스는 다루지 않는다.
+- 계약 밖의 경로(수동 라벨 우회, 구버전 runner)는 서버가 통제하지 못한다.
+- 원격 브랜치 보호를 이용한 쓰기 차단(GitHub fencing)은 구현하지 않았다.
+- 취소를 주장하지 않으며, 근거는 runner의 서명된 증명뿐이다.
+
 성공에는 실제 CLI 종료 코드, 1개 이상의 테스트 종료 코드, 검증된 GitHub PR HEAD가 필요하다. GitHub compare로 결과 커밋이 PM 기준 SHA를 포함하는지도 검증한다. 검수 결과는 해당 PR 번호와 SHA에 묶인다. 서버가 확인하는 것은 서명된 worker 보고와 GitHub 증거이며 테스트 결과를 서버가 독립 재실행했다고 표시하지 않는다. 결과/요약에 인증정보나 원문 환경변수를 넣지 않는다.
 
 ## 서버 API

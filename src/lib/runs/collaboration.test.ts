@@ -3,7 +3,7 @@ import test from "node:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assignCollaboration, claimCollaboration, finishCollaboration, decideCollaboration, refreshCollaboration, type Assignment, type ExecutionResult } from "./collaboration";
+import { assignCollaboration, claimCollaboration, finishCollaboration, decideCollaboration, refreshCollaboration, leaseCollaboration, quiesceCollaboration, type Assignment, type ExecutionResult } from "./collaboration";
 import { GitHubEvidenceReader, type CollaborationGitHub, type PullSnapshot } from "./collaboration-github";
 import { MemoryRunStore, FileRunStore } from "./store";
 import { submitQueued, type DispatchAdapter } from "./dispatcher";
@@ -230,6 +230,9 @@ test("P2: heartbeat timeout of a claimed run is unknown execution; late finish i
   const later = new Date(MS + 16 * 60_000).toISOString();
   await reconcile(s.store, later);
   assert.equal((await s.store.read()).collaborations![s.w.id].blockedReason, "execution_unknown");
+  // #41 P1: acknowledgement alone no longer recovers a claimed run; the runner must prove quiescence first.
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover", later, true), /prior_execution_not_quiesced/);
+  await quiesceCollaboration(s.store, id, "codex", "run-00001", { reason: "lease_revoked", processGroupEmpty: true, signal: "SIGTERM" }, later);
   await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover", later, true);
   await assert.rejects(finishCollaboration(s.store, s.github, id, "codex", "run-00001", result(), later), /already_finished|stale_step/);
   assert.equal((await s.store.read()).collaborations![s.w.id].stage, "claude");
@@ -273,4 +276,86 @@ test("P2: claim before ACK still honours OFF gate, held state, stale step and un
   await s.store.transact(d => { d.control.agents.codex = true; d.collaborations![s.w.id].dispatchId = "w-other"; });
   await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", NOW), /stale_step/);
   release(); await pending;
+});
+
+// #41 P1 (r4575357529): a timed-out worker whose CLI keeps running must be fenced, not merely acknowledged.
+type Runner = { leaseController: Function; superviseChild: Function; groupAlive: (pid: number) => boolean };
+const loadRunner = () => (new Function("p", "return import(p)") as (p: string) => Promise<Runner>)(
+  require("node:url").pathToFileURL(path.resolve("scripts/subscription-worker.mjs")).href);
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+async function claudeStep(s: Awaited<ReturnType<typeof setup>>, run: string) {
+  await s.claim(s.w.dispatchId!, "codex");
+  await finishCollaboration(s.store, s.github, s.w.dispatchId!, "codex", "run-00001", result(), NOW);
+  const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Develop the fix", NOW);
+  await s.claim(w.dispatchId!, "claude-sonnet", run);
+  return w.dispatchId!;
+}
+test("P1: old still-running writer after heartbeat timeout blocks recovery until fenced; it never writes after the new claim", async () => {
+  const runner = await loadRunner();
+  const s = await setup(), old = await claudeStep(s, "old-run-01");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "p1-")), branch = path.join(root, "workBranch-writes");
+  let clock = MS, connected = true;
+  const iso = () => new Date(clock).toISOString();
+  // The real server lease is the old worker's only control channel. Connectivity is lost mid-run (the P1 case).
+  const lease = runner.leaseController(async () => { if (!connected) throw new Error("network partition"); return (await leaseCollaboration(s.store, old, "claude-sonnet", "old-run-01", iso())).lease; }, { intervalMs: 25, selfFenceMs: 60 * 60_000 });
+  const supervised = runner.superviseChild(process.execPath, [path.resolve("scripts/fixtures/stubborn-writer.cjs"), branch], root, process.env, lease, { graceMs: 100 });
+  try {
+  await sleep(150);
+  assert.equal((await s.store.read()).records[old].status, "running");
+  connected = false;
+  clock += 16 * 60_000;
+  const { reconcile } = await import("./service");
+  assert.equal(await reconcile(s.store, iso()), 1);
+  let d = await s.store.read();
+  assert.equal(d.records[old].status, "timeout"); assert.equal(d.collaborations![s.w.id].blockedReason, "execution_unknown");
+  // The old CLI is still writing to the branch: acknowledgement must not let a second writer start.
+  const before = (await fs.stat(branch)).size; await sleep(80);
+  assert.ok((await fs.stat(branch)).size > before, "old worker keeps writing after timeout");
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover", iso(), true), /prior_execution_not_quiesced/);
+  // Every other path into a new writer is fenced at claim time too (e.g. refresh -> review -> PM revise).
+  await s.store.transact(dd => {
+    const w = dd.collaborations![s.w.id], id = `w-${w.id}-99-claude`;
+    dd.records[id] = { ...dd.records[old], dispatchId: id, status: "dispatched", submission: "accepted", runId: undefined, finishedAt: undefined, quiescence: undefined,
+      collaboration: { ...dd.records[old].collaboration!, cycle: 99 } };
+    w.stage = "claude"; w.dispatchId = id;
+  });
+  const bypass = `w-${s.w.id}-99-claude`;
+  await assert.rejects(claimCollaboration(s.store, bypass, "claude-sonnet", "new-run-01", iso()), /prior_execution_not_quiesced/);
+  await s.store.transact(dd => { delete dd.records[bypass]; const w = dd.collaborations![s.w.id]; w.stage = "blocked"; w.dispatchId = old; });
+  await assert.rejects(quiesceCollaboration(s.store, old, "claude-sonnet", "other-run-1", { reason: "lease_revoked", processGroupEmpty: true, signal: null }, iso()), /run_mismatch/);
+  // Connectivity returns: the server revokes the lease, the runner kills the whole group and proves it empty.
+  connected = true;
+  const r = await supervised; lease.stop();
+  assert.equal(r.fenced.reason, "lease_revoked"); assert.equal(r.fenced.processGroupEmpty, true);
+  const pids: number[] = JSON.parse(await fs.readFile(branch + ".pids", "utf8"));
+  assert.ok(pids.every(p => { try { process.kill(p, 0); return false; } catch { return true; } }));
+  await quiesceCollaboration(s.store, old, "claude-sonnet", "old-run-01", { reason: r.fenced.reason, processGroupEmpty: true, signal: r.fenced.signal }, iso());
+  const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover after verified quiescence", iso(), true);
+  const claimed = await s.claim(w.dispatchId!, "claude-sonnet", "new-run-01");
+  assert.equal(claimed.status, "running");
+  const atClaim = (await fs.stat(branch)).size; await sleep(150);
+  assert.equal((await fs.stat(branch)).size, atClaim, "old worker wrote after the new writer claimed workBranch");
+  d = await s.store.read();
+  assert.equal(d.records[old].quiescence?.runId, "old-run-01"); assert.equal(d.records[old].status, "timeout");
+  await assert.rejects(finishCollaboration(s.store, s.github, old, "claude-sonnet", "old-run-01", result(), iso()), /already_finished|stale_step/);
+  } finally {
+    // Never leak the stubborn writer if an assertion fails before the fence fires.
+    lease.stop();
+    const pids: number[] = await fs.readFile(branch + ".pids", "utf8").then(JSON.parse, () => []);
+    if (pids[0]) { try { process.kill(-pids[0], "SIGKILL"); } catch { /* already stopped */ } }
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+test("P1: a self-fenced runner ends its still-running record as blocked/unknown, never as progress", async () => {
+  const s = await setup(), old = await claudeStep(s, "old-run-02");
+  assert.equal((await leaseCollaboration(s.store, old, "claude-sonnet", "old-run-02", NOW)).lease, "held");
+  assert.equal((await leaseCollaboration(s.store, old, "claude-sonnet", "intruder-1", NOW)).lease, "revoked");
+  await assert.rejects(quiesceCollaboration(s.store, old, "claude-sonnet", "old-run-02", { reason: "lease_expired", processGroupEmpty: false as unknown as true, signal: null }, NOW), /invalid_quiescence/);
+  await quiesceCollaboration(s.store, old, "claude-sonnet", "old-run-02", { reason: "lease_expired", processGroupEmpty: true, signal: "SIGKILL" }, NOW);
+  const d = await s.store.read();
+  assert.equal(d.records[old].status, "failed"); assert.equal(d.collaborations![s.w.id].stage, "blocked");
+  assert.equal(d.collaborations![s.w.id].blockedReason, "execution_unknown");
+  assert.equal((await leaseCollaboration(s.store, old, "claude-sonnet", "old-run-02", NOW)).lease, "revoked");
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "no ack", NOW), /unknown_execution_requires_ack/);
+  assert.equal((await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "ack", NOW, true)).stage, "claude");
 });

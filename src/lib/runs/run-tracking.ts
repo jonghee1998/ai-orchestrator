@@ -44,6 +44,12 @@ export interface DispatchRecord {
   held?: string;
   /** #34: set when authorizeSubmission let this record through the gate (before the provider/label call). */
   submitAuthorizedAt?: string;
+  /**
+   * #41 P1: signed runner attestation that the claimed CLI's whole process group exited (killed after lease
+   * revocation/expiry or reaped after normal exit). Only this, a structured execution result, or "never claimed"
+   * proves the old run can no longer write; a terminal status alone does not.
+   */
+  quiescence?: { at: string; runId: string; reason: "lease_revoked" | "lease_expired"; signal: string | null };
 }
 
 export interface Timeouts { ackMs: number; heartbeatMs: number }
