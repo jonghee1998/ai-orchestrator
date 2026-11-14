@@ -1,9 +1,13 @@
 // Pure view-model for the live collaboration progress dashboard (issue #42).
 // Inputs are the existing read contracts: GET /api/runs and GET /api/collaboration.
 // Anything the APIs do not provide is surfaced as null -> rendered as "unknown/unverified". Never invented.
+// #57: evidence labels come from run-trust.ts; a session self-report is never shown as verified (receipt != outcome).
+import { parseTrust, trustLabel } from "../../lib/runs/run-trust";
 
 export interface RunRow {
   dispatchId: string; issueNumber: number; agent: string; attempt: number; status: string; verified: boolean;
+  /** #57: validated client-side by parseTrust; absent/malformed => unknown, never verified. */
+  trust?: unknown;
   submission: string | null; lastActivityAt: string | null; lastError: string | null;
   evidence: { kind: string; url: string; at?: string }[]; latency: { ackMs?: number; startMs?: number } | null;
   collaboration: { workflowId: string; cycle: number; step: string; repo: string; baseBranch: string; baseSha: string; workBranch: string; targetSha: string; prNumber?: number } | null;
@@ -65,6 +69,14 @@ export function nextAction(r: RunRow, w?: WorkflowRow): string {
     default: return r.submission === "unknown" ? "ACK 유실 가능 — 자동 재시도 안 함, 수동 확인" : "ACK 미확인 — 수신 여부 확인 필요";
   }
 }
+const selfReport = (r: RunRow) => parseTrust(r.trust)?.origin === "session";
+/** ACK/evidence row. The legacy boolean `verified` alone is not enough: it must agree with a valid trust object. */
+function ack(r: RunRow): Card["ack"] {
+  const t = parseTrust(r.trust), l = trustLabel(t, r.status);
+  if (l.verified && r.verified) return { verified: true, text: `검증됨 (${l.text})${r.latency?.ackMs !== undefined ? ` · ACK ${Math.round(r.latency.ackMs / 1000)}s` : ""}` };
+  if (t || r.status === "unknown") return { verified: false, text: `${l.text}${!t?.origin && r.submission ? ` (submission: ${r.submission})` : ""}` };
+  return { verified: false, text: `미검증 — trust 정보 없음${r.submission ? ` (submission: ${r.submission})` : ""}` };
+}
 export function buildCards(runs: RunRow[], workflows: WorkflowRow[]): Card[] {
   const wf = new Map(workflows.map((w) => [w.id, w]));
   return [...runs].sort((a, b) => Date.parse(b.lastActivityAt ?? "") - Date.parse(a.lastActivityAt ?? "") || 0).map((r) => {
@@ -84,11 +96,9 @@ export function buildCards(runs: RunRow[], workflows: WorkflowRow[]): Card[] {
       task: c ? `#${r.issueNumber} · ${c.step} · cycle ${c.cycle}` : `#${r.issueNumber} (attempt ${r.attempt})`,
       branch: reviewedBranch(r, w),
       sha: ex?.headSha ?? c?.targetSha ?? null, shaKind: ex ? "head" : c ? "target" : null,
-      ack: r.verified
-        ? { verified: true, text: `검증됨 (agent 콜백)${r.latency?.ackMs !== undefined ? ` · ACK ${Math.round(r.latency.ackMs / 1000)}s` : ""}` }
-        : { verified: false, text: `미검증 — provider ACK 없음${r.submission ? ` (submission: ${r.submission})` : ""}` },
+      ack: ack(r),
       lastEvent: r.lastActivityAt, links, error: r.lastError,
-      findings: ex ? `exit ${ex.exitCode}${ex.tests.length ? ` · 테스트 ${ex.tests.length - failed}/${ex.tests.length} 통과` : " · 테스트 기록 없음"} — ${ex.summary}` : w?.feedback ? `PM 피드백: ${w.feedback}` : null,
+      findings: ex ? `${selfReport(r) ? "세션 자기보고(미검증) · " : ""}exit ${ex.exitCode}${ex.tests.length ? ` · 테스트 ${ex.tests.length - failed}/${ex.tests.length} ${selfReport(r) ? "통과 보고" : "통과"}` : " · 테스트 기록 없음"} — ${ex.summary}` : w?.feedback ? `PM 피드백: ${w.feedback}` : null,
       nextAction: nextAction(r, w),
     };
   });

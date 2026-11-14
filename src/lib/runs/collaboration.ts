@@ -88,9 +88,17 @@ export function provablyQuiescent(r: DispatchRecord): boolean {
   if (!r.runId) return isTerminal(r.status);
   return r.execution?.cleanup?.processGroupsEmpty === true || r.quiescence?.runId === r.runId;
 }
-/** Claimed Claude (writer) runs of this workflow, other than `except`, that may still write to workBranch. */
-function unquiescedWriters(d: StoreData, w: Collaboration, except?: string) {
-  return Object.values(d.records).filter(r => r.collaboration?.workflowId === w.id && r.collaboration.step === "claude" &&
+/**
+ * #57 (PR56 P1): claimed Claude (writer) runs, other than `except`, that may still push to (repo, workBranch) — across
+ * EVERY workflow and BOTH channels (runner and session). A new issue/workflow is not write isolation: it targets the
+ * same branch, so the fence is keyed by repository AND branch, never by workflow id. Names are compared
+ * case-insensitively (GitHub resolves repositories case-insensitively), so case variants share one fence (fail closed).
+ * Evaluated inside the claim/decide transaction, so concurrent claims of different workflows serialize on it.
+ */
+const branchKey = (repo: string, branch: string) => `${repo.toLowerCase()}\u0000${branch.toLowerCase()}`;
+function unquiescedWriters(d: StoreData, repo: string, workBranch: string, except?: string) {
+  const key = branchKey(repo, workBranch);
+  return Object.values(d.records).filter(r => r.collaboration?.step === "claude" && branchKey(r.collaboration.repo, r.collaboration.workBranch) === key &&
     r.dispatchId !== except && !!r.runId && !provablyQuiescent(r));
 }
 /** Workflows persisted before #41 may be stuck in claude/codex with a terminal step; derive blocked for them. */
@@ -155,8 +163,11 @@ export async function claimCollaboration(store: RunStore, id: string, agent: str
     if (!/^[A-Za-z0-9._-]{8,128}$/.test(runId)) conflict("invalid_run_id");
     // #41 P1 fence: never start a second writer on workBranch while an earlier claimed writer may still push.
     // Enforced here (not only in decide) so no recovery path (revise, refresh -> review -> revise) can bypass it.
-    if (r.collaboration.step === "claude" && unquiescedWriters(d, w, id).length) conflict("prior_execution_not_quiesced");
-    d.records[id] = { ...r, status: "running", runId, runOrigin: origin, ackAt: at, startedAt: at, lastHeartbeatAt: at, source: "agent-callback" };
+    // #57: keyed by (repo, workBranch) across all workflows/channels — a new workflow is not a way around it.
+    if (r.collaboration.step === "claude" && unquiescedWriters(d, r.collaboration.repo, r.collaboration.workBranch, id).length) conflict("prior_execution_not_quiesced");
+    // #57 (PR56 P2): only the HMAC runner is an "agent-callback"; a session claim is an authenticated receipt only.
+    d.records[id] = { ...r, status: "running", runId, runOrigin: origin, ackAt: at, startedAt: at, lastHeartbeatAt: at,
+      source: origin === "session" ? "session-self-report" : "agent-callback" };
     note(w, at, pendingAck ? "claimed_before_submission_ack" : "claimed");
     return structuredClone(d.records[id]);
   });
@@ -328,7 +339,7 @@ export async function decideCollaboration(store: RunStore, github: Collaboration
 
 function quiescenceBlocker(d: StoreData, w: Collaboration) {
   const r = w.dispatchId ? d.records[w.dispatchId] : undefined;
-  return (!!r && isTerminal(r.status) && r.status !== "succeeded" && !provablyQuiescent(r)) || unquiescedWriters(d, w).length > 0;
+  return (!!r && isTerminal(r.status) && r.status !== "succeeded" && !provablyQuiescent(r)) || unquiescedWriters(d, w.assignment.repo, w.assignment.workBranch).length > 0;
 }
 /** Poll a tracked PR, invalidating old reviews when GitHub reports a newer commit. Never changes the PM baseline. */
 export async function refreshCollaboration(store: RunStore, github: CollaborationGitHub, id: string, at: string) {

@@ -3,9 +3,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
 import { ScopeNotice } from "@/components/ScopeNotice";
+import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason: string | null; lastAck: string | null; lastHeartbeat: string | null; lastStatus: string | null; externalGate?: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number }; running: number; queued: number; held: number };
-type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; held: string | null; lastActivityAt: string; lastError: string | null };
+type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; held: string | null; lastActivityAt: string; lastError: string | null };
 type Snap = { mode: "live"; generatedAt: string; agents: Agent[]; runs: Run[]; errors: Run[]; control: { preset: string }; audit: { at: string; actor: string; action: string; detail: string }[] };
 type GH = { state: "unconfigured" | "configured_unverified" | "live" | "error"; repo: string | null; tokenSource: string; openIssues: number | null };
 type Ready = { github?: GH; items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean };
@@ -69,7 +70,7 @@ export default function OverviewDashboard() {
             <div className="flex items-center justify-between"><h2 className="text-sm font-semibold text-text-muted">큐 · 최근 활동</h2><Link href="/tasks" className="text-xs text-accent">작업 큐 →</Link></div>
             {s.snap.runs.length === 0 && <p className="text-xs text-text-faint">기록된 실행이 없습니다.</p>}
             {s.snap.runs.slice(0, 6).map((r) => (
-              <Card key={r.dispatchId}><p className="break-all text-sm">#{r.issueNumber} · {NAMES[r.agent] ?? r.agent} · <b>{r.held ? `보류(${r.held})` : r.status}</b>{r.status === "unknown" ? " (수신 미확인)" : r.verified ? " (agent 확인)" : ""}</p>
+              <Card key={r.dispatchId}><p className="break-all text-sm">#{r.issueNumber} · {NAMES[r.agent] ?? r.agent} · <b>{r.held ? `보류(${r.held})` : r.status}</b>{` (${trustLabel(parseTrust(r.trust), r.status).text})`}</p>
                 <p className="text-xs text-text-faint">{t(r.lastActivityAt)}{r.lastError ? ` · ${r.lastError}` : ""}</p></Card>
             ))}
             <Link href="/activity" className="block text-xs text-accent">전체 활동 →</Link>

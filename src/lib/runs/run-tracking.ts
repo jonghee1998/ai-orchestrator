@@ -38,8 +38,12 @@ export interface DispatchRecord {
   attempt: number;
   lastError?: string;
   evidence: Evidence[];
-  /** 상태 근거: agent 콜백만 "verified". 그 외는 추정 금지. */
-  source: "none" | "agent-callback";
+  /**
+   * 상태 근거: agent 콜백(HMAC 서명)만 "verified". 그 외는 추정 금지.
+   * #57: "session-self-report" = claimed via the session header channel — the RECEIPT is authenticated, the execution,
+   * tests and process stop are not. Read APIs derive trust via run-trust.ts (runOrigin wins over this field).
+   */
+  source: "none" | "agent-callback" | "session-self-report";
   /** provider submission outcome; "unknown" = possible lost ACK (never auto-retried) */
   submission?: "accepted" | "rejected_not_accepted" | "unknown";
   lastActivityAt?: string;

@@ -40,7 +40,7 @@
 1. 테스트 전용 Issue 1개 생성(라벨 없음, "스모크 — 코드 변경 금지, 댓글만").
 2. `scripts/gate-check.mjs`로 서명 호출 → 기본 OFF에서 `allow:false`(exit 1) 확인, ON이어도 dispatch 없는 이슈는 `no_authorized_dispatch` 확인.
 3. **(승인 후에만)** `claude-sonnet` ON + `claude` provider ON → `/api/dispatch`로 해당 이슈 1건.
-4. 루틴이 `ack`/`finished` 서명 콜백(`/api/runs/callback`) 전송 → 대시보드에서 `verified`(agent 확인) 확인.
+4. 루틴이 `ack`/`finished` 서명 콜백(`/api/runs/callback`) 전송 → 대시보드에서 `verified`(agent 확인, HMAC run만 — 세션 run은 #57부터 항상 미검증 자기보고로 표시) 확인.
 5. 즉시 `all-paused` 복귀. 콜백 미수신이면 `unknown` 유지(성공 주장 금지).
 이 세션에서는 어떤 단계도 실행하지 않음.
 

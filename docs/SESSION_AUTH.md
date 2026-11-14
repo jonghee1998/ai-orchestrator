@@ -16,16 +16,18 @@
 | 작업 바인딩 | 본문 `{v:1, action, agent, issueNumber, dispatchId, runId, targetSha}`. agent=토큰 agent, record의 agent/issue/dispatch 일치(아니면 409 `dispatch_mismatch`), `targetSha`=dispatch의 정확한 task HEAD(아니면 409 `stale_target_sha`). |
 | 게이트 | `gate`/`claim`은 기존 `checkExternalGate`(제어 ON·provider·스케줄 + orchestrator가 승인한 live dispatch) 그대로. `claim`은 기존 원자적 단일 writer claim + #41 writer fence 그대로. |
 | 액션 | `gate`(허가 + task 컨텍스트 반환), `claim`, `lease`(heartbeat), `finish`. `quiesce`/`cleanup_failed` → 400 `unsupported_for_session`. |
-| 기존 엔드포인트 | `/api/gate`, `/api/collaboration/worker`, `/api/runs/callback`은 변경 없음, 세션 헤더 무시(헤더만으로 401 — 테스트). |
+| 기존 엔드포인트 | `/api/gate`, `/api/collaboration/worker`, `/api/runs/callback`의 HMAC 검증은 변경 없음, 세션 헤더 무시(헤더만으로 401 — 테스트). #57: `/api/runs/callback`은 세션 run에 대해 **어떤 변경도 하기 전에** 409 `origin_mismatch`로 거부(heartbeat/activity·event id 미소비 → 세션 heartbeat timeout이 억제되지 않음). |
 
 ## 신뢰 경계 / 증거 구분 (중요)
 - 정적 헤더는 **bearer 자격증명**이지 서명이 아님: "그 에이전트 환경에서 나간 요청"만 증명. 본문 무결성은 TLS, 응답은 서명 없음(세션이 검증 키를 가질 수 없음).
 - record에 `runOrigin: "session"` 기록. 세션 run은 세션 채널만 lease/finish 가능, HMAC runner는 lease/finish/quiesce 불가(`origin_mismatch`) — 반대도 동일.
 - 세션 `finish` 결과는 `execution.attestation: "external_session_self_report"`로 저장, `cleanup` 필드 **없음**(보내면 `invalid_result`). 테스트 결과/요약은 **자기 보고(미검증)**. 서버가 검증하는 것은 GitHub PR HEAD = headSha, workBranch/base 일치, baseline ancestry(기존 로직)뿐.
-- **프로세스 정리 증명 없음**: 세션 run은 절대 `provablyQuiescent`가 되지 않는다. 따라서 세션 writer 이후 같은 workflow의 새 Claude writer claim / PM revise는 `prior_execution_not_quiesced`로 계속 차단(fence 우회 없음). Codex 리뷰 → PM approve 경로는 동작.
+- **프로세스 정리 증명 없음**: 세션 run은 절대 `provablyQuiescent`가 되지 않는다. 따라서 세션 writer 이후 새 Claude writer claim / PM revise는 `prior_execution_not_quiesced`로 계속 차단(fence 우회 없음). Codex 리뷰 → PM approve 경로는 동작.
+- #57 writer fence 범위: **workflow가 아니라 (repository, workBranch)** 기준(대소문자 무시), 모든 workflow·두 채널(runner/session) 공통. 다른 Issue/새 workflow로 같은 branch에 writer를 붙이는 것은 격리가 아니며 차단된다. 실제 정리 증명(runner cleanup/quiescence) 전까지 유지.
+- #57 읽기 API/UI 증거 표시: `/api/runs`·`/api/dashboard`의 각 run에 `trust {origin, receipt, execution, cleanup, verified}`(`src/lib/runs/run-trust.ts`). 세션 run은 `receipt: session_header`(수신만 인증), `execution: session_self_report_unverified`, `cleanup: unproven`, `verified: false`. 세션 claim은 `source: "session-self-report"`로 저장(`agent-callback` 아님). UI(진행 현황·실행 추적·제어/개요)는 "세션 수신만 인증 · 실행·테스트 결과는 세션 자기보고(미검증) · 정리 증명 없음"으로 표시, "agent 확인/검증됨"은 HMAC runner run에만. `trust`가 없거나 잘못된 응답은 미검증/근거 미상으로 표시. 어떤 경우에도 결과·테스트·중지를 독립 검증했다고 표시하지 않는다.
 
 ## 남은 차단 요소 / 소유자 결정
-1. **세션 writer 이후 revise 불가**: 외부 세션 종료를 증명할 provider 측 증거(세션 상태 API 등)가 이 저장소에서 확인되지 않음. 대안은 (a) 수동 종료 확인을 PM 증거로 인정하는 별도 정책(현재 거부 — 인정 = fence 완화), (b) revise 시 새 workBranch로 새 workflow 할당. 소유자 결정 필요.
+1. **세션 writer 이후 revise 불가**: 외부 세션 종료를 증명할 provider 측 증거(세션 상태 API 등)가 이 저장소에서 확인되지 않음. 대안은 (a) 수동 종료 확인을 PM 증거로 인정하는 별도 정책(현재 거부 — 인정 = fence 완화), (b) revise 시 **다른** workBranch로 새 workflow 할당(같은 branch의 새 workflow는 #57에서 차단; 다른 branch도 자동으로 안전하다고 보지 않음 — 이전 세션이 그 branch에 쓰지 않는다는 검증된 격리 없음). 소유자 결정 필요.
 2. 토큰 발급/주입: 소유자가 `openssl rand -base64 48` 등으로 에이전트별 토큰 생성 → 해당 Claude 환경 Network Secrets에 ORCH 호스트 + 헤더 `x-orch-session-token` 설정 → Vercel에 `SESSION_TOKEN_SHA256_*`(sha256 hex)만 설정. 토큰 평문은 어디에도 커밋/로그 금지.
 3. 프록시가 실제로 해당 헤더를 curl/fetch 요청에 주입하는지, 동일 호스트 다른 경로에도 주입되는지(무해하나 확인 권장)는 **미검증** — 라이브 스모크 승인 후 1회 확인.
 4. 루틴 프롬프트 변경(아래)은 소유자만 가능. 이 세션은 기존 루틴을 변경하지 않음.

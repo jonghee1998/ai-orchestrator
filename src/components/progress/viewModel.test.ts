@@ -12,13 +12,14 @@ test("bucket mapping never reports unACKed dispatch as running", () => {
   assert.equal(bucketOf("succeeded"), "completed");
   assert.equal(bucketOf("weird"), "unknown");
 });
+const HMAC = { origin: "runner", receipt: "hmac_signed", execution: "none", cleanup: "unproven", verified: true };
 test("missing data stays null/unverified, not invented", () => {
   const [c] = buildCards([run()], []);
   assert.equal(c.sha, null); assert.equal(c.branch, null); assert.equal(c.ack.verified, false); assert.deepEqual(c.links, []);
 });
 test("collaboration data yields branch/sha/links; only github urls accepted", () => {
   const sha = "a".repeat(40);
-  const [c] = buildCards([run({ status: "running", verified: true, latency: { ackMs: 4000 }, collaboration: { workflowId: "w", cycle: 1, step: "claude", repo: "o/r", baseBranch: "b", baseSha: sha, workBranch: "x", targetSha: sha, prNumber: 7 },
+  const [c] = buildCards([run({ status: "running", verified: true, trust: HMAC, latency: { ackMs: 4000 }, collaboration: { workflowId: "w", cycle: 1, step: "claude", repo: "o/r", baseBranch: "b", baseSha: sha, workBranch: "x", targetSha: sha, prNumber: 7 },
     evidence: [{ kind: "pr", url: "https://github.com/o/r/pull/7" }, { kind: "other", url: "javascript:alert(1)" }] })], []);
   assert.equal(c.branch, null, "planned workBranch is not review evidence"); assert.equal(c.sha, sha); assert.equal(c.ack.verified, true); assert.match(c.ack.text, /4s/);
   assert.equal(c.links.length, 3); assert.ok(c.links.every((l) => l.url.startsWith("https://github.com/")));
@@ -71,4 +72,30 @@ test("malformed/partial/null nested responses are rejected (loader error), never
   for (const b of [null, 1, {}, { ...wf(), assignment: null }, { ...wf(), latest: 3 }, { ...wf(), history: [null] }, { ...wf(), cycle: "1" }])
     assert.equal(parseWorkflows(200, { workflows: [b] }), null);
   assert.equal(parseWorkflows(200, [] as unknown), null);
+});
+
+// #57 (PR56 P2): evidence labels — SYNTHETIC rows (no live data).
+test("#57: session rows are never verified, even if a payload claims verified:true", () => {
+  const session = { origin: "session", receipt: "session_header", execution: "session_self_report_unverified", cleanup: "unproven", verified: false };
+  const ex = { exitCode: 0, summary: "done", headSha: SHA, tests: [{ command: "npm test", exitCode: 0 }] };
+  for (const trust of [session, { ...session, verified: true }, { ...session, receipt: "hmac_signed" }, { ...session, cleanup: "runner_attested" }]) {
+    const [c] = buildCards([run({ status: "succeeded", verified: true, trust, execution: ex })], []);
+    assert.equal(c.ack.verified, false, JSON.stringify(trust)); assert.match(c.ack.text, /자기보고/); assert.doesNotMatch(c.ack.text, /검증됨/);
+    assert.match(c.findings!, /^세션 자기보고\(미검증\)/); assert.match(c.findings!, /1\/1 통과 보고/);
+  }
+});
+test("#57: legacy payload without trust, malformed trust and HMAC runner rows", () => {
+  const [legacy] = buildCards([run({ status: "running", verified: true })], []);
+  assert.equal(legacy.ack.verified, false, "verified:true alone (no trust) is not enough"); assert.match(legacy.ack.text, /trust 정보 없음/);
+  for (const trust of [null, "x", [], { origin: "runner" }, { ...HMAC, receipt: "forged" }]) {
+    const [c] = buildCards([run({ status: "running", verified: true, trust })], []);
+    assert.equal(c.ack.verified, false, JSON.stringify(trust));
+  }
+  const [hmacFalse] = buildCards([run({ status: "running", verified: false, trust: HMAC })], []);
+  assert.equal(hmacFalse.ack.verified, false, "both flags must agree");
+  const [ok] = buildCards([run({ status: "succeeded", verified: true, trust: { ...HMAC, execution: "runner_reported", cleanup: "runner_attested" },
+    execution: { exitCode: 0, summary: "ok", headSha: SHA, tests: [{ command: "t", exitCode: 0 }] } })], []);
+  assert.equal(ok.ack.verified, true); assert.match(ok.ack.text, /runner 정리 증명/); assert.doesNotMatch(ok.findings!, /자기보고/);
+  const [unk] = buildCards([run({ status: "unknown", submission: "unknown" })], []);
+  assert.equal(unk.ack.verified, false); assert.match(unk.ack.text, /수신 미확인/);
 });

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
 import { ScopeNotice } from "@/components/ScopeNotice";
+import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Agent = {
   key: string; provider: string; enabled: boolean; effective: boolean; blockedReason: string | null; cancelSupported: boolean;
@@ -9,7 +10,7 @@ type Agent = {
   running: number; queued: number; held: number; orchestratorDispatches: number; suppressedByGate: number;
   providerUsage: { state: string; reason?: string };
 };
-type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; held: string | null; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[] };
+type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; held: string | null; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[] };
 type Schedule = { enabled: boolean; timezone: string; windows: { days: number[]; start: string; end: string }[] };
 type Snap = {
   mode: "live"; generatedAt: string; lastUpdate: string | null; presets: string[]; agents: Agent[]; runs: Run[]; errors: Run[]; handoffs: Run[];
@@ -143,7 +144,7 @@ function Body({ snap, token, saveToken, send, busy, msg, reload }: { snap: Snap;
         <div className="space-y-2">
           {snap.runs.slice(0, 15).map((r) => (
             <Card key={r.dispatchId}>
-              <p className="text-sm break-all">#{r.issueNumber} · {NAMES[r.agent] ?? r.agent} · <b>{r.held ? `보류(${r.held})` : r.status}</b>{r.status === "unknown" ? " (수신 미확인)" : r.verified ? " (agent 확인)" : ""}</p>
+              <p className="text-sm break-all">#{r.issueNumber} · {NAMES[r.agent] ?? r.agent} · <b>{r.held ? `보류(${r.held})` : r.status}</b>{` (${trustLabel(parseTrust(r.trust), r.status).text})`}</p>
               <p className="text-xs text-text-faint">{t(r.lastActivityAt)}{r.lastError ? ` · ${r.lastError}` : ""}</p>
               {r.evidence.map((e) => <a key={e.url} href={e.url} className="block break-all text-xs underline">{e.kind}: {e.url}</a>)}
               {!r.held && ["acknowledged", "running", "unknown"].includes(r.status) && <button disabled={busy} className="mt-1 text-xs underline" onClick={() => send({ action: "cancel", dispatchId: r.dispatchId })}>취소 요청 (미지원 시 drain)</button>}

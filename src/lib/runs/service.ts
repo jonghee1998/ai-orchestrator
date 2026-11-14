@@ -129,13 +129,18 @@ export async function recordSubmission(store: RunStore, dispatchId: string, outc
 
 export type CallbackResult =
   | { ok: true; duplicate: boolean; record?: DispatchRecord }
-  | { ok: false; reason: "unknown_dispatch" | "agent_mismatch" | "collaboration_callback_required" };
+  | { ok: false; reason: "unknown_dispatch" | "agent_mismatch" | "collaboration_callback_required" | "origin_mismatch" };
 
 /** Idempotent, atomic callback application. Replayed event IDs are no-ops. */
 export async function applyCallback(store: RunStore, eventId: string, dispatchId: string, agent: string, ev: RunEvent, now: string): Promise<CallbackResult> {
   return store.transact((d) => {
-    if (d.events[eventId]) return { ok: true as const, duplicate: true, record: d.records[dispatchId] };
     const r = d.records[dispatchId];
+    // #57 (PR56 P2): the legacy HMAC callback belongs to the runner. A session-origin run is driven ONLY by the session
+    // channel, so reject it before ANY state/heartbeat/activity mutation or event consumption (and before the replay
+    // short-circuit, which would otherwise echo the session record). Keeps its heartbeat timeout honest.
+    if (r && (r.runOrigin === "session" || r.source === "session-self-report"))
+      return { ok: false as const, reason: r.agent !== agent ? "agent_mismatch" as const : "origin_mismatch" as const };
+    if (d.events[eventId]) return { ok: true as const, duplicate: true, record: r };
     if (!r) return { ok: false as const, reason: "unknown_dispatch" as const };
     if (r.agent !== agent) return { ok: false as const, reason: "agent_mismatch" as const };
     if (r.collaboration && ev.type !== "heartbeat") return { ok: false as const, reason: "collaboration_callback_required" as const };

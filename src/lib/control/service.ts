@@ -3,6 +3,7 @@ import { gateEvidence } from "../runs/external-gate";
 // All mutations run in the shared serialized store transaction: concurrent toggles are linearized, every
 // change bumps `version` and appends an audit entry. Monitoring (snapshot) reads the store only and
 // NEVER imports or calls a provider adapter.
+import { runTrust } from "../runs/run-trust";
 import type { RunStore, StoreData } from "../runs/store";
 import { displayStatus, isTerminal } from "../runs/run-tracking";
 import {
@@ -120,9 +121,9 @@ export function buildSnapshot(d: StoreData, nowIso: string) {
       externalGate: gateEvidence(d.gateChecks?.[key], nowMs),
     };
   });
-  const runs = recs.map((r) => ({
+  const runs = recs.map((r) => ({ r, trust: runTrust(r) })).map(({ r, trust }) => ({
     dispatchId: r.dispatchId, issueNumber: r.issueNumber, agent: r.agent, attempt: r.attempt, status: displayStatus(r),
-    verified: r.source === "agent-callback", held: r.held ?? null, capability: r.capability ?? null,
+    verified: trust.verified, origin: trust.origin, trust, held: r.held ?? null, capability: r.capability ?? null,
     lastActivityAt: r.lastActivityAt ?? r.lastHeartbeatAt ?? r.dispatchedAt ?? r.requestedAt,
     lastError: r.lastError ?? null, evidence: r.evidence,
   })).sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt)).slice(0, 50);
