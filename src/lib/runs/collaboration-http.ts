@@ -27,7 +27,7 @@ export async function handleCollaboration(method: string, headers: Headers, raw:
     if (!b || typeof b !== "object") return reply(400, { error: "bad_request" });
     let w;
     if (b.action === "assign" && b.assignment?.repo === d.env.GITHUB_REPO) w = await assignCollaboration(d.store(), d.github, b.assignment as Assignment, at(d));
-    else if (b.action === "decide") w = await decideCollaboration(d.store(), d.github, b.workflowId, b.sha, b.decision, b.feedback, at(d));
+    else if (b.action === "decide") w = await decideCollaboration(d.store(), d.github, b.workflowId, b.sha, b.decision, b.feedback, at(d), b.acknowledgeUnknownExecution === true);
     else if (b.action === "refresh") w = await refreshCollaboration(d.store(), d.github, b.workflowId, at(d));
     else if (b.action === "submit" && typeof b.dispatchId === "string") {
       const r = (await d.store().read()).records[b.dispatchId];

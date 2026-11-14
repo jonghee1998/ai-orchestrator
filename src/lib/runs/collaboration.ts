@@ -15,8 +15,11 @@ export interface Assignment {
 export interface Collaboration {
   id: string; assignment: Assignment; cycle: number; stage: "claude" | "codex" | "pm" | "approved" | "blocked";
   dispatchId?: string; latest?: PullSnapshot; feedback: string; updatedAt: string;
+  /** Why the loop stopped. execution_unknown = a worker may have run; PM must acknowledge before any recovery. */
+  blockedReason?: BlockedReason;
   history: { at: string; action: string; dispatchId?: string; sha?: string; detail?: string }[];
 }
+export type BlockedReason = "execution_failed" | "not_executed" | "execution_unknown";
 export interface ExecutionResult {
   exitCode: number; headSha: string; summary: string; tests: { command: string; exitCode: number }[]; prNumber?: number;
 }
@@ -40,6 +43,28 @@ function note(w: Collaboration, at: string, action: string, detail?: string) {
   w.updatedAt = at;
   w.history.push({ at, action, detail, dispatchId: w.dispatchId, sha: w.latest?.headSha });
 }
+/** A step that ended without a structured result: labels may have been delivered or a worker may have claimed it. */
+function stepOutcome(r: DispatchRecord): BlockedReason {
+  return r.execution ? "execution_failed" : (!r.runId && r.submission === "rejected_not_accepted") ? "not_executed" : "execution_unknown";
+}
+/**
+ * #41 P2: called INSIDE the transaction that made a collaboration dispatch terminal outside finishCollaboration
+ * (adapter rejection, reconcile ACK/heartbeat timeout). Moves the workflow to a PM-recoverable blocked stage.
+ * Never queues or reruns anything by itself.
+ */
+export function blockTerminalStep(d: StoreData, r: DispatchRecord, at: string, reason: string) {
+  if (!r.collaboration || !isTerminal(r.status) || r.status === "succeeded") return;
+  const w = d.collaborations?.[r.collaboration.workflowId];
+  if (!w || w.dispatchId !== r.dispatchId || w.stage !== r.collaboration.step) return;
+  w.stage = "blocked"; w.blockedReason = stepOutcome(r);
+  note(w, at, "step_blocked", `${reason}: ${r.lastError ?? r.status}`);
+}
+/** Workflows persisted before #41 may be stuck in claude/codex with a terminal step; derive blocked for them. */
+function effectiveStage(d: StoreData, w: Collaboration): { stage: Collaboration["stage"]; reason?: BlockedReason } {
+  const r = w.dispatchId ? d.records[w.dispatchId] : undefined;
+  if ((w.stage === "claude" || w.stage === "codex") && r && isTerminal(r.status) && r.status !== "succeeded") return { stage: "blocked", reason: stepOutcome(r) };
+  return { stage: w.stage, reason: w.blockedReason };
+}
 /** Queue only. submitQueued performs the existing atomic OFF/schedule/provider gate before labels. */
 function queue(d: StoreData, w: Collaboration, step: "claude" | "codex", at: string) {
   const a = w.assignment;
@@ -52,7 +77,7 @@ function queue(d: StoreData, w: Collaboration, step: "claude" | "codex", at: str
       workBranch: a.workBranch, targetSha: w.latest?.headSha ?? a.baseSha, prNumber: w.latest?.number,
       instructions: `${a.instructions}\nPM feedback: ${w.feedback}` } };
   d.records[dispatchId] = rec;
-  w.stage = step; w.dispatchId = dispatchId;
+  w.stage = step; w.dispatchId = dispatchId; w.blockedReason = undefined;
   note(w, at, "queued");
 }
 export async function assignCollaboration(store: RunStore, github: CollaborationGitHub, a: Assignment, at: string) {
@@ -73,18 +98,25 @@ export async function assignCollaboration(store: RunStore, github: Collaboration
   });
 }
 
-/** Called only after per-agent HMAC verification AND gate v2. Atomic claim prevents multiple routine workers. */
+/**
+ * Called only after per-agent HMAC verification AND gate v2. Atomic claim prevents multiple routine workers.
+ * #41 P2: the label watcher may start a worker while the label POST response is still outstanding. That
+ * authorized-but-unacknowledged state (queued + submitAuthorizedAt, no outcome yet) is claimable in the same
+ * single transaction; recordSubmission later only annotates the claimed record and never re-runs or fails it.
+ */
 export async function claimCollaboration(store: RunStore, id: string, agent: string, runId: string, at: string) {
   return store.transact(d => {
     const r = d.records[id];
-    if (!r?.collaboration || r.agent !== agent || !r.submitAuthorizedAt || r.held || r.status !== "dispatched" || !["accepted", "unknown"].includes(r.submission ?? "")) conflict("not_claimable");
+    const pendingAck = r?.status === "queued" && r.submission === undefined;
+    const acked = r?.status === "dispatched" && ["accepted", "unknown"].includes(r.submission ?? "");
+    if (!r?.collaboration || r.agent !== agent || !r.submitAuthorizedAt || r.held || !(pendingAck || acked)) conflict("not_claimable");
     const w = workflow(d, r.collaboration.workflowId);
     if (w.dispatchId !== id || w.stage !== r.collaboration.step) conflict("stale_step");
     const gate = evaluateGate(d.control, agent, Date.parse(at));
     if (!gate.allowed) conflict(gate.reason);
     if (!/^[A-Za-z0-9._-]{8,128}$/.test(runId)) conflict("invalid_run_id");
     d.records[id] = { ...r, status: "running", runId, ackAt: at, startedAt: at, lastHeartbeatAt: at, source: "agent-callback" };
-    note(w, at, "claimed");
+    note(w, at, pendingAck ? "claimed_before_submission_ack" : "claimed");
     return structuredClone(d.records[id]);
   });
 }
@@ -120,22 +152,29 @@ export async function finishCollaboration(store: RunStore, github: Collaboration
       lastError: ok ? undefined : "execution or required tests failed", evidence: p ? [...r.evidence, { kind: "pr", url: p.url, at }] : r.evidence };
     if (p) w.latest = p;
     note(w, at, ok ? "completed" : "execution_failed", result.summary);
-    if (!ok) { w.stage = "blocked"; }
+    if (!ok) { w.stage = "blocked"; w.blockedReason = "execution_failed"; }
     else if (r.collaboration!.step === "claude") queue(d, w, "codex", at);
     else { w.stage = "pm"; note(w, at, "awaiting_pm"); }
     return structuredClone(w);
   });
 }
 /** GPT PM remains a subscription/manual handoff: no fabricated ChatGPT dispatch or paid API. */
-export async function decideCollaboration(store: RunStore, github: CollaborationGitHub, id: string, sha: string, decision: "approve" | "revise", feedback: string, at: string) {
+/**
+ * #41 P2: a blocked workflow (failed execution, rejected submission, ACK/heartbeat timeout) is recovered only by an
+ * explicit PM revise, which queues a NEW cycle; the old step is never re-run. If a worker may have executed
+ * (execution_unknown) the PM must also pass acknowledgeUnknownExecution after checking the branch/PR by hand.
+ */
+export async function decideCollaboration(store: RunStore, github: CollaborationGitHub, id: string, sha: string, decision: "approve" | "revise", feedback: string, at: string, acknowledgeUnknownExecution = false) {
   if (!validSha(sha) || !["approve", "revise"].includes(decision) || typeof feedback !== "string" || !feedback.trim() || feedback.length > 4000) conflict("invalid_decision");
-  const before = workflow(await store.read(), id);
-  if (!["pm", "blocked"].includes(before.stage) || (before.stage === "blocked" && decision !== "revise")) conflict("not_awaiting_pm");
+  const snap = await store.read();
+  const before = workflow(snap, id), eff = effectiveStage(snap, before);
+  if (!["pm", "blocked"].includes(eff.stage) || (eff.stage === "blocked" && decision !== "revise")) conflict("not_awaiting_pm");
+  if (eff.stage === "blocked" && eff.reason === "execution_unknown" && acknowledgeUnknownExecution !== true) conflict("unknown_execution_requires_ack");
   const p = await github.pull(before.assignment.repo, before.latest?.number ?? before.assignment.sourcePr);
   if (!await github.descendsFrom(before.assignment.repo, before.assignment.baseSha, p.headSha)) conflict("baseline_not_ancestor");
   return store.transact(d => {
-    const w = workflow(d, id);
-    if (w.stage !== before.stage || w.latest?.headSha !== before.latest?.headSha || w.dispatchId !== before.dispatchId) conflict("stale_decision");
+    const w = workflow(d, id), now = effectiveStage(d, w);
+    if (now.stage !== eff.stage || now.reason !== eff.reason || w.stage !== before.stage || w.latest?.headSha !== before.latest?.headSha || w.dispatchId !== before.dispatchId) conflict("stale_decision");
     if (!matches(w, p)) conflict("unrelated_pr");
     if (sha !== (w.latest?.headSha ?? w.assignment.baseSha)) conflict("stale_decision");
     if (p.headSha !== sha) {
@@ -144,6 +183,7 @@ export async function decideCollaboration(store: RunStore, github: Collaboration
       return structuredClone(w);
     }
     w.feedback = feedback;
+    if (now.stage === "blocked") note(w, at, "pm_recovered_blocked", `${now.reason}${acknowledgeUnknownExecution ? " (unknown execution acknowledged)" : ""}`);
     note(w, at, `pm_${decision}`, feedback);
     appendAudit(d, "pm", `collaboration_${decision}`, `${id} pr=#${p.number} sha=${sha}`, at);
     if (decision === "approve") { w.stage = "approved"; }

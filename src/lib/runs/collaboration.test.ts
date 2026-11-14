@@ -187,3 +187,90 @@ test("GitHub evidence reader rejects forks, does not trust arbitrary URLs, fails
   assert.equal(await compare.descendsFrom("o/r", A, B), true);
   assert.equal(await compare.descendsFrom("o/r", C, B), false);
 });
+// #41 / PR #38 P2 regressions: recovery after submission rejection/timeout, and claim before label ACK.
+test("P2: rejected label submission blocks the workflow; PM revise recovers it without resubmitting the old step", async () => {
+  const s = await setup(), old = s.w.dispatchId!;
+  const reject: DispatchAdapter = { supports: () => true, submit: async () => ({ outcome: "rejected_not_accepted", error: "http 422" }) };
+  assert.equal((await submitQueued(s.store, reject, old, NOW)).ok, false);
+  let d = await s.store.read();
+  assert.equal(d.records[old].status, "failed");
+  assert.equal(d.collaborations![s.w.id].stage, "blocked");
+  assert.equal(d.collaborations![s.w.id].blockedReason, "not_executed");
+  await assert.rejects(claimCollaboration(s.store, old, "codex", "run-00001", NOW), /not_claimable/);
+  const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Retry after fixing label permissions", NOW);
+  assert.equal(w.stage, "claude"); assert.equal(w.cycle, 2); assert.notEqual(w.dispatchId, old); assert.equal(w.blockedReason, undefined);
+  d = await s.store.read();
+  assert.equal(d.records[old].status, "failed"); // the old step is never re-run
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "again", NOW), /not_awaiting_pm/);
+});
+test("P2: reconcile timeout of an unknown execution blocks; PM must explicitly acknowledge before recovery", async () => {
+  const s = await setup(), id = s.w.dispatchId!;
+  const unknown: DispatchAdapter = { supports: () => true, submit: async () => ({ outcome: "unknown" }) };
+  await submitQueued(s.store, unknown, id, NOW);
+  const { reconcile } = await import("./service");
+  const later = new Date(MS + 6 * 60_000).toISOString();
+  assert.equal(await reconcile(s.store, later), 1);
+  let d = await s.store.read();
+  assert.equal(d.records[id].status, "timeout");
+  assert.equal(d.collaborations![s.w.id].stage, "blocked");
+  assert.equal(d.collaborations![s.w.id].blockedReason, "execution_unknown");
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "revise", "retry", later), /unknown_execution_requires_ack/);
+  await assert.rejects(decideCollaboration(s.store, s.github, s.w.id, A, "approve", "ok", later), /not_awaiting_pm/);
+  // A late claim/finish of the timed-out step cannot advance the workflow.
+  await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", later), /not_claimable/);
+  const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Checked: no worker ran", later, true);
+  assert.equal(w.stage, "claude");
+  d = await s.store.read();
+  assert.equal(d.records[id].status, "timeout");
+});
+test("P2: heartbeat timeout of a claimed run is unknown execution; late finish is refused after recovery", async () => {
+  const s = await setup(), id = s.w.dispatchId!;
+  await s.claim(id, "codex");
+  const { reconcile } = await import("./service");
+  const later = new Date(MS + 16 * 60_000).toISOString();
+  await reconcile(s.store, later);
+  assert.equal((await s.store.read()).collaborations![s.w.id].blockedReason, "execution_unknown");
+  await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover", later, true);
+  await assert.rejects(finishCollaboration(s.store, s.github, id, "codex", "run-00001", result(), later), /already_finished|stale_step/);
+  assert.equal((await s.store.read()).collaborations![s.w.id].stage, "claude");
+});
+test("P2: legacy stuck workflow (terminal step, stage not blocked) is still recoverable by PM", async () => {
+  const s = await setup(), id = s.w.dispatchId!;
+  await s.store.transact(d => { d.records[id] = { ...d.records[id], status: "failed", submission: "rejected_not_accepted", finishedAt: NOW }; });
+  const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover legacy", NOW);
+  assert.equal(w.stage, "claude");
+});
+test("P2: worker claim before label ACK is atomic; late adapter results never re-run or fail the claimed step", async () => {
+  for (const late of ["accepted", "unknown", "rejected_not_accepted"] as const) {
+    const s = await setup(), id = s.w.dispatchId!;
+    let release!: () => void; let calls = 0;
+    const slow: DispatchAdapter = { supports: () => true, submit: async () => { calls++; await new Promise<void>(r => { release = r; }); return { outcome: late }; } };
+    const pending = submitQueued(s.store, slow, id, NOW);
+    await new Promise(r => setImmediate(r));
+    assert.equal((await s.store.read()).records[id].status, "queued");
+    // Concurrent duplicate workers: exactly one claim wins while the ACK is still outstanding.
+    const claims = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => claimCollaboration(s.store, id, "codex", `run-0000${i}`, NOW)));
+    const won = claims.filter(c => c.status === "fulfilled") as PromiseFulfilledResult<{ runId?: string; status: string }>[];
+    assert.equal(won.length, 1); assert.equal(won[0].value.status, "running");
+    // Resubmission is refused while pending.
+    assert.equal((await submitQueued(s.store, slow, id, NOW)).ok, false);
+    release(); await pending;
+    const r = (await s.store.read()).records[id];
+    assert.equal(r.status, "running"); assert.equal(r.runId, won[0].value.runId); assert.equal(r.submission, late); assert.equal(calls, 1);
+    const w = await finishCollaboration(s.store, s.github, id, "codex", won[0].value.runId!, result(), NOW);
+    assert.equal(w.stage, "pm");
+  }
+});
+test("P2: claim before ACK still honours OFF gate, held state, stale step and unauthorized queue", async () => {
+  const s = await setup(), id = s.w.dispatchId!;
+  await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", NOW), /not_claimable/); // not yet authorized
+  let release!: () => void;
+  const slow: DispatchAdapter = { supports: () => true, submit: async () => { await new Promise<void>(r => { release = r; }); return { outcome: "accepted" }; } };
+  const pending = submitQueued(s.store, slow, id, NOW);
+  await new Promise(r => setImmediate(r));
+  await s.store.transact(d => { d.control.agents.codex = false; });
+  await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", NOW), /agent_disabled/);
+  await s.store.transact(d => { d.control.agents.codex = true; d.collaborations![s.w.id].dispatchId = "w-other"; });
+  await assert.rejects(claimCollaboration(s.store, id, "codex", "run-00001", NOW), /stale_step/);
+  release(); await pending;
+});

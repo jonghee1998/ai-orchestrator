@@ -4,6 +4,7 @@ import {
 import type { RunStore, StoreData } from "./store";
 import { AGENT_CAPS, evaluateGate, isAgentKey, routeTarget, type AgentKey, type Capability, type GateReason } from "../control/model";
 import { appendAudit } from "../control/service";
+import { blockTerminalStep } from "./collaboration";
 
 /** What a provider adapter reports about a submission attempt. */
 export type SubmitOutcome = "accepted" | "rejected_not_accepted" | "unknown";
@@ -105,6 +106,14 @@ export async function authorizeSubmission(store: RunStore, dispatchId: string, n
 export async function recordSubmission(store: RunStore, dispatchId: string, outcome: SubmitOutcome, now: string, error?: string): Promise<DispatchRecord | undefined> {
   return store.transact((d) => {
     const r = d.records[dispatchId];
+    if (r && r.collaboration && r.runId && r.submission === undefined && !isTerminal(r.status)) {
+      // #41 P2: a verified worker already claimed this step before the label ACK. The late outcome is recorded for
+      // display only; a claimed step is never failed or resubmitted from here (its result comes via finish).
+      const late: DispatchRecord = { ...r, submission: outcome, dispatchedAt: r.dispatchedAt ?? now,
+        lastError: outcome === "rejected_not_accepted" ? `late adapter rejection after verified worker claim: ${error ?? "rejected"}` : r.lastError };
+      d.records[dispatchId] = late;
+      return late;
+    }
     if (!r || r.status !== "queued") return r;
     let next: DispatchRecord;
     if (outcome === "rejected_not_accepted") {
@@ -113,6 +122,7 @@ export async function recordSubmission(store: RunStore, dispatchId: string, outc
       next = { ...applyEvent(r, { type: "dispatched", at: now }), submission: outcome };
     }
     d.records[dispatchId] = next;
+    blockTerminalStep(d, next, now, "submission_rejected");
     return next;
   });
 }
@@ -146,7 +156,7 @@ export async function reconcile(store: RunStore, now: string, t: Timeouts = DEFA
         // Crashed between persist and submit: outcome unknown, never auto-resubmit.
         next = { ...r, status: "timeout", submission: "unknown", finishedAt: now, lastError: "submission outcome unknown after restart" };
       }
-      if (next !== r) { d.records[id] = next; changed++; }
+      if (next !== r) { d.records[id] = next; changed++; blockTerminalStep(d, next, now, "reconcile_timeout"); }
     }
     return changed;
   });
