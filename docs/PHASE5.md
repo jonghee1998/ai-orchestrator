@@ -10,6 +10,7 @@
 
 ## 2. 구현
 - `runs/dispatcher.ts`: `dispatchIssue`/`submitQueued` = 게이트(요청) → `authorizeSubmission`(provider 호출 직전, 원자적) → 어댑터 → 결과 영구 기록. 멱등키=dispatchId, 전송 실패/타임아웃=`unknown`(자동 재시도 금지), 4xx=`rejected`(명시 재시도 가능). 에러 상세/토큰은 저장하지 않음.
+- 라벨 핸드오프(Issue #79): `claude-opus`→`agent:opus`, `claude-sonnet`→`agent:claude`, `codex`→`agent:codex`. 어댑터는 GET issue → 기존 `agent:*`/`status:*` 전부 제거 + 대상 agent + `status:ready`로 PUT(전체 교체) → 응답 라벨 검증. 무관 라벨 보존. 읽기 실패=쓰기 없음=`rejected`(재시도 가능), 쓰기 5xx/408/전송오류/응답 불일치=`unknown`. GET→PUT은 원자적이지 않으며 `X-Idempotency-Key`는 GitHub가 무시하는 추적용 헤더일 뿐 — 배타성은 store 게이트가 보장. `accepted`는 라벨 반영일 뿐 에이전트 실행 증거가 아님(Claude 루틴은 신규 issues.opened에서만 시작).
 - `runs/pg-store.ts` + `getRunStore`: `DATABASE_URL` → Postgres(`SELECT … FOR UPDATE` 단일 행 트랜잭션). 서버리스(VERCEL 등)에서는 파일 폴백 **금지**. 둘 다 없으면 fail-closed.
 - 인증: `GET /api/dashboard|runs|work-queue`는 `CONTROL_READ_TOKEN` 또는 `CONTROL_ADMIN_TOKEN`(미설정 503, 불일치 401). `POST /api/dispatch`, `/api/reconcile`, `/api/control`은 admin 토큰.
 - 재조정: `POST /api/reconcile`(외부 스케줄러가 주기 호출) — provider 호출/재제출 없음.

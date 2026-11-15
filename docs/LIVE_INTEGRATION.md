@@ -15,7 +15,7 @@
 - 이 세션에서 **실제 GitHub 라이브 프로브는 실행하지 않음**(배포 환경 변수 접근 불가, 테스트는 mock fetch).
 
 ## 3. 외부 트리거 소유권 감사 / 게이트
-- 코드 내 dispatch 경로는 하나: `GitHubLabelAdapter`(라벨 `agent:*`+`status:ready` 부착) — 이미 `authorizeSubmission` 게이트 통과 후에만 호출(강제됨).
+- 코드 내 dispatch 경로는 하나: `GitHubLabelAdapter`(기존 `agent:*`/`status:*`를 대상 agent+`status:ready`로 교체, 무관 라벨 보존) — 이미 `authorizeSubmission` 게이트 통과 후에만 호출(강제됨).
 - 외부 경로(예: 본 작업을 실행한 예약 루틴 — GitHub `issues.opened` webhook 트리거)는 **저장소 코드로 차단 불가**. 라벨/이슈 생성만으로 시작되며, 소유자의 루틴 설정(claude.ai/code/routines 등)에 있음. **외부 루틴이 통제된다고 주장하지 않음.**
 - **게이트 v2 (#34)** `POST /api/gate` — 루틴이 시작 시 먼저 호출하는 **에이전트·작업 바인딩 서명 게이트** (v1 GET은 405로 폐기):
   - 본문(서명 대상): `{"v":2,"agent":"claude-opus","issueNumber":34[,"dispatchId":"d-34-claude-opus-1"]}`

@@ -41,7 +41,7 @@ test("OFF race: toggle OFF between request and submit => held, zero provider cal
 
 test("lost ACK / timeout => unknown, not auto-retried; HTTP 4xx => rejected and retryable", async () => {
   const s = new MemoryRunStore(); await preset(s, "claude-only");
-  const bad = new GitHubLabelAdapter({ token: "t", repo: "o/r" }, (async () => { throw new Error("secret-token-xyz"); }) as typeof fetch);
+  const bad = new GitHubLabelAdapter({ token: "t", repo: "o/r" }, (async (_u: string, i: RequestInit) => { if (i.method === "GET") return Response.json({ state: "open", labels: [] }); throw new Error("secret-token-xyz"); }) as unknown as typeof fetch);
   const r = await dispatchIssue(s, bad, 4, "claude-sonnet", NOW);
   assert.equal(r.ok && r.record.submission, "unknown");
   assert.ok(!JSON.stringify(await s.read()).includes("secret-token-xyz"));
@@ -52,12 +52,16 @@ test("lost ACK / timeout => unknown, not auto-retried; HTTP 4xx => rejected and 
   assert.equal((await retryDispatchRecord(s2, 5, "claude-sonnet", NOW)).ok, true);
 });
 
-test("GitHub adapter request shape: labels, no token in body, codex label", async () => {
-  let seen: { url: string; init: RequestInit } | undefined;
-  const ad = new GitHubLabelAdapter({ token: "tok", repo: "o/r" }, (async (u: string, i: RequestInit) => { seen = { url: u, init: i }; return new Response("{}", { status: 200 }); }) as unknown as typeof fetch);
-  await ad.submit({ dispatchId: "d-9-codex-1", issueNumber: 9, agent: "codex" } as never, "d-9-codex-1");
-  assert.equal(seen!.url, "https://api.github.com/repos/o/r/issues/9/labels");
-  assert.deepEqual(JSON.parse(seen!.init.body as string), { labels: ["agent:codex", "status:ready"] });
+test("GitHub adapter request shape: GET then PUT replace, no token in body, codex label", async () => {
+  const seen: { url: string; init: RequestInit }[] = [];
+  const ad = new GitHubLabelAdapter({ token: "tok", repo: "o/r" }, (async (u: string, i: RequestInit) => {
+    seen.push({ url: u, init: i });
+    return i.method === "GET" ? Response.json({ state: "open", labels: [{ name: "agent:claude" }, { name: "status:review" }] }) : Response.json([{ name: "agent:codex" }, { name: "status:ready" }]);
+  }) as unknown as typeof fetch);
+  assert.equal((await ad.submit({ dispatchId: "d-9-codex-1", issueNumber: 9, agent: "codex" } as never, "d-9-codex-1")).outcome, "accepted");
+  assert.deepEqual(seen.map((c) => [c.init.method, c.url]), [["GET", "https://api.github.com/repos/o/r/issues/9"], ["PUT", "https://api.github.com/repos/o/r/issues/9/labels"]]);
+  assert.deepEqual(JSON.parse(seen[1].init.body as string), { labels: ["agent:codex", "status:ready"] });
+  assert.ok(!(seen[1].init.body as string).includes("tok"));
   assert.equal(ad.supports("gpt"), false);
 });
 
