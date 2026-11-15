@@ -46,14 +46,14 @@ function Issue({ i }: { i: IssueEvidence }) {
 }
 
 export default function EvidencePage() {
-  const { state, reload } = useAuthedJson<EvidenceReport>("/api/evidence", accept, 60_000);
+  const { state, reload, error } = useAuthedJson<EvidenceReport>("/api/evidence", accept, 60_000);
   const r = state.kind === "ok" ? state.data : null;
   const open = r?.issues.filter((i) => i.state === "open") ?? [];
   const closed = r?.issues.filter((i) => i.state === "closed").slice(0, 10) ?? [];
   return (
     <div className="space-y-3">
       <PageTitle title="GitHub 증거" subtitle="이슈·ACK·PR·리뷰·수정·다음 조치 — GitHub API 실측, 읽기 전용" />
-      <LiveStatus s={state} reload={reload} what="GitHub 증거" />
+      <LiveStatus s={state} reload={reload} what="GitHub 증거" error={error} />
       {r && <>
         <Card>
           <p className="text-sm">출처: GitHub <code>{r.repo}</code> · 생성 {when(r.generatedAt)}</p>

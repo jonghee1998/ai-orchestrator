@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
 import { ScopeNotice } from "@/components/ScopeNotice";
 import { sharedGet, useRegisterRefresh } from "@/components/live/refresh";
+import { createOverviewLoader, type OverviewView } from "@/lib/refresh/overview-loader";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason: string | null; lastAck: string | null; lastHeartbeat: string | null; lastStatus: string | null; externalGate?: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number }; running: number; queued: number; held: number };
@@ -11,7 +12,6 @@ type Run = { dispatchId: string; issueNumber: number; agent: string; status: str
 type Snap = { mode: "live"; generatedAt: string; agents: Agent[]; runs: Run[]; errors: Run[]; control: { preset: string }; audit: { at: string; actor: string; action: string; detail: string }[] };
 type GH = { state: "unconfigured" | "configured_unverified" | "live" | "error"; repo: string | null; tokenSource: string; openIssues: number | null };
 type Ready = { github?: GH; items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean; githubEvidence?: { ready: boolean; detail: string } };
-type St = { kind: "loading" } | { kind: "notoken" } | { kind: "unauth"; reason?: string } | { kind: "unconfigured" } | { kind: "error"; detail?: string } | { kind: "ok"; snap: Snap; ready: Ready | null };
 
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
 const t = (s: string | null) => (s ? s.replace("T", " ").slice(0, 19) + "Z" : "없음");
@@ -19,32 +19,21 @@ const DOT: Record<string, string> = { ok: "bg-green-500", missing: "bg-yellow-50
 
 export default function OverviewDashboard() {
   const [token, setToken] = useState("");
-  const [s, setS] = useState<St>({ kind: "loading" });
-  const seq = useRef(0);
+  const [view, setView] = useState<OverviewView<Snap, Ready>>({ state: { kind: "loading" }, ready: null, staleErr: null, readyError: null });
+  const tokenRef = useRef(""); tokenRef.current = token;
+  const loader = useRef<ReturnType<typeof createOverviewLoader<Snap, Ready>> | null>(null);
   useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* ignore */ } }, []);
-  const good = useRef(false);
-  const [staleErr, setStaleErr] = useState<string | null>(null);
-  // #81: 오류 시 마지막 정상 스냅샷 유지(staleErr 로 별도 표시). 성공 여부를 반환해 전역 새로고침이 집계한다.
-  const load = useCallback(async (): Promise<boolean> => {
-    if (!token.trim()) { seq.current++; good.current = false; setStaleErr(null); setS({ kind: "notoken" }); return false; }
-    const my = ++seq.current;
-    const keep = (next: St, detail: string) => { if (my !== seq.current) return false; if (good.current) setStaleErr(detail); else setS(next); return false; };
-    try {
-      const tk = token.trim();
-      const [r, rr] = await Promise.all([sharedGet("/api/dashboard", tk), sharedGet("/api/readiness", tk)]);
-      if (my !== seq.current) return false;
-      const j = (r.body ?? {}) as Record<string, any>;
-      if (r.status === 401) { good.current = false; setStaleErr(null); setS({ kind: "unauth", reason: j.reason }); return false; }
-      if (j.mode === "unconfigured" || r.status === 503) return keep({ kind: "unconfigured" }, "서버 설정 없음 (unconfigured)");
-      const okHttp = r.status >= 200 && r.status < 300;
-      if (!okHttp || j.mode !== "live") { const d = `HTTP ${r.status}${typeof j.category === "string" ? ` · 원인 분류: ${j.category}` : ""}`; return keep({ kind: "error", detail: d }, d); }
-      good.current = true; setStaleErr(null);
-      setS({ kind: "ok", snap: j as Snap, ready: rr.status >= 200 && rr.status < 300 ? (rr.body as Ready) : null });
-      return true;
-    } catch { return keep({ kind: "error", detail: "네트워크 오류 (서버에 도달하지 못함)" }, "네트워크 오류 (서버에 도달하지 못함)"); }
+  // #83: 대시보드와 readiness 를 독립 추적(readiness 실패가 대시보드 성공을 가리지 않음), 오류 시 마지막 정상 데이터 유지.
+  const load = useCallback(() => (loader.current ? loader.current.load() : Promise.resolve(false)), []);
+  useEffect(() => {
+    const l = createOverviewLoader<Snap, Ready>({ getToken: () => tokenRef.current, get: sharedGet, onChange: setView });
+    loader.current = l;
+    void l.load();
+    const id = setInterval(() => { void l.load(); }, 15000);
+    return () => { clearInterval(id); l.dispose(); loader.current = null; };
   }, [token]);
-  useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
   useRegisterRefresh("/api/dashboard+readiness", load);
+  const s = view.state, staleErr = view.staleErr;
   const save = (v: string) => { setToken(v); try { sessionStorage.setItem("ctl-token", v); } catch { /* ignore */ } };
 
   return (
@@ -85,12 +74,13 @@ export default function OverviewDashboard() {
             ))}
             <Link href="/activity" className="block text-xs text-accent">전체 활동 →</Link>
           </section>
-          <p className="text-xs text-text-faint" aria-label="GitHub 연결 상태">GitHub 큐: {!s.ready?.github ? "unknown (readiness 미수신)" : s.ready.github.state === "live" ? `live · ${s.ready.github.repo} (읽기 확인, 열린 이슈 ${s.ready.github.openIssues ?? "unknown"})` : s.ready.github.state === "unconfigured" ? "미설정 (unconfigured)" : "오류 — 연결 실패(unknown)"}</p>
-          {s.ready && (
+          {view.readyError && <p role="status" className="text-xs text-warn">readiness 갱신 실패 ({view.readyError}){view.ready ? " — 마지막 정상 readiness 를 표시 중입니다." : " — readiness 는 unknown 입니다."}</p>}
+          <p className="text-xs text-text-faint" aria-label="GitHub 연결 상태">GitHub 큐: {!view.ready?.github ? "unknown (readiness 미수신)" : view.ready.github.state === "live" ? `live · ${view.ready.github.repo} (읽기 확인, 열린 이슈 ${view.ready.github.openIssues ?? "unknown"})` : view.ready.github.state === "unconfigured" ? "미설정 (unconfigured)" : "오류 — 연결 실패(unknown)"}</p>
+          {view.ready && (
             <section aria-label="릴리스 준비도" className="space-y-2">
-              <h2 className="text-sm font-semibold text-text-muted">릴리스 준비도(런타임 포함) · {s.ready.releaseBlocked ? "차단됨" : "준비됨"}</h2>
-              <p className="text-xs" aria-label="GitHub 읽기 전용 준비도">GitHub 읽기 전용 증거 범위 · {!s.ready.githubEvidence ? "unknown" : s.ready.githubEvidence.ready ? "준비됨" : "미준비"}{s.ready.githubEvidence ? <span className="text-text-faint"> — {s.ready.githubEvidence.detail}</span> : null}</p>
-              <Card><ul className="space-y-2 text-xs">{s.ready.items.map((i) => (
+              <h2 className="text-sm font-semibold text-text-muted">릴리스 준비도(런타임 포함) · {view.ready.releaseBlocked ? "차단됨" : "준비됨"}</h2>
+              <p className="text-xs" aria-label="GitHub 읽기 전용 준비도">GitHub 읽기 전용 증거 범위 · {!view.ready.githubEvidence ? "unknown" : view.ready.githubEvidence.ready ? "준비됨" : "미준비"}{view.ready.githubEvidence ? <span className="text-text-faint"> — {view.ready.githubEvidence.detail}</span> : null}</p>
+              <Card><ul className="space-y-2 text-xs">{view.ready.items.map((i) => (
                 <li key={i.id} className="flex gap-2"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${DOT[i.state]}`} aria-label={i.state} /><span><b>{i.label}</b> — {i.detail}</span></li>
               ))}</ul></Card>
             </section>

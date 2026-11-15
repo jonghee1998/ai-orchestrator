@@ -10,7 +10,7 @@ type Audit = { at: string; actor: string; action: string; detail: string };
 const t = (s: string) => s.replace("T", " ").slice(0, 19) + "Z";
 
 export default function ActivityPage() {
-  const { state, reload } = useAuthedJson<Audit[]>("/api/dashboard", (st, b) => {
+  const { state, reload, error } = useAuthedJson<Audit[]>("/api/dashboard", (st, b) => {
     const j = b as { mode?: string; audit?: unknown } | null;
     if (j?.mode === "unconfigured") return "unconfigured";
     return st === 200 && j?.mode === "live" && Array.isArray(j.audit) ? (j.audit as Audit[]) : null;
@@ -24,7 +24,7 @@ export default function ActivityPage() {
       <p className="mb-2 text-[11px] text-text-faint">오케스트레이터 dispatch·콜백 실행만 표시합니다. 비어 있어도 GitHub 작업이 없다는 뜻이 아닙니다.</p>
       <RunsPanel />
       <h2 className="mb-2 mt-6 text-sm font-semibold text-text-muted">감사 로그 (최근 30건)</h2>
-      <LiveStatus s={state} reload={reload} what="감사 로그" />
+      <LiveStatus s={state} reload={reload} what="감사 로그" error={error} />
       {state.kind === "ok" && state.data.length === 0 && <p className="text-xs text-text-faint">내부 감사 로그 0건 (GitHub 활동은 위 별도 표시).</p>}
       {state.kind === "ok" && (
         <ol className="space-y-2">

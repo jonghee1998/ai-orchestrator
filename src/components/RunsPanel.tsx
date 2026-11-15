@@ -1,6 +1,7 @@
 "use client";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { Card } from "@/components/ui";
+import { StaleNotice } from "@/components/live/LiveStatus";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[];
@@ -8,7 +9,7 @@ type Run = { dispatchId: string; issueNumber: number; agent: string; status: str
   execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[] } | null };
 export default function RunsPanel() {
   // #81: 전역 새로고침·공유 GET·마지막 정상 데이터 유지를 위해 공용 로더 사용.
-  const { state } = useAuthedJson<Run[]>("/api/runs", (st, b) => {
+  const { state, error } = useAuthedJson<Run[]>("/api/runs", (st, b) => {
     const j = (b ?? {}) as { mode?: string; runs?: Run[] };
     if (j.mode === "unconfigured") return "unconfigured";
     return st >= 200 && st < 300 && Array.isArray(j.runs) ? j.runs : null;
@@ -20,6 +21,7 @@ export default function RunsPanel() {
       {s.kind === "loading" && <p className="text-xs text-text-faint">불러오는 중…</p>}
       {s.kind === "unconfigured" && <p className="text-xs text-text-faint">실행 저장소가 설정되지 않았습니다 (RUN_STORE_PATH).</p>}
       {s.kind === "error" && <p className="text-xs text-text-faint">실행 상태를 불러오지 못했습니다.</p>}
+      {s.kind === "ok" && <StaleNotice error={error} />}
       {s.kind === "ok" && s.runs.length === 0 && <p className="text-xs text-text-faint">기록된 실행이 없습니다.</p>}
       {s.kind === "ok" && s.runs.map((r) => { const t = parseTrust(r.trust), ev = trustLabel(t, r.status), self = t?.origin === "session"; return (
         <Card key={r.dispatchId}>

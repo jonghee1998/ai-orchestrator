@@ -11,7 +11,7 @@ const PHASES: { id: Phase; label: string }[] = [
 ];
 
 export default function ProjectsPage() {
-  const { state, reload } = useAuthedJson<QueueTask[]>("/api/work-queue", (_st, b) => {
+  const { state, reload, error } = useAuthedJson<QueueTask[]>("/api/work-queue", (_st, b) => {
     const r = parseResponse(b);
     if (!r) return null;
     if (r.mode === "unconfigured") return "unconfigured";
@@ -21,7 +21,7 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-3">
       <PageTitle title="프로젝트" subtitle="GitHub 작업 큐(GITHUB_REPO) 실제 이슈 기준 진행 상황" />
-      <LiveStatus s={state} reload={reload} what="프로젝트 작업" />
+      <LiveStatus s={state} reload={reload} what="프로젝트 작업" error={error} />
       {model && (
         <>
           <Card>
