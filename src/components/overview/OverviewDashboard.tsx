@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
 import { ScopeNotice } from "@/components/ScopeNotice";
+import { sharedGet, useRegisterRefresh } from "@/components/live/refresh";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason: string | null; lastAck: string | null; lastHeartbeat: string | null; lastStatus: string | null; externalGate?: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number }; running: number; queued: number; held: number };
@@ -21,21 +22,29 @@ export default function OverviewDashboard() {
   const [s, setS] = useState<St>({ kind: "loading" });
   const seq = useRef(0);
   useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* ignore */ } }, []);
-  const load = useCallback(async () => {
-    if (!token.trim()) { seq.current++; setS({ kind: "notoken" }); return; }
+  const good = useRef(false);
+  const [staleErr, setStaleErr] = useState<string | null>(null);
+  // #81: 오류 시 마지막 정상 스냅샷 유지(staleErr 로 별도 표시). 성공 여부를 반환해 전역 새로고침이 집계한다.
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!token.trim()) { seq.current++; good.current = false; setStaleErr(null); setS({ kind: "notoken" }); return false; }
     const my = ++seq.current;
+    const keep = (next: St, detail: string) => { if (my !== seq.current) return false; if (good.current) setStaleErr(detail); else setS(next); return false; };
     try {
-      const h = { "x-admin-token": token.trim() };
-      const [r, rr] = await Promise.all([fetch("/api/dashboard", { cache: "no-store", headers: h }), fetch("/api/readiness", { cache: "no-store", headers: h })]);
-      if (my !== seq.current) return;
-      if (r.status === 401) { const e = await r.json().catch(() => ({})); if (my !== seq.current) return; return setS({ kind: "unauth", reason: e.reason }); }
-      const j = await r.json().catch(() => ({}));
-      if (j.mode === "unconfigured" || r.status === 503) return setS({ kind: "unconfigured" });
-      if (!r.ok || j.mode !== "live") return setS({ kind: "error", detail: `HTTP ${r.status}${typeof j.category === "string" ? ` · 원인 분류: ${j.category}` : ""}` });
-      setS({ kind: "ok", snap: j, ready: rr.ok ? await rr.json() : null });
-    } catch { if (my === seq.current) setS({ kind: "error", detail: "네트워크 오류 (서버에 도달하지 못함)" }); }
+      const tk = token.trim();
+      const [r, rr] = await Promise.all([sharedGet("/api/dashboard", tk), sharedGet("/api/readiness", tk)]);
+      if (my !== seq.current) return false;
+      const j = (r.body ?? {}) as Record<string, any>;
+      if (r.status === 401) { good.current = false; setStaleErr(null); setS({ kind: "unauth", reason: j.reason }); return false; }
+      if (j.mode === "unconfigured" || r.status === 503) return keep({ kind: "unconfigured" }, "서버 설정 없음 (unconfigured)");
+      const okHttp = r.status >= 200 && r.status < 300;
+      if (!okHttp || j.mode !== "live") { const d = `HTTP ${r.status}${typeof j.category === "string" ? ` · 원인 분류: ${j.category}` : ""}`; return keep({ kind: "error", detail: d }, d); }
+      good.current = true; setStaleErr(null);
+      setS({ kind: "ok", snap: j as Snap, ready: rr.status >= 200 && rr.status < 300 ? (rr.body as Ready) : null });
+      return true;
+    } catch { return keep({ kind: "error", detail: "네트워크 오류 (서버에 도달하지 못함)" }, "네트워크 오류 (서버에 도달하지 못함)"); }
   }, [token]);
   useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
+  useRegisterRefresh("/api/dashboard+readiness", load);
   const save = (v: string) => { setToken(v); try { sessionStorage.setItem("ctl-token", v); } catch { /* ignore */ } };
 
   return (
@@ -53,6 +62,7 @@ export default function OverviewDashboard() {
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p>{s.detail && <p className="mt-1 text-xs text-text-faint">{s.detail}</p>}<button className="mt-2 min-h-11 rounded-lg border border-border px-3 text-xs" onClick={load}>다시 시도</button></Card>}
       {s.kind === "ok" && (
         <>
+          {staleErr && <p role="status" className="text-xs text-warn">최신 갱신 실패 ({staleErr}) — 아래는 마지막 정상 데이터입니다.</p>}
           <p className="text-xs text-text-faint">갱신 {t(s.snap.generatedAt)} · 프리셋 {s.snap.control.preset} · 오류 {s.snap.errors.length}건</p>
           <section aria-label="에이전트 상태" className="space-y-2">
             <div className="flex items-center justify-between"><h2 className="text-sm font-semibold text-text-muted">에이전트</h2><Link href="/control" className="text-xs text-accent">제어 →</Link></div>

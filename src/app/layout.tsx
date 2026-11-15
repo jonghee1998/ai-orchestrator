@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { BottomNav } from "@/components/BottomNav";
+import { GlobalRefresh } from "@/components/GlobalRefresh";
 
 export const metadata: Metadata = {
   title: "AI Orchestrator",
@@ -23,6 +24,7 @@ export default function RootLayout({
     <html lang="ko">
       <body>
         <div className="mx-auto flex min-h-dvh max-w-app flex-col">
+          <GlobalRefresh />
           <main className="flex-1 px-4 pb-24 pt-4">{children}</main>
           <BottomNav />
         </div>

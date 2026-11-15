@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
 import { ScopeNotice } from "@/components/ScopeNotice";
+import { sharedGet, useRegisterRefresh } from "@/components/live/refresh";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Agent = {
@@ -32,17 +33,26 @@ export default function ControlDashboard() {
 
   useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* storage unavailable */ } }, []);
 
-  const load = useCallback(async () => {
-    if (!token.trim()) { seq.current++; setS({ kind: "error" }); return; }
+  const good = useRef(false);
+  const [staleErr, setStaleErr] = useState(false);
+  // #81: 실패 시 마지막 정상 상태 유지, 성공 여부 반환.
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!token.trim()) { seq.current++; good.current = false; setStaleErr(false); setS({ kind: "error" }); return false; }
     const my = ++seq.current; // stale-response guard
+    const keep = (next: State) => { if (my !== seq.current) return false; if (good.current) setStaleErr(true); else setS(next); return false; };
     try {
-      const r = await fetch("/api/dashboard", { cache: "no-store", headers: { "x-admin-token": token.trim() } });
-      const j = await r.json();
-      if (my !== seq.current) return;
-      setS(j.mode === "unconfigured" ? { kind: "unconfigured" } : r.ok && j.mode === "live" ? { kind: "ok", snap: j } : { kind: "error" });
-    } catch { if (my === seq.current) setS({ kind: "error" }); }
+      const r = await sharedGet("/api/dashboard", token.trim());
+      if (my !== seq.current) return false;
+      const j = (r.body ?? {}) as Record<string, any>;
+      if (j.mode === "unconfigured") return keep({ kind: "unconfigured" });
+      if (r.status >= 200 && r.status < 300 && j.mode === "live") { good.current = true; setStaleErr(false); setS({ kind: "ok", snap: j as Snap }); return true; }
+      if (r.status === 401) { good.current = false; setStaleErr(false); setS({ kind: "error" }); return false; }
+      return keep({ kind: "error" });
+    } catch { return keep({ kind: "error" }); }
   }, [token]);
   useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
+
+  useRegisterRefresh("/api/dashboard", load);
 
   async function send(body: Record<string, unknown>) {
     setBusy(true); setMsg(null);
@@ -62,6 +72,7 @@ export default function ControlDashboard() {
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">실행 저장소가 설정되지 않았습니다 (RUN_STORE_PATH). 연결되지 않은 상태이며 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p><button className="mt-2 rounded-lg border border-border px-3 py-2 text-xs" onClick={load}>다시 시도</button></Card>}
+      {s.kind === "ok" && staleErr && <p role="status" className="mb-2 text-xs text-warn">최신 갱신 실패 — 마지막 정상 데이터를 표시 중입니다.</p>}
       {s.kind === "ok" && <Body snap={s.snap} token={token} saveToken={saveToken} send={send} busy={busy} msg={msg} reload={load} />}
     </div>
   );

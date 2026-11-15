@@ -1,23 +1,19 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { Card } from "@/components/ui";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
 
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[];
   collaboration?: { baseBranch: string; baseSha: string; targetSha: string; step: string; cycle: number } | null;
   execution?: { exitCode: number; summary: string; headSha: string; tests: { command: string; exitCode: number }[] } | null };
-type State = { kind: "loading" } | { kind: "unconfigured" } | { kind: "error" } | { kind: "ok"; runs: Run[] };
-
 export default function RunsPanel() {
-  const [s, setS] = useState<State>({ kind: "loading" });
-  useEffect(() => {
-    let live = true;
-    fetch("/api/runs", { cache: "no-store", headers: { "x-admin-token": (() => { try { return sessionStorage.getItem("ctl-token") ?? ""; } catch { return ""; } })() } })
-      .then((r) => r.json().then((j) => ({ r, j })))
-      .then(({ r, j }) => { if (live) setS(j.mode === "unconfigured" ? { kind: "unconfigured" } : r.ok ? { kind: "ok", runs: j.runs } : { kind: "error" }); })
-      .catch(() => live && setS({ kind: "error" }));
-    return () => { live = false; };
-  }, []);
+  // #81: 전역 새로고침·공유 GET·마지막 정상 데이터 유지를 위해 공용 로더 사용.
+  const { state } = useAuthedJson<Run[]>("/api/runs", (st, b) => {
+    const j = (b ?? {}) as { mode?: string; runs?: Run[] };
+    if (j.mode === "unconfigured") return "unconfigured";
+    return st >= 200 && st < 300 && Array.isArray(j.runs) ? j.runs : null;
+  });
+  const s = state.kind === "ok" ? { kind: "ok" as const, runs: state.data } : state.kind === "unconfigured" ? { kind: "unconfigured" as const } : state.kind === "loading" ? { kind: "loading" as const } : { kind: "error" as const };
   return (
     <section className="mb-4" aria-label="실행 추적">
       <h2 className="mb-2 text-sm font-semibold">실행 추적</h2>

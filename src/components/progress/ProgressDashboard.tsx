@@ -1,6 +1,7 @@
 "use client";
 import { Card } from "@/components/ui";
 import { LiveStatus } from "@/components/live/LiveStatus";
+import { refreshCenter } from "@/components/live/refresh";
 import { useAuthedJson, type Live } from "@/components/live/useAuthedJson";
 import { GitHubProgressPanel, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
 import { BUCKET_LABEL, buildCards, parseRuns, parseWorkflows, summarize, type Bucket, type RunRow, type WorkflowRow } from "./viewModel";
@@ -14,9 +15,9 @@ export function ProgressDashboard() {
   const runs = useAuthedJson("/api/runs", parseRuns, POLL_MS);
   const wfs = useAuthedJson("/api/collaboration", parseWorkflows, POLL_MS);
   const gh = useGitHubEvidence();
-  const reload = () => { runs.reload(); wfs.reload(); gh.reload(); };
+  const reload = () => { void refreshCenter.refreshAll(); };
   const note = <p className="mb-3 text-xs text-text-faint">자동 갱신: {POLL_MS / 1000}초 폴링 (실시간 푸시 아님) · 내부 런타임: /api/runs, /api/collaboration · GitHub 증거: /api/evidence (별도 표시, 서로 합산하지 않음) · API가 제공하지 않는 값은 “unknown”으로 표시</p>;
-  const head = <div className="mb-2 flex items-center justify-between">{note}<button className="min-h-11 shrink-0 rounded-lg border border-border px-3 text-xs" onClick={reload}>새로고침</button></div>;
+  const head = <div className="mb-2">{note}</div>;
   return (
     <div className="space-y-6">
       {head}
