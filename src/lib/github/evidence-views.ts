@@ -160,7 +160,9 @@ export function githubTaskSplit(r: EvidenceReport): TaskSplit {
   for (const i of r.issues) {
     const stage = stageOf(i);
     const merged = i.pulls.filter((p) => p.state === "merged").sort((a, b) => b.number - a.number)[0];
-    const reviewedExact = i.pulls.some((p) => p.decision?.kind === "approve" && p.decision.headMatch === "exact");
+    // Bound to the SAME primary PR as nextAction — an older approved PR must not light the indicator for a newer open one.
+    const pp = primaryPull(i);
+    const reviewedExact = pp?.decision?.kind === "approve" && pp.decision.headMatch === "exact";
     const row: TaskSplitRow = { number: i.number, title: i.title, url: i.url, agent: i.agent, statusLabel: i.status, stage, closurePending: i.state === "open" && stage === "done", reviewedExact, mergedPr: merged?.number ?? null };
     (i.state === "open" ? remaining : history).push(row);
   }

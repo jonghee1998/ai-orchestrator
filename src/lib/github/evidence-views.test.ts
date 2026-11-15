@@ -129,3 +129,26 @@ test("#69: task split keeps open+merged-PR as remaining/closure-pending; closed 
   assert.equal(t8.closurePending, true); assert.equal(t8.mergedPr, 11); assert.equal(t8.statusLabel, "done");
   assert.equal(s.remaining.find((x) => x.number === 10)!.closurePending, false);
 });
+
+test("#71: approval indicator is bound to the primary PR, not any historical PR (exact SHA)", async () => {
+  const { githubTaskSplit } = await import("./evidence-views");
+  const SHA2 = "1111111111111111111111111111111111111111";
+  const commits = (sha: string) => [{ sha, commit: { committer: { date: "2026-01-01T01:00:00Z" } } }];
+  const approved = (sha: string) => [{ id: 1, state: "APPROVED", submitted_at: "2026-01-01T02:00:00Z", commit_id: sha, user: { login: "pm" } }];
+  const changes = [{ id: 2, state: "CHANGES_REQUESTED", submitted_at: "2026-01-01T02:00:00Z", commit_id: SHA2, user: { login: "pm" } }];
+  const mk = (newer: Array<{ id: number; state: string; submitted_at: string; commit_id: string; user: { login: string } }>) => build(
+    [issue(20, ["agent:claude", "status:review"])],
+    [pull(21, "old — Refs #20", null, { state: "closed" }), pull(22, "new — Refs #20", null, { head: { ref: "claude/y", sha: SHA2 } })],
+    [], new Map([
+      [21, { reviews: approved(SHA), commits: commits(SHA), commitsTruncated: false }],
+      [22, { reviews: newer, commits: commits(SHA2), commitsTruncated: false }],
+    ]));
+  // Older approved PR + newer open PR unreviewed -> no approval indicator.
+  assert.equal(githubTaskSplit(mk([])).remaining[0].reviewedExact, false);
+  // Newer open PR with changes requested -> no approval indicator.
+  assert.equal(githubTaskSplit(mk(changes)).remaining[0].reviewedExact, false);
+  // Newer open PR approved on its exact head -> indicator on.
+  assert.equal(githubTaskSplit(mk(approved(SHA2))).remaining[0].reviewedExact, true);
+  // Newer open PR approved on a stale SHA -> off.
+  assert.equal(githubTaskSplit(mk(approved(SHA))).remaining[0].reviewedExact, false);
+});
