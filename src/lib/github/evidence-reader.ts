@@ -72,6 +72,6 @@ export async function readGitHubEvidence(
 
   return buildEvidence({
     repo, generatedAt: now().toISOString(), issues: issues.items, pulls: pulls.items, comments: comments.items,
-    pullDetail, commentsTruncated: comments.truncated, pullsTruncated: pulls.truncated || issues.truncated,
+    pullDetail, commentsTruncated: comments.truncated, pullsTruncated: pulls.truncated, issuesTruncated: issues.truncated,
   });
 }

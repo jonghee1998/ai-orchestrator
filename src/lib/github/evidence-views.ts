@@ -30,6 +30,8 @@ export interface GitHubIssueRow {
   ack: CommentEvidence | null; completion: CommentEvidence | null;
   pull: { number: number; url: string; state: PullEvidence["state"]; headSha: string; review: string } | null;
   nextAction: string; actor: string;
+  /** #67: GitHub issue state. An open issue can be in stage "done" (PR merged, closure pending) — list by THIS. */
+  issueState: "open" | "closed";
 }
 function reviewText(p: PullEvidence): string {
   if (p.detail === "skipped") return "리뷰 상세 미조회(unknown)";
@@ -40,9 +42,29 @@ function reviewText(p: PullEvidence): string {
   return p.reviews.length ? `리뷰 ${p.reviews.length}건(판정 없음)` : "리뷰 없음";
 }
 export interface GitHubProgress {
-  repo: string; generatedAt: string; total: number; open: number;
+  repo: string; generatedAt: string;
+  /** Within the read bounds; a lower bound when `coverage.issuesTruncated`. */
+  total: number; open: number;
   stages: Record<GitHubStage, number>; rows: GitHubIssueRow[];
 }
+/** #67: what the bounded reader could NOT see. Callers must disclose it and qualify counts / "none found" claims:
+ *  issues truncated → issue totals are lower bounds; comments truncated → only the newest comments were read, so a
+ *  missing ACK/completion may just be older than the window and ACK'd counts are lower bounds (un-ACK'd upper). */
+export interface EvidenceCoverage { issuesTruncated: boolean; pullsTruncated: boolean; commentsTruncated: boolean; partial: boolean; notes: string[] }
+export function evidenceCoverage(r: Pick<EvidenceReport, "limits">): EvidenceCoverage {
+  const l = r.limits;
+  const issuesTruncated = l.issuesTruncated === true, pullsTruncated = l.pullsTruncated === true, commentsTruncated = l.commentsTruncated === true;
+  const notes: string[] = [];
+  if (issuesTruncated) notes.push(`이슈 목록 상한 도달(최근 갱신 ${l.issues}개까지) — 오래된 이슈 누락, 이슈 수는 최소값`);
+  if (pullsTruncated) notes.push(`PR 목록 상한 도달(${l.pulls}개) — 오래된 PR 연결 누락 가능`);
+  if (commentsTruncated) notes.push(`코멘트 상한 도달(최근 ${l.comments}건만) — 이전 ACK/완료보고는 보이지 않을 수 있음`);
+  return { issuesTruncated, pullsTruncated, commentsTruncated, partial: notes.length > 0, notes };
+}
+/** "None found" wording that does not overclaim when the source was truncated. */
+export const absence = (what: string, truncated: boolean) => (truncated ? `${what} 조회 범위 내 없음(코멘트 잘림 — 이전 기록 있을 수 있음)` : `${what} 없음`);
+/** Count wording: lower bound ("≥n") when the source was truncated. */
+export const atLeast = (n: number, truncated: boolean) => (truncated ? `≥${n}` : String(n));
+
 export function githubProgress(r: EvidenceReport): GitHubProgress {
   const stages = Object.fromEntries(Object.keys(GITHUB_STAGE_LABEL).map((k) => [k, 0])) as Record<GitHubStage, number>;
   const rows = r.issues.map((i): GitHubIssueRow => {
@@ -52,7 +74,7 @@ export function githubProgress(r: EvidenceReport): GitHubProgress {
       number: i.number, title: i.title, url: i.url, agent: i.agent, statusLabel: i.status, stage,
       ack: last(i.acks) ?? null, completion: last(i.completions) ?? null,
       pull: p ? { number: p.number, url: p.url, state: p.state, headSha: p.headSha, review: reviewText(p) } : null,
-      nextAction: i.nextAction.label, actor: i.nextAction.actor,
+      nextAction: i.nextAction.label, actor: i.nextAction.actor, issueState: i.state,
     };
   });
   return { repo: r.repo, generatedAt: r.generatedAt, total: rows.length, open: r.issues.filter((i) => i.state === "open").length, stages, rows };

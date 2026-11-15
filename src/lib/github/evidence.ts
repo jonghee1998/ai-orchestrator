@@ -59,7 +59,9 @@ export interface EvidenceReport {
   /** Session/runtime callbacks are intentionally not consulted here (Issue #59 deferred). */
   runtimeProof: "not_included";
   identityNote: string;
-  limits: { issues: number; pulls: number; comments: number; commentsTruncated: boolean; pullsTruncated: boolean; detailedPulls: number };
+  limits: { issues: number; pulls: number; comments: number; commentsTruncated: boolean; pullsTruncated: boolean; detailedPulls: number;
+    /** #67: the issue listing hit its page bound — older issues are omitted from every count. */
+    issuesTruncated: boolean };
   issues: IssueEvidence[];
 }
 
@@ -218,7 +220,7 @@ export interface EvidenceInput {
   repo: string; generatedAt: string;
   issues: RawIssue[]; pulls: RawPull[]; comments: RawComment[];
   pullDetail: Map<number, { reviews: RawReview[]; commits: RawCommit[]; commitsTruncated: boolean }>;
-  commentsTruncated: boolean; pullsTruncated: boolean;
+  commentsTruncated: boolean; pullsTruncated: boolean; issuesTruncated?: boolean;
 }
 /** Which PRs each non-PR issue is linked to (deterministic, numeric order). */
 export function linkPulls(issues: RawIssue[], pulls: RawPull[], comments: RawComment[]): Map<number, Map<number, Set<PullEvidence["linkedBy"][number]>>> {
@@ -284,6 +286,7 @@ export function buildEvidence(input: EvidenceInput): EvidenceReport {
     limits: {
       issues: issues.length, pulls: input.pulls.length, comments: input.comments.length,
       commentsTruncated: input.commentsTruncated, pullsTruncated: input.pullsTruncated, detailedPulls: input.pullDetail.size,
+      issuesTruncated: input.issuesTruncated ?? false,
     },
     issues,
   };

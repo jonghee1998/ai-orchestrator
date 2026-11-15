@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildEvidence, commentPullRefs, type RawComment, type RawIssue, type RawPull } from "./evidence";
-import { githubActivity, githubAgents, githubProgress, parseEvidenceResponse, stageOf } from "./evidence-views";
+import { absence, atLeast, evidenceCoverage, githubActivity, githubAgents, githubProgress, parseEvidenceResponse, stageOf } from "./evidence-views";
+import { readGitHubEvidence } from "./evidence-reader";
 
 const R = "o/r", SHA = "05b409b0ca4fa36f4c9400104aec916f1d991f2f";
 const issue = (n: number, labels: string[], state = "open", body: string | null = null, title = `Issue ${n}`): RawIssue =>
@@ -69,4 +70,41 @@ test("#65: stage mapping covers every next-action code; parse rejects non-live b
   assert.equal(parseEvidenceResponse(200, { mode: "unconfigured" }), "unconfigured");
   assert.equal(parseEvidenceResponse(502, { mode: "error", error: "x" }), null);
   assert.equal(parseEvidenceResponse(200, { mode: "live", report: { source: "runtime", issues: [] } }), null);
+});
+
+test("#67: open issue whose PR merged stays in the open list (stage done, closure pending)", () => {
+  const r = build([issue(8, ["agent:opus", "status:review"]), issue(9, ["agent:opus", "status:done"], "closed")],
+    [pull(10, "fix — Refs #8", null, { state: "closed", merged_at: "2026-01-01T03:00:00Z" } as Partial<RawPull>)], []);
+  const g = githubProgress(r);
+  const row = g.rows.find((x) => x.number === 8)!;
+  assert.equal(r.issues.find((i) => i.number === 8)!.nextAction.code, "pr_merged");
+  assert.equal(row.stage, "done"); assert.equal(row.issueState, "open");
+  const openList = g.rows.filter((x) => x.issueState === "open");
+  assert.deepEqual(openList.map((x) => x.number), [8], "panel list uses issue state, so the pending closure is visible");
+  assert.equal(g.open, openList.length, "summary open count matches the listed rows");
+  assert.equal(g.rows.find((x) => x.number === 9)!.issueState, "closed");
+});
+
+test("#67: truncation is disclosed and qualifies counts / absence claims", () => {
+  const full = build([issue(1, ["agent:opus", "status:ready"])], [], []);
+  assert.deepEqual(evidenceCoverage(full), { issuesTruncated: false, pullsTruncated: false, commentsTruncated: false, partial: false, notes: [] });
+  assert.equal(absence("ACK 코멘트", false), "ACK 코멘트 없음"); assert.equal(atLeast(3, false), "3");
+  const cut = buildEvidence({ repo: R, generatedAt: "2026-01-02T00:00:00Z", issues: [issue(1, ["agent:opus", "status:ready"])], pulls: [], comments: [], pullDetail: new Map(), commentsTruncated: true, pullsTruncated: true, issuesTruncated: true });
+  const c = evidenceCoverage(cut);
+  assert.ok(c.partial && c.issuesTruncated && c.pullsTruncated && c.commentsTruncated); assert.equal(c.notes.length, 3);
+  assert.match(absence("ACK 코멘트", true), /조회 범위 내/); assert.equal(atLeast(3, true), "≥3");
+  // Legacy reports without issuesTruncated are treated as not truncated (never undefined → truthy).
+  assert.equal(evidenceCoverage({ limits: { ...full.limits, issuesTruncated: undefined as unknown as boolean } }).issuesTruncated, false);
+});
+
+test("#67: reader reports issue truncation separately from PR truncation", async () => {
+  const page = (n: number, base: number) => Array.from({ length: n }, (_, k) => issue(base + k, ["agent:opus", "status:ready"]));
+  const req = (async (u: unknown) => {
+    const url = new URL(String(u)); const p = Number(url.searchParams.get("page") ?? "1");
+    if (url.pathname.endsWith("/issues")) return Response.json(page(100, p * 1000));
+    return Response.json([]);
+  }) as typeof fetch;
+  const r = await readGitHubEvidence({ GITHUB_READ_TOKEN: "t", GITHUB_REPO: R }, req, () => new Date("2026-01-02T00:00:00Z"));
+  assert.equal(r.limits.issuesTruncated, true); assert.equal(r.limits.pullsTruncated, false); assert.equal(r.limits.commentsTruncated, false);
+  assert.equal(r.limits.issues, 300);
 });

@@ -17,7 +17,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     try { await getRunStore().read(); if (db) { db.state = "ok"; db.detail = "설정됨 · 연결/읽기 확인됨"; } }
     catch (e) { const category = classifyStoreError(e); console.error(`[api/readiness] db probe failed category=${category}`); if (db) { db.state = "blocked"; db.detail = `연결 실패 (category: ${category})`; } }
   }
-  // Real read-only GitHub probe (GET repo + GET repo/issues). Reports configured/live/error, never values.
+  // Real read-only GitHub probe (GET repo + GET repo/issues; #67: + the PR/comment/review/commit reads /api/evidence needs). Reports configured/live/error, never values.
   const gh = await probeGitHub(process.env);
   const item = r.items.find((i) => i.id === "github");
   if (item) {
@@ -26,5 +26,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     else if (gh.state === "error") { item.state = "blocked"; item.detail = `연결 실패 (${gh.error}${gh.issues === "denied" ? " · 토큰에 Issues 읽기 권한 없음" : gh.issues === "disabled" ? " · 저장소 Issues 비활성화" : ""})`; }
     else { item.state = "missing"; item.detail = "미설정 (GITHUB_REPO + GITHUB_READ_TOKEN 또는 GITHUB_TOKEN)"; }
   }
-  return NextResponse.json({ ...r, github: gh, githubEvidence: githubEvidenceReadiness(r.items) }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ...r, github: gh, githubEvidence: githubEvidenceReadiness(r.items, gh) }, { headers: { "Cache-Control": "no-store" } });
 }

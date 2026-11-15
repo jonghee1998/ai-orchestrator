@@ -58,7 +58,7 @@ export default function EvidencePage() {
         <Card>
           <p className="text-sm">출처: GitHub <code>{r.repo}</code> · 생성 {when(r.generatedAt)}</p>
           <p className="mt-1 text-[11px] text-text-faint">{r.identityNote} 런타임 증명: 포함 안 함(세션 콜백 #59 보류).</p>
-          <p className="mt-1 text-[11px] text-text-faint">이슈 {r.limits.issues} · PR {r.limits.pulls}{r.limits.pullsTruncated ? " (잘림)" : ""} · 코멘트 {r.limits.comments}{r.limits.commentsTruncated ? " (최근분만)" : ""} · 상세 PR {r.limits.detailedPulls}</p>
+          <p className="mt-1 text-[11px] text-text-faint">이슈 {r.limits.issues}{r.limits.issuesTruncated ? " (잘림 — 오래된 이슈 누락)" : ""} · PR {r.limits.pulls}{r.limits.pullsTruncated ? " (잘림)" : ""} · 코멘트 {r.limits.comments}{r.limits.commentsTruncated ? " (최근분만)" : ""} · 상세 PR {r.limits.detailedPulls}</p>
         </Card>
         <h2 className="text-sm font-semibold text-text-muted">열린 이슈 · {open.length}</h2>
         {open.map((i) => <Issue key={i.number} i={i} />)}

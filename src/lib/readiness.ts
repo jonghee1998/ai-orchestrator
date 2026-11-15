@@ -1,4 +1,5 @@
 // Release-readiness report from server env. Pure; reports presence/validity only — NEVER values.
+import type { EvidenceReads, GitHubIntegration } from "./github/integration";
 export type ReadyState = "ok" | "missing" | "blocked";
 export interface ReadyItem { id: string; label: string; state: ReadyState; detail: string }
 type Env = Readonly<Record<string, string | undefined>>;
@@ -40,15 +41,27 @@ export function computeReadiness(env: Env): { items: ReadyItem[]; releaseBlocked
 }
 
 /** #65: GitHub read-only evidence scope, reported SEPARATELY from `releaseBlocked` (which still covers the
- *  unverified runtime: callbacks, external routine gate, live provider smoke). Ready only when the GitHub probe
- *  is live and an auth token gates the read API. Never implies runtime E2E. */
-export interface GitHubEvidenceReadiness { ready: boolean; scope: "github_read_only"; runtimeVerified: false; detail: string }
-export function githubEvidenceReadiness(items: ReadyItem[]): GitHubEvidenceReadiness {
+ *  unverified runtime: callbacks, external routine gate, live provider smoke). Never implies runtime E2E.
+ *  #67: ready only when every read /api/evidence needs was actually verified by the probe (PRs, issue comments,
+ *  per-PR reviews + commits), not just the Issues queue read. Without a probe result it is never ready. */
+export interface GitHubEvidenceReadiness {
+  ready: boolean; scope: "github_read_only"; runtimeVerified: false;
+  /** Queue (/issues) read verified — narrower than evidence readiness. */
+  queueReadable: boolean;
+  reads: EvidenceReads | null; detail: string;
+}
+const READ_NAME: Record<keyof EvidenceReads, string> = { pulls: "PR 목록", comments: "이슈 코멘트", reviews: "PR 리뷰", commits: "PR 커밋" };
+export function githubEvidenceReadiness(items: ReadyItem[], probe?: Pick<GitHubIntegration, "state" | "evidenceReads">): GitHubEvidenceReadiness {
   const gh = items.find((i) => i.id === "github"), admin = items.find((i) => i.id === "admin");
-  const ready = gh?.state === "ok" && admin?.state === "ok";
-  return {
-    ready, scope: "github_read_only", runtimeVerified: false,
-    detail: ready ? "GitHub 읽기 + 인증 확인 — 증거 대시보드(읽기 전용) 범위만 준비됨. 런타임(세션 콜백/외부 게이트/라이브 스모크)은 미검증이며 releaseBlocked 에 그대로 반영됨"
-      : `미준비 — ${gh?.state !== "ok" ? "GitHub 읽기 미확인" : "관리자 토큰 미설정"}`,
-  };
+  const queueReadable = gh?.state === "ok" && probe?.state === "live";
+  const reads = probe?.evidenceReads ?? null;
+  const failed = reads ? (Object.keys(READ_NAME) as (keyof EvidenceReads)[]).filter((k) => reads[k] !== "readable" && reads[k] !== "no_sample") : [];
+  const ready = queueReadable && admin?.state === "ok" && reads !== null && failed.length === 0;
+  const detail = ready
+    ? "GitHub 큐 + 증거 읽기(PR/코멘트/리뷰/커밋) 확인 — 증거 대시보드(읽기 전용) 범위만 준비됨. 런타임(세션 콜백/외부 게이트/라이브 스모크)은 미검증이며 releaseBlocked 에 그대로 반영됨"
+    : !queueReadable ? "미준비 — GitHub 큐(Issues) 읽기 미확인"
+    : admin?.state !== "ok" ? "미준비 — 관리자 토큰 미설정"
+    : !reads ? "미준비 — 큐 읽기만 확인됨, 증거 엔드포인트 미검증"
+    : `미준비 — 큐 읽기만 확인됨. 증거 읽기 실패: ${failed.map((k) => `${READ_NAME[k]}(${reads[k]})`).join(", ")} → /api/evidence 실패`;
+  return { ready, scope: "github_read_only", runtimeVerified: false, queueReadable, reads, detail };
 }

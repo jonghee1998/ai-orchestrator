@@ -4,7 +4,7 @@ import { Card, PageTitle } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
 import { GitHubAgentLine, GitHubAgentsUnmapped, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
-import { githubAgents } from "@/lib/github/evidence-views";
+import { evidenceCoverage, githubAgents } from "@/lib/github/evidence-views";
 
 type Agent = {
   key: string; provider: string; enabled: boolean; effective: boolean; blockedReason: string | null;
@@ -23,6 +23,7 @@ export default function AgentsPage() {
   });
   const gh = useGitHubEvidence();
   const ghRows = gh.state.kind === "ok" ? githubAgents(gh.state.data) : null;
+  const ghCov = gh.state.kind === "ok" ? evidenceCoverage(gh.state.data) : undefined;
   return (
     <div className="space-y-3">
       <PageTitle title="에이전트" subtitle="내부 런타임(ON/OFF·ACK·콜백)과 GitHub 증거(라벨·코멘트)를 분리 표시 · provider 사용량은 unknown" />
@@ -42,7 +43,7 @@ export default function AgentsPage() {
               <p className="text-[11px] text-text-faint">오케스트레이터 dispatch {a.orchestratorDispatches}건 · 게이트 차단 {a.suppressedByGate}건 · provider 사용량 unknown</p>
               <p className="text-[11px] text-text-faint">내부 런타임 마지막 ACK {t(a.lastAck)}{!a.lastAck ? " — 런타임 ACK 기록 없음 (GitHub 코멘트 ACK는 아래 별도)" : ""}</p>
               <p className="text-[11px] text-text-faint">외부 루틴 게이트 증거: {a.externalGate.state === "none" ? "없음 — 외부 루틴 통제 미확인(unknown)" : `${a.externalGate.state === "fresh" ? "최근" : "오래됨"} ${t(a.externalGate.lastAt)} · ${a.externalGate.lastAllowed ? "허용" : "차단"} (${a.externalGate.count}회)`}</p>
-              {ghRows ? (ghRows.filter((g) => g.agentKey === a.key).map((g) => <GitHubAgentLine key={g.label} row={g} />).concat(ghRows.some((g) => g.agentKey === a.key) ? [] : [<p key="none" className="mt-2 text-[11px] text-text-faint">GitHub: agent 라벨 이슈 없음</p>]))
+              {ghRows ? (ghRows.filter((g) => g.agentKey === a.key).map((g) => <GitHubAgentLine key={g.label} row={g} cov={ghCov} />).concat(ghRows.some((g) => g.agentKey === a.key) ? [] : [<p key="none" className="mt-2 text-[11px] text-text-faint">{ghCov?.issuesTruncated ? "GitHub: 조회 범위 내 agent 라벨 이슈 없음(이슈 목록 잘림)" : "GitHub: agent 라벨 이슈 없음"}</p>]))
                 : <p className="mt-2 text-[11px] text-text-faint">GitHub 증거: {gh.state.kind === "loading" ? "불러오는 중" : "확인 불가(아래 상태 참조)"}</p>}
             </Card>
           ))}

@@ -164,3 +164,29 @@ test("github probe: repo GET ok but Issues not readable => error (not live)", as
   const off = await probeGitHub(env, f(200, { has_issues: false })); assert.equal(off.state, "error"); assert.equal(off.issues, "disabled");
   const notList = await probeGitHub(env, (async () => res(200, { open_issues_count: 1 })) as typeof fetch); assert.equal(notList.state, "error");
 });
+
+test("#67: github probe verifies the evidence reads (pulls, comments, reviews, commits) without changing queue liveness", async () => {
+  const env = { GITHUB_REPO: "o/r", GITHUB_READ_TOKEN: "SECRETTOK" };
+  const route = (over: Record<string, number> = {}, pulls: unknown[] = [{ number: 9 }]) => {
+    const seen: string[] = [];
+    const f = (async (u: unknown, i?: RequestInit) => {
+      const url = String(u).replace("https://api.github.com/repos/o/r", ""); seen.push(`${i?.method} ${url}`);
+      const key = url.startsWith("/pulls/9/reviews") ? "reviews" : url.startsWith("/pulls/9/commits") ? "commits" : url.startsWith("/pulls") ? "pulls" : url.startsWith("/issues/comments") ? "comments" : url.startsWith("/issues") ? "issues" : "repo";
+      if (over[key]) return res(over[key], {});
+      return key === "repo" ? res(200, { open_issues_count: 1 }) : key === "pulls" ? res(200, pulls) : res(200, []);
+    }) as typeof fetch;
+    return { f, seen };
+  };
+  const all = route(); const ok = await probeGitHub(env, all.f);
+  assert.equal(ok.state, "live"); assert.deepEqual(ok.evidenceReads, { pulls: "readable", comments: "readable", reviews: "readable", commits: "readable" });
+  assert.ok(all.seen.every((x) => x.startsWith("GET "))); assert.ok(all.seen.some((x) => x.includes("/pulls/9/commits")));
+  assert.ok(!JSON.stringify(ok).includes("SECRETTOK"));
+  const noPr = await probeGitHub(env, route({ pulls: 403 }).f);
+  assert.equal(noPr.state, "live", "queue stays live"); assert.equal(noPr.evidenceReads.pulls, "denied"); assert.equal(noPr.evidenceReads.reviews, "not_probed");
+  assert.equal((await probeGitHub(env, route({ comments: 403 }).f)).evidenceReads.comments, "denied");
+  assert.equal((await probeGitHub(env, route({ reviews: 404 }).f)).evidenceReads.reviews, "denied");
+  assert.equal((await probeGitHub(env, route({ commits: 500 }).f)).evidenceReads.commits, "error");
+  assert.deepEqual((await probeGitHub(env, route({}, []).f)).evidenceReads, { pulls: "readable", comments: "readable", reviews: "no_sample", commits: "no_sample" });
+  // Queue not live => evidence endpoints are not probed at all.
+  assert.equal((await probeGitHub(env, route({ issues: 403 }).f)).evidenceReads.pulls, "not_probed");
+});
