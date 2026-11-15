@@ -127,3 +127,42 @@ export function parseEvidenceResponse(_s: number, b: unknown): EvidenceReport | 
   if (o.mode !== "live" || !o.report || o.report.source !== "github" || !Array.isArray(o.report.issues)) return null;
   return o.report;
 }
+
+// ---- Final mobile polish (#69): deterministic Korean summaries + remaining-vs-history split. No model API. ----
+const SHA_RE = /\b[0-9a-f]{40}\b/gi;
+/** Full 40-hex SHAs → 7 chars for compact display. The original text stays available (expandable) with the full SHA. */
+export const shortenShas = (s: string) => s.replace(SHA_RE, (m) => m.slice(0, 7));
+
+export const EVENT_KIND_LABEL: Record<GitHubEventKind, string> = { ack: "ACK", completion: "완료보고", approve: "승인", revise: "수정 요청", review: "리뷰", pr: "PR" };
+/** Deterministic Korean one-liner for a known event type. Facts only (issue/PR number, login, short SHA) — nothing inferred. */
+export function summarizeEvent(e: GitHubEvent): string {
+  const who = e.login + (e.bot ? " (bot)" : "");
+  const target = e.pull ? `PR #${e.pull}` : `이슈 #${e.issue}`;
+  const sha = /@ ([0-9a-f]{7})/i.exec(e.text)?.[1];
+  const at = sha ? ` (커밋 ${sha})` : "";
+  switch (e.kind) {
+    case "ack": return `${who}이(가) ${target}에 작업 시작(ACK)을 남김`;
+    case "completion": return `${who}이(가) ${target}에 완료보고를 남김`;
+    case "approve": return `${who}이(가) ${target}을(를) 승인${at}`;
+    case "revise": return `${who}이(가) ${target}에 수정을 요청${at}`;
+    case "review": return `${who}이(가) ${target}에 리뷰를 남김${at}`;
+    case "pr": return `${target} 관련 활동 (${who})`;
+    default: return `${target} 활동 (${who})`;
+  }
+}
+
+/** /tasks: open issues are REMAINING work (incl. closure-pending: PR merged but issue still open — never shown as completed).
+ *  Closed issues are HISTORY (completed). `reviewed` is evidence (decision on a PR), shown separately from the status label. */
+export interface TaskSplitRow { number: number; title: string; url: string; agent: string; statusLabel: string; stage: GitHubStage; closurePending: boolean; reviewedExact: boolean; mergedPr: number | null }
+export interface TaskSplit { remaining: TaskSplitRow[]; history: TaskSplitRow[] }
+export function githubTaskSplit(r: EvidenceReport): TaskSplit {
+  const remaining: TaskSplitRow[] = [], history: TaskSplitRow[] = [];
+  for (const i of r.issues) {
+    const stage = stageOf(i);
+    const merged = i.pulls.filter((p) => p.state === "merged").sort((a, b) => b.number - a.number)[0];
+    const reviewedExact = i.pulls.some((p) => p.decision?.kind === "approve" && p.decision.headMatch === "exact");
+    const row: TaskSplitRow = { number: i.number, title: i.title, url: i.url, agent: i.agent, statusLabel: i.status, stage, closurePending: i.state === "open" && stage === "done", reviewedExact, mergedPr: merged?.number ?? null };
+    (i.state === "open" ? remaining : history).push(row);
+  }
+  return { remaining, history };
+}

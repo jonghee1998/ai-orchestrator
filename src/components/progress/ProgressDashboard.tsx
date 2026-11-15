@@ -19,8 +19,12 @@ export function ProgressDashboard() {
   const head = <div className="mb-2 flex items-center justify-between">{note}<button className="min-h-11 shrink-0 rounded-lg border border-border px-3 text-xs" onClick={reload}>새로고침</button></div>;
   return (
     <div className="space-y-6">
-      <div>{head}<InternalRuntime runs={runs} wfs={wfs} reload={reload} /></div>
+      {head}
       <GitHubProgressPanel ev={gh} />
+      <div className="border-t border-border pt-4">
+        <p className="mb-2 rounded bg-bg-raised px-2 py-1 text-[11px] text-text-faint">아래는 GitHub 진행과 별개인 내부 런타임 기록입니다. 오케스트레이터가 직접 dispatch·콜백한 실행만 집계하므로 0건이어도 GitHub 작업이 없다는 뜻이 아니며, 위 GitHub 수치와 합산하지 않습니다.</p>
+        <InternalRuntime runs={runs} wfs={wfs} reload={reload} />
+      </div>
     </div>
   );
 }

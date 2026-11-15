@@ -7,7 +7,7 @@ import { LiveStatus } from "@/components/live/LiveStatus";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import type { EvidenceReport } from "@/lib/github/evidence";
 import {
-  GITHUB_STAGE_LABEL, absence, atLeast, evidenceCoverage, githubActivity, githubAgents, githubProgress, parseEvidenceResponse,
+  GITHUB_STAGE_LABEL, EVENT_KIND_LABEL, absence, atLeast, evidenceCoverage, githubActivity, githubAgents, githubProgress, githubTaskSplit, parseEvidenceResponse, shortenShas, summarizeEvent,
   type EvidenceCoverage, type GitHubAgentRow, type GitHubStage,
 } from "@/lib/github/evidence-views";
 
@@ -101,7 +101,6 @@ export function GitHubAgentsUnmapped({ ev, known }: { ev: Ev; known: string[] })
   );
 }
 
-const KIND_LABEL: Record<string, string> = { ack: "ACK", completion: "완료보고", approve: "승인", revise: "수정 요청", review: "리뷰", pr: "PR" };
 export function GitHubActivityPanel({ ev, limit = 40 }: { ev: Ev; limit?: number }) {
   const r = ev.state.kind === "ok" ? ev.state.data : null;
   if (!r) return <section aria-label="GitHub 활동 증거"><Head r={null} title="GitHub 활동" /><LiveStatus s={ev.state} reload={ev.reload} what="GitHub 증거" /></section>;
@@ -109,20 +108,59 @@ export function GitHubActivityPanel({ ev, limit = 40 }: { ev: Ev; limit?: number
   return (
     <section aria-label="GitHub 활동 증거">
       <Head r={r} title={`GitHub 활동 (최근 ${limit}건)`} />
+      <p className="mb-2 text-[11px] text-text-faint">요약은 이벤트 유형·번호·작성자·짧은 SHA로 만든 고정 규칙 문장입니다(AI 요약 아님). 원문은 펼쳐서 확인하세요.</p>
       {events.length === 0 ? <p className="text-xs text-text-faint">{evidenceCoverage(r).partial ? "조회 범위 내 분류된 GitHub 활동(ACK/완료/리뷰/판정)이 없습니다 (부분 증거)." : "분류된 GitHub 활동(ACK/완료/리뷰/판정)이 없습니다."}</p> : (
         <ol className="space-y-2">
           {events.map((e, i) => (
             <Card key={`${e.url ?? e.at}-${i}`}>
               <div className="flex items-center justify-between gap-3">
-                <span className="rounded bg-bg-raised px-2 py-0.5 text-xs text-text-muted">{KIND_LABEL[e.kind] ?? e.kind} · #{e.issue}{e.pull ? ` · PR #${e.pull}` : ""}</span>
-                <Ext href={e.url}><span className="text-xs">{when(e.at)}</span></Ext>
+                <span className="rounded bg-bg-raised px-2 py-0.5 text-xs text-text-muted">{EVENT_KIND_LABEL[e.kind] ?? e.kind} · #{e.issue}{e.pull ? ` · PR #${e.pull}` : ""}</span>
+                <span className="text-xs text-text-faint">{when(e.at)}</span>
               </div>
-              <p className="mt-1 break-words text-sm">{e.text || "(빈 첫 줄)"}</p>
-              <p className="mt-0.5 text-[11px] text-text-faint">GitHub 로그인 {e.login}{e.bot ? " (bot)" : ""}</p>
+              <p className="mt-1 break-words text-sm">{summarizeEvent(e)}</p>
+              <p className="mt-0.5 break-words text-[11px] text-text-faint">{shortenShas(e.text || "(빈 첫 줄)")}</p>
+              <details className="mt-1 text-[11px]">
+                <summary className="min-h-8 cursor-pointer py-1 text-accent">원문·출처</summary>
+                <p className="break-all text-text-muted">{e.text || "(빈 첫 줄)"}</p>
+                <p className="break-all text-text-faint">GitHub 로그인 {e.login}{e.bot ? " (bot)" : ""} · {e.url ? <Ext href={e.url}>출처 링크</Ext> : "링크 없음"}</p>
+              </details>
             </Card>
           ))}
         </ol>
       )}
+    </section>
+  );
+}
+
+/** /tasks: remaining work vs historical completed/reviewed evidence, from GitHub issue state (labels are not completion). */
+export function GitHubTaskSplitPanel({ ev }: { ev: Ev }) {
+  const r = ev.state.kind === "ok" ? ev.state.data : null;
+  if (!r) return <section aria-label="GitHub 작업 증거"><Head r={null} title="GitHub 작업 현황" /><LiveStatus s={ev.state} reload={ev.reload} what="GitHub 증거" /></section>;
+  const s = githubTaskSplit(r), cov = evidenceCoverage(r);
+  const line = (x: (typeof s.remaining)[number]) => (
+    <li key={x.number} className="rounded-lg border border-border p-3">
+      <div className="flex items-start justify-between gap-2">
+        <a href={x.url} target="_blank" rel="noreferrer" className="min-w-0 break-words text-sm text-accent">#{x.number} {x.title}</a>
+        <span className="shrink-0 rounded-full bg-bg-raised px-2 py-0.5 text-[11px] text-text-muted">{GITHUB_STAGE_LABEL[x.stage]}</span>
+      </div>
+      <p className="mt-1 break-words text-[11px] text-text-faint">라벨(자기보고): agent:{x.agent} · status:{x.statusLabel}</p>
+      <p className="break-words text-[11px] text-text-muted">
+        증거: {x.reviewedExact ? "현재 head 승인 확인" : "현재 head 승인 증거 없음"}{x.mergedPr ? ` · PR #${x.mergedPr} 병합` : ""}
+      </p>
+      {x.closurePending ? <p className="mt-1 rounded bg-warn/15 px-2 py-1 text-[11px] text-warn">PR 병합됨 · 이슈는 아직 열림 — 닫기 대기(완료 처리 아님)</p> : null}
+    </li>
+  );
+  return (
+    <section aria-label="GitHub 작업 증거" className="space-y-4">
+      <Head r={r} title="GitHub 작업 현황" />
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-text-muted">남은 작업 <span className="tabular-nums">({atLeast(s.remaining.length, cov.issuesTruncated)})</span></h3>
+        {s.remaining.length ? <ul className="space-y-2">{s.remaining.map(line)}</ul> : <p className="text-xs text-text-faint">열린 이슈 없음 (GitHub 기준{cov.issuesTruncated ? ", 조회 범위 내" : ""}).</p>}
+      </div>
+      <details>
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-text-muted">이력: 닫힌 이슈 (완료·검수 증거) <span className="tabular-nums">({atLeast(s.history.length, cov.issuesTruncated)})</span></summary>
+        {s.history.length ? <ul className="mt-2 space-y-2">{s.history.map(line)}</ul> : <p className="text-xs text-text-faint">닫힌 이슈 없음.</p>}
+      </details>
     </section>
   );
 }

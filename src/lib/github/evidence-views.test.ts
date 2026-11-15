@@ -108,3 +108,24 @@ test("#67: reader reports issue truncation separately from PR truncation", async
   assert.equal(r.limits.issuesTruncated, true); assert.equal(r.limits.pullsTruncated, false); assert.equal(r.limits.commentsTruncated, false);
   assert.equal(r.limits.issues, 300);
 });
+
+test("#69: Korean event summaries are deterministic; SHAs shortened, original preserved", async () => {
+  const { summarizeEvent, shortenShas } = await import("./evidence-views");
+  const e = { at: "2026-01-01T00:00:00Z", kind: "approve" as const, login: "pm", bot: false, issue: 5, pull: 7, text: `PR #7 리뷰 APPROVED @ ${SHA.slice(0, 7)}` };
+  assert.equal(summarizeEvent(e), `pm이(가) PR #7을(를) 승인 (커밋 ${SHA.slice(0, 7)})`);
+  assert.equal(summarizeEvent({ ...e, kind: "ack", pull: undefined, bot: true }), "pm (bot)이(가) 이슈 #5에 작업 시작(ACK)을 남김");
+  assert.equal(shortenShas(`head ${SHA} ok`), `head ${SHA.slice(0, 7)} ok`);
+  assert.equal(summarizeEvent(e), summarizeEvent(e));
+});
+
+test("#69: task split keeps open+merged-PR as remaining/closure-pending; closed is history; label alone is not completion", async () => {
+  const { githubTaskSplit } = await import("./evidence-views");
+  const r = build([issue(8, ["agent:opus", "status:done"]), issue(9, ["agent:opus", "status:done"], "closed"), issue(10, ["agent:claude", "status:ready"])],
+    [pull(11, "fix — Refs #8", null, { state: "closed", merged_at: "2026-01-01T03:00:00Z" } as Partial<RawPull>)], []);
+  const s = githubTaskSplit(r);
+  assert.deepEqual(s.remaining.map((x) => x.number).sort(), [10, 8]);
+  assert.deepEqual(s.history.map((x) => x.number), [9]);
+  const t8 = s.remaining.find((x) => x.number === 8)!;
+  assert.equal(t8.closurePending, true); assert.equal(t8.mergedPr, 11); assert.equal(t8.statusLabel, "done");
+  assert.equal(s.remaining.find((x) => x.number === 10)!.closurePending, false);
+});
