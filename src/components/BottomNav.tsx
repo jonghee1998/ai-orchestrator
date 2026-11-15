@@ -10,6 +10,7 @@ const items = [
   { href: "/control", label: "제어", icon: "⏻" },
   { href: "/progress", label: "진행", icon: "▶" },
   { href: "/tasks", label: "큐", icon: "☰" },
+  { href: "/evidence", label: "증거", icon: "✓" },
   { href: "/activity", label: "활동", icon: "↻" },
 ];
 
