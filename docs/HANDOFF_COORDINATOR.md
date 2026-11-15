@@ -36,12 +36,25 @@ Status: **dry-run by default. Live events not yet observed** (see "Verified / no
 - **No duplicate writers.**
   - Within the coordinator: `concurrency: handoff-<PR>` with `cancel-in-progress: false`. A queued run
     reads live state again, so nothing is lost if GitHub replaces it.
-  - Against the GPT writer: if a GPT PM revise marker
-    (`gpt-pm-followup:pr<N>:<sha>:…:revise` / `gpt-pm-event-state:v1 pr<N>:<sha>:…:revise`) already
-    exists for the same SHA, the coordinator defers.
+  - Against the GPT writer: if a GPT PM revise marker already exists for the same PR and exact SHA,
+    the coordinator defers (`gpt_writer_already_handled`). Since Issue #75 this guard is hardened:
+    - **Trusted author only.** The marker must be written by the PM writer identity
+      (`login == jonghee1998` **and** `id == 129052128` **and** `type == User`). A marker posted by any
+      other account is ignored, so it cannot suppress a revision.
+    - **Complete structure only.** Accepted forms, every field anchored (full 40-char SHA, round ≥ 1):
+      `<!-- gpt-pm-followup:pr<N>:<sha>[:<agent>]:revise:<round> -->`,
+      `<!-- gpt-pm-event-state:v1 pr<N>:<sha>[:<agent>]:revise:<round> -->`, and, in an issue body
+      only, `Dedupe pr<N>:<sha>:<agent>:revise:<round>` (the separate revision-issue form, e.g. #75).
+    - **Issue side included.** Besides PR comments, the guard reads all repository issue comments and
+      issue bodies created or updated since the PR was created. This covers the linked issue and
+      separate revision issues. The scan runs only when the plan is `revise`, is paginated, and fails
+      closed at its bound (2000 comments / 1000 issues): the run errors and writes nothing.
 - **Bounded retry.** GET/PATCH requests retry up to 3 times with backoff on network errors, 429 and
   5xx. POST requests are never retried in-process; the claim resolves an ambiguous failure on the
-  next run. Comment pagination is capped at 1000 comments and fails closed. Each job has a 5-minute
+  next run. Comment pagination is capped at 1000 comments and fails closed. The crash-recovery
+  lookup for a pending claim (Issue #75) scans issues updated since the claim's `created_at` (the
+  revision Issue is always created after its claim), paginates, and fails closed at 1000 issues
+  instead of creating a possible duplicate. Each job has a 5-minute
   timeout. The coordinator does no polling.
 - **Least privilege.**
   - The workflow default is `permissions: {}`.
@@ -72,7 +85,7 @@ Files:
 
 - Verified in this session:
   - `npm run typecheck` exit 0
-  - `npm test` 199 tests: 197 pass, 0 fail, 2 skipped (the existing Postgres integration tests,
+  - `npm test` 209 tests (after Issue #75): 207 pass, 0 fail, 2 skipped (the existing Postgres integration tests,
     which need `TEST_DATABASE_URL`), exit 0
   - `npm run build` exit 0
   - Both workflow YAML files parse.
@@ -83,7 +96,8 @@ Files:
     - the head moving before a write
     - bounded retry and the pagination bound
     - dry run writing nothing
-    - deferring to the GPT writer
+    - deferring to the GPT writer (trusted PM author, complete marker, issue-side and separate revision issues — #75)
+    - recovery lookup pagination past 100 issues and fail-closed bounds (#75)
 - **Not verified (no live observation yet):**
   1. The workflow actually running on real Codex events. `issue_comment` and `workflow_dispatch`
      workflows only run once the file is on the **default branch** (`main`). Before merge, only

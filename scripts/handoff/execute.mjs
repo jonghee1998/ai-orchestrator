@@ -12,7 +12,11 @@ export async function loadState(gh, prNumber) {
   const comments = await gh.listIssueComments(prNumber);
   const refs = linkedIssueNumbers(pr);
   const linkedIssue = refs.length === 1 ? await gh.getIssue(refs[0]).catch(() => null) : null;
-  return { pr, comments, linkedIssue };
+  const state = { pr, comments, linkedIssue, pmEvidence: [] };
+  // Issue-side PM handoffs (linked issue, separate revision issues) are only needed to veto a revise.
+  // Fetched lazily; any failure propagates (fail closed: no write without the full transition guard).
+  if (decide(state).action === "revise") state.pmEvidence = await gh.listIssueSideEvidence(pr.created_at);
+  return state;
 }
 
 /** @param {{apply:boolean, writerLogin?:string, repo:string, log?:(o:object)=>void}} opts */
@@ -43,7 +47,7 @@ export async function run(gh, prNumber, opts) {
     let issueNumber;
     if (claimId) {
       // Resume a crashed run: was the issue already created?
-      const existing = await gh.findIssueByMarker(markerFor(plan.key), writer);
+      const existing = await gh.findIssueByMarker(markerFor(plan.key), writer, claim.createdAt);
       issueNumber = existing?.number;
     } else {
       await assertHead();

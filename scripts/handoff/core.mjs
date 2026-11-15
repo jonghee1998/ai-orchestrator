@@ -73,22 +73,54 @@ export function findClaim(comments, key, writerLogin = DEFAULT_WRITER_LOGIN) {
   for (const c of comments) {
     if (c.user?.login !== writerLogin) continue;
     const m = parseMarker(c.body);
-    if (m && m.key === key) return { ...m, commentId: c.id };
+    if (m && m.key === key) return { ...m, commentId: c.id, createdAt: c.created_at };
   }
   return null;
 }
 
-/** Existing GPT PM writer already handed off this exact PR+SHA (transition guard against two writers). */
-export function gptWriterHandled(comments, prNumber, sha) {
-  const re = new RegExp(`gpt-pm-(?:followup:|event-state:v1\\s+)pr${prNumber}:${sha}:(?:[a-z-]+:)?revise:\\d+`);
-  return comments.some((c) => re.test(c.body ?? ""));
+/**
+ * Identity of the existing GPT PM writer (it posts through the owner account). Login alone is not
+ * trusted: login AND numeric id AND type User must all match, exactly like CODEX_BOT.
+ */
+export const PM_WRITER = Object.freeze({ login: "jonghee1998", id: 129052128, type: "User" });
+export function isTrustedPm(user) {
+  return !!user && user.login === PM_WRITER.login && Number(user.id) === PM_WRITER.id && user.type === PM_WRITER.type;
+}
+
+/**
+ * Complete PM revise-marker structures. Every field is anchored; a partial or free-text mention never matches.
+ *  - `<!-- gpt-pm-followup:pr<N>:<sha40>[:<agent>]:revise:<round> -->`            (comment or issue body)
+ *  - `<!-- gpt-pm-event-state:v1 pr<N>:<sha40>[:<agent>]:revise:<round> -->`       (comment or issue body)
+ *  - a line `Dedupe pr<N>:<sha40>:<agent>:revise:<round>.` (separate revision-issue body, e.g. Issue #75)
+ */
+const PM_KEY = String.raw`pr(\d+):([a-f0-9]{40}):(?:([a-z][a-z-]*):)?revise:([1-9]\d*)`;
+const PM_HTML_RE = new RegExp(String.raw`<!--\s*gpt-pm-(?:followup:|event-state:v1\s+)${PM_KEY}\s*-->`, "g");
+const PM_DEDUPE_RE = new RegExp(String.raw`(?:^|[\s.])Dedupe\s+${PM_KEY}(?=[.\s]|$)`, "gm");
+
+/** Structured PM revise markers in one authored item. Untrusted authors yield nothing (fail closed). */
+export function pmReviseMarkers(item) {
+  if (!isTrustedPm(item?.user)) return [];
+  const body = item.body ?? "";
+  const res = [...body.matchAll(PM_HTML_RE)];
+  // The plain `Dedupe` form is accepted only in an issue body (where the PM writes separate revision issues).
+  if (item.kind === "issue") res.push(...body.matchAll(PM_DEDUPE_RE));
+  return res.map((m) => ({ pr: Number(m[1]), sha: m[2], agent: m[3], round: Number(m[4]) }));
+}
+
+/**
+ * Existing GPT PM writer already handed off this exact PR+SHA (transition guard against two writers).
+ * `items` are PR comments plus issue-side evidence (issue comments and issue bodies, including separate
+ * revision issues). Only trusted-PM, structurally complete markers for exactly this PR and SHA count.
+ */
+export function gptWriterHandled(items, prNumber, sha) {
+  return items.some((it) => pmReviseMarkers(it).some((m) => m.pr === prNumber && m.sha === sha));
 }
 
 /**
  * Decide the single mechanical handoff for a PR from live state.
  * @returns {{action:"noop", reason:string, detail?:object} | {action:"revise"|"release_ready", key:string, sha:string, agent?:string, linkedIssue?:number, codex:object}}
  */
-export function decide({ pr, comments, linkedIssue }) {
+export function decide({ pr, comments, linkedIssue, pmEvidence = [] }) {
   if (!pr || pr.state !== "open") return { action: "noop", reason: "pr_not_open" };
   const head = pr.head?.sha;
   const codex = latestCodexState(comments);
@@ -98,7 +130,7 @@ export function decide({ pr, comments, linkedIssue }) {
   if (codex.hasUnresolvedFindings === false) {
     return { action: "release_ready", key: handoffKey(pr.number, head, "release-ready"), sha: head, codex };
   }
-  if (gptWriterHandled(comments, pr.number, head)) return { action: "noop", reason: "gpt_writer_already_handled" };
+  if (gptWriterHandled([...comments, ...pmEvidence], pr.number, head)) return { action: "noop", reason: "gpt_writer_already_handled" };
   const refs = linkedIssueNumbers(pr);
   if (refs.length !== 1) return { action: "noop", reason: "linked_issue_ambiguous", detail: { refs } };
   if (!linkedIssue || linkedIssue.number !== refs[0]) return { action: "noop", reason: "linked_issue_unavailable", detail: { refs } };

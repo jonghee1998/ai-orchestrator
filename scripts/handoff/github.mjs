@@ -28,27 +28,55 @@ export function createClient({ token, repo, fetchImpl = fetch, sleep = (ms) => n
     }
   }
 
-  async function paged(path, maxPages) {
+  // Bounded pagination. `stop(item)` ends the scan early on a match. Exhausting the bound with a full
+  // last page throws: a truncated scan could miss a claim/issue/marker and cause a duplicate write.
+  async function paged(path, maxPages, stop) {
     const out = [];
     for (let page = 1; page <= maxPages; page++) {
       const sep = path.includes("?") ? "&" : "?";
       const items = await req("GET", `${path}${sep}per_page=100&page=${page}`);
+      if (!Array.isArray(items)) throw new Error(`unexpected non-array page for ${path}`);
+      if (stop) { const hit = items.find(stop); if (hit) return { items: out.concat(items), hit }; }
       out.push(...items);
-      if (items.length < 100) return out;
+      if (items.length < 100) return { items: out, hit: null };
     }
-    throw new Error(`pagination bound exceeded for ${path}`); // fail closed: a missed claim could duplicate
+    throw new Error(`pagination bound exceeded for ${path}`); // fail closed
   }
+  const isoSince = (since) => {
+    const t = Date.parse(since ?? "");
+    if (!Number.isFinite(t)) throw new Error("since timestamp required"); // never fall back to an unbounded scan
+    return encodeURIComponent(new Date(t).toISOString());
+  };
 
   return {
     getPull: (n) => req("GET", `/pulls/${n}`),
     getIssue: (n) => req("GET", `/issues/${n}`),
-    listIssueComments: (n) => paged(`/issues/${n}/comments`, 10),
+    listIssueComments: async (n) => (await paged(`/issues/${n}/comments`, 10)).items,
     createIssueComment: (n, body) => req("POST", `/issues/${n}/comments`, { body }),
     updateIssueComment: (id, body) => req("PATCH", `/issues/comments/${id}`, { body }),
     createIssue: ({ title, body, labels }) => req("POST", `/issues`, { title, body, labels }),
-    async findIssueByMarker(marker, writerLogin) {
-      const items = await req("GET", `/issues?state=all&sort=created&direction=desc&per_page=100`);
-      return items.find((i) => !i.pull_request && i.user?.login === writerLogin && (i.body ?? "").includes(marker)) ?? null;
+    /**
+     * Recovery lookup for a pending claim. The revision issue is always created after its claim comment,
+     * so `since` (the claim's created_at) bounds the scan; it is paginated and fails closed at the bound.
+     */
+    async findIssueByMarker(marker, writerLogin, since) {
+      const { hit } = await paged(`/issues?state=all&sort=created&direction=desc&since=${isoSince(since)}`, 10,
+        (i) => !i.pull_request && i.user?.login === writerLogin && (i.body ?? "").includes(marker));
+      return hit;
+    },
+    /**
+     * Issue-side PM evidence created/updated since `since` (the PR's created_at — a `pr<N>` marker cannot
+     * predate PR N): all repository issue comments plus issue bodies (separate revision issues).
+     * Items are tagged with `kind`; authorship is checked by the caller. Bounded, fails closed.
+     */
+    async listIssueSideEvidence(since) {
+      const s = isoSince(since);
+      const comments = (await paged(`/issues/comments?sort=created&direction=asc&since=${s}`, 20)).items;
+      const issues = (await paged(`/issues?state=all&sort=created&direction=asc&since=${s}`, 10)).items;
+      return [
+        ...comments.map((c) => ({ kind: "comment", id: c.id, user: c.user, body: c.body, url: c.html_url })),
+        ...issues.filter((i) => !i.pull_request).map((i) => ({ kind: "issue", id: i.number, user: i.user, body: i.body, url: i.html_url })),
+      ];
     },
   };
 }
