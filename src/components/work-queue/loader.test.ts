@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRequestTracker, loadQueue } from "./loader";
+import { createRequestTracker, loadQueue as load } from "./loader";
+
+const TOKEN = "reader-token-0123456789";
+const loadQueue = (f: Parameters<typeof load>[0]) => load(f, TOKEN);
 
 const reply = (status: number, body: unknown) => async () => ({
   ok: status >= 200 && status < 300,
@@ -51,4 +54,19 @@ test("stale response: older request is ignored once a newer one starts", () => {
   assert.equal(t.isCurrent(b), true);
   t.invalidate(); // sample / unmount
   assert.equal(t.isCurrent(b), false);
+});
+
+// #65 regression: /tasks returned HTTP 401 with a valid admin token because the loader sent no auth header.
+test("#65: sends the tab token as x-admin-token to the same read endpoint", async () => {
+  const calls: { url: string; headers?: Record<string, string> }[] = [];
+  const s = await load(async (url, init) => { calls.push({ url, headers: init?.headers }); return { ok: true, status: 200, json: async () => ({ mode: "live", tasks: [] }) }; }, `  ${TOKEN} `);
+  assert.equal(s.kind, "live");
+  assert.deepEqual(calls, [{ url: "/api/work-queue", headers: { "x-admin-token": TOKEN } }]);
+});
+test("#65: no token -> notoken without any request; 401 -> unauth (never 'HTTP 401' unavailable)", async () => {
+  let n = 0;
+  const none = await load(async () => { n++; return { ok: true, status: 200, json: async () => ({}) }; }, "   ");
+  assert.deepEqual(none, { kind: "notoken" }); assert.equal(n, 0);
+  const denied = await load(reply(401, { error: "unauthorized" }), TOKEN);
+  assert.deepEqual(denied, { kind: "unauth" });
 });

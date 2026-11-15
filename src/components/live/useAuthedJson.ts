@@ -7,7 +7,10 @@ export type Live<T> =
   | { kind: "loading" } | { kind: "notoken" } | { kind: "unauth" } | { kind: "unconfigured" }
   | { kind: "error"; detail: string } | { kind: "ok"; data: T };
 
-const readToken = () => { try { return sessionStorage.getItem("ctl-token") ?? ""; } catch { return ""; } };
+/** Same per-tab token the home dashboard stores. Exported so every live loader (incl. /tasks) uses one source. */
+export const readToken = () => { try { return sessionStorage.getItem("ctl-token") ?? ""; } catch { return ""; } };
+/** Header set for authenticated read endpoints. */
+export const authHeaders = (token: string) => ({ "x-admin-token": token });
 
 /** `accept` returns the data if the body is the live contract, "unconfigured" if the server says so, else null (=error). */
 export function useAuthedJson<T>(path: string, accept: (status: number, body: unknown) => T | "unconfigured" | null, intervalMs = 15000) {
@@ -19,7 +22,7 @@ export function useAuthedJson<T>(path: string, accept: (status: number, body: un
     const token = readToken().trim();
     if (!token) { setS({ kind: "notoken" }); return; }
     try {
-      const r = await fetch(path, { cache: "no-store", headers: { "x-admin-token": token } });
+      const r = await fetch(path, { cache: "no-store", headers: authHeaders(token) });
       const body: unknown = await r.json().catch(() => null);
       if (my !== seq.current) return;
       if (r.status === 401) return setS({ kind: "unauth" });

@@ -4,18 +4,24 @@ import { parseResponse, type WorkQueueResponse } from "./viewModel";
 export type Source =
   | { kind: "loading" }
   | { kind: "live"; res: WorkQueueResponse }
+  | { kind: "notoken" }
+  | { kind: "unauth" }
   | { kind: "unavailable"; reason: string }
   | { kind: "sample" };
 
 type FetchLike = (
   input: string,
-  init?: { cache?: "no-store" },
+  init?: { cache?: "no-store"; headers?: Record<string, string> },
 ) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
 
-/** GET /api/work-queue 를 호출해 화면 상태로 변환한다. 절대 throw 하지 않는다. */
-export async function loadQueue(fetchFn: FetchLike): Promise<Source> {
+/** GET /api/work-queue 를 호출해 화면 상태로 변환한다. 절대 throw 하지 않는다.
+ *  #65: 보호된 읽기 API이므로 홈과 같은 탭 토큰(x-admin-token)을 반드시 보낸다. 토큰 없음/401 은 명시 상태. */
+export async function loadQueue(fetchFn: FetchLike, token: string): Promise<Source> {
+  const t = token.trim();
+  if (!t) return { kind: "notoken" };
   try {
-    const r = await fetchFn("/api/work-queue", { cache: "no-store" });
+    const r = await fetchFn("/api/work-queue", { cache: "no-store", headers: { "x-admin-token": t } });
+    if (r.status === 401) return { kind: "unauth" };
     // 502 등 오류 응답도 계약(mode:"error")을 따르므로 본문을 먼저 해석한다.
     const body: unknown = await r.json().catch(() => null);
     const res = parseResponse(body);

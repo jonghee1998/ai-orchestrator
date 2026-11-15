@@ -24,7 +24,7 @@ export interface ReviewEvidence { id: number; url?: string; at: string; login: s
 export interface PullEvidence {
   number: number; url: string; title: string; state: "open" | "closed" | "merged"; draft: boolean;
   base: string; head: string; headSha: string;
-  linkedBy: Array<"title" | "body" | "issue-comment">;
+  linkedBy: Array<"title" | "body" | "issue-body" | "issue-comment">;
   commits: { count: number; truncated: boolean; latestAt?: string };
   reviews: ReviewEvidence[]; comments: CommentEvidence[];
   /** Revision rounds: revise signals that were followed by at least one later commit. */
@@ -114,12 +114,14 @@ export function pullIssueRefs(p: Pick<RawPull, "title" | "body">): { title: Set<
   const body = new Set([...(p.body ?? "").matchAll(KEYWORD_REF)].map((m) => Number(m[1])));
   return { title, body };
 }
-/** PR numbers an issue comment points at: `/pull/N` URLs, or `PR #N` / `PR: #N` mentions. */
+/** PR numbers an issue comment (or issue body, #65) points at: `/pull/N` URLs, `PR #N` / `PR: #N` mentions,
+ *  or the compact upper-case `PR63` form. Explicit references only — branch/SHA similarity is never used. */
 export function commentPullRefs(body: string | null | undefined): Set<number> {
-  const s = body ?? "";
+  const s = (body ?? "").replace(/<!--[\s\S]*?-->/g, " ");
   const out = new Set<number>();
   for (const m of s.matchAll(/\/pull\/(\d+)\b/g)) out.add(Number(m[1]));
   for (const m of s.matchAll(/\bPR\s*:?\s*#(\d+)/gi)) out.add(Number(m[1]));
+  for (const m of s.matchAll(/\bPR(\d+)\b/g)) out.add(Number(m[1]));
   return out;
 }
 
@@ -232,6 +234,11 @@ export function linkPulls(issues: RawIssue[], pulls: RawPull[], comments: RawCom
     const r = pullIssueRefs(p);
     r.title.forEach((n) => add(n, p.number, "title"));
     r.body.forEach((n) => add(n, p.number, "body"));
+  }
+  // #65: the issue's own body/title can name its PR explicitly (e.g. #64 → "…/pull/63#issuecomment-…", "verified PR63").
+  for (const i of issues) if (!i.pull_request) {
+    commentPullRefs(i.body).forEach((pr) => add(i.number, pr, "issue-body"));
+    commentPullRefs(i.title).forEach((pr) => add(i.number, pr, "issue-body"));
   }
   for (const c of comments) {
     const n = issueNumberFromUrl(c.issue_url);

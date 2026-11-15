@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui";
+import { readToken } from "@/components/live/useAuthedJson";
 import { SAMPLE_TASKS } from "./fixtures";
 import { createRequestTracker, loadQueue, type Source } from "./loader";
 import {
@@ -37,7 +39,7 @@ export function WorkQueueDashboard() {
   const refresh = useCallback(() => {
     const id = tracker.next();
     setSrc({ kind: "loading" });
-    loadQueue(fetch).then((next) => {
+    loadQueue(fetch, readToken()).then((next) => {
       if (tracker.isCurrent(id)) setSrc(next);
     });
   }, [tracker]);
@@ -93,6 +95,19 @@ function StatusBanner({
         <button onClick={onExit} className="mt-2 text-xs underline">
           샘플 종료
         </button>
+      </Card>
+    );
+  if (src.kind === "notoken")
+    return (
+      <Card className="text-sm">
+        토큰이 없습니다. <Link href="/" className="text-accent">홈</Link>에서 토큰을 입력하면 작업 큐를 실제 데이터로 표시합니다.
+      </Card>
+    );
+  if (src.kind === "unauth")
+    return (
+      <Card className="text-sm">
+        토큰이 올바르지 않습니다 (401).{" "}
+        <button onClick={onRetry} className="ml-2 text-xs text-accent underline">다시 시도</button>
       </Card>
     );
   const msg =

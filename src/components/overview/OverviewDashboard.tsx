@@ -9,7 +9,7 @@ type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason:
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; held: string | null; lastActivityAt: string; lastError: string | null };
 type Snap = { mode: "live"; generatedAt: string; agents: Agent[]; runs: Run[]; errors: Run[]; control: { preset: string }; audit: { at: string; actor: string; action: string; detail: string }[] };
 type GH = { state: "unconfigured" | "configured_unverified" | "live" | "error"; repo: string | null; tokenSource: string; openIssues: number | null };
-type Ready = { github?: GH; items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean };
+type Ready = { github?: GH; items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean; githubEvidence?: { ready: boolean; detail: string } };
 type St = { kind: "loading" } | { kind: "notoken" } | { kind: "unauth"; reason?: string } | { kind: "unconfigured" } | { kind: "error"; detail?: string } | { kind: "ok"; snap: Snap; ready: Ready | null };
 
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
@@ -78,7 +78,8 @@ export default function OverviewDashboard() {
           <p className="text-xs text-text-faint" aria-label="GitHub 연결 상태">GitHub 큐: {!s.ready?.github ? "unknown (readiness 미수신)" : s.ready.github.state === "live" ? `live · ${s.ready.github.repo} (읽기 확인, 열린 이슈 ${s.ready.github.openIssues ?? "unknown"})` : s.ready.github.state === "unconfigured" ? "미설정 (unconfigured)" : "오류 — 연결 실패(unknown)"}</p>
           {s.ready && (
             <section aria-label="릴리스 준비도" className="space-y-2">
-              <h2 className="text-sm font-semibold text-text-muted">릴리스 준비도 · {s.ready.releaseBlocked ? "차단됨" : "준비됨"}</h2>
+              <h2 className="text-sm font-semibold text-text-muted">릴리스 준비도(런타임 포함) · {s.ready.releaseBlocked ? "차단됨" : "준비됨"}</h2>
+              <p className="text-xs" aria-label="GitHub 읽기 전용 준비도">GitHub 읽기 전용 증거 범위 · {!s.ready.githubEvidence ? "unknown" : s.ready.githubEvidence.ready ? "준비됨" : "미준비"}{s.ready.githubEvidence ? <span className="text-text-faint"> — {s.ready.githubEvidence.detail}</span> : null}</p>
               <Card><ul className="space-y-2 text-xs">{s.ready.items.map((i) => (
                 <li key={i.id} className="flex gap-2"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${DOT[i.state]}`} aria-label={i.state} /><span><b>{i.label}</b> — {i.detail}</span></li>
               ))}</ul></Card>

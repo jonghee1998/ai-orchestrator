@@ -3,15 +3,10 @@
 import { Card, PageTitle } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
+import { parseEvidenceResponse } from "@/lib/github/evidence-views";
 import type { CommentEvidence, EvidenceReport, IssueEvidence, PullEvidence } from "@/lib/github/evidence";
 
-function accept(_s: number, b: unknown): EvidenceReport | "unconfigured" | null {
-  if (!b || typeof b !== "object") return null;
-  const o = b as { mode?: unknown; report?: EvidenceReport };
-  if (o.mode === "unconfigured") return "unconfigured";
-  if (o.mode !== "live" || !o.report || o.report.source !== "github" || !Array.isArray(o.report.issues)) return null;
-  return o.report;
-}
+const accept = parseEvidenceResponse;
 const when = (iso?: string) => (iso ? iso.replace("T", " ").slice(0, 16) + "Z" : "unknown");
 const Ext = ({ href, children }: { href?: string; children: React.ReactNode }) =>
   href ? <a href={href} target="_blank" rel="noreferrer" className="text-accent break-all">{children}</a> : <>{children}</>;

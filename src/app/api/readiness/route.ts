@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireRead } from "../_auth";
-import { computeReadiness } from "@/lib/readiness";
+import { computeReadiness, githubEvidenceReadiness } from "@/lib/readiness";
 import { getRunStore } from "@/lib/runs/store";
 import { probeGitHub } from "@/lib/github/integration";
 import { classifyStoreError } from "@/lib/runs/store-errors";
@@ -26,5 +26,5 @@ export async function GET(req: Request): Promise<NextResponse> {
     else if (gh.state === "error") { item.state = "blocked"; item.detail = `연결 실패 (${gh.error}${gh.issues === "denied" ? " · 토큰에 Issues 읽기 권한 없음" : gh.issues === "disabled" ? " · 저장소 Issues 비활성화" : ""})`; }
     else { item.state = "missing"; item.detail = "미설정 (GITHUB_REPO + GITHUB_READ_TOKEN 또는 GITHUB_TOKEN)"; }
   }
-  return NextResponse.json({ ...r, github: gh }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ...r, github: gh, githubEvidence: githubEvidenceReadiness(r.items) }, { headers: { "Cache-Control": "no-store" } });
 }

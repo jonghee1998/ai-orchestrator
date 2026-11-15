@@ -38,3 +38,17 @@ export function computeReadiness(env: Env): { items: ReadyItem[]; releaseBlocked
   ];
   return { items, releaseBlocked: items.some((i) => i.state === "blocked") || items.some((i) => i.state === "missing" && ["database", "admin", "github", "github_write", "callback", "cron"].includes(i.id)) };
 }
+
+/** #65: GitHub read-only evidence scope, reported SEPARATELY from `releaseBlocked` (which still covers the
+ *  unverified runtime: callbacks, external routine gate, live provider smoke). Ready only when the GitHub probe
+ *  is live and an auth token gates the read API. Never implies runtime E2E. */
+export interface GitHubEvidenceReadiness { ready: boolean; scope: "github_read_only"; runtimeVerified: false; detail: string }
+export function githubEvidenceReadiness(items: ReadyItem[]): GitHubEvidenceReadiness {
+  const gh = items.find((i) => i.id === "github"), admin = items.find((i) => i.id === "admin");
+  const ready = gh?.state === "ok" && admin?.state === "ok";
+  return {
+    ready, scope: "github_read_only", runtimeVerified: false,
+    detail: ready ? "GitHub 읽기 + 인증 확인 — 증거 대시보드(읽기 전용) 범위만 준비됨. 런타임(세션 콜백/외부 게이트/라이브 스모크)은 미검증이며 releaseBlocked 에 그대로 반영됨"
+      : `미준비 — ${gh?.state !== "ok" ? "GitHub 읽기 미확인" : "관리자 토큰 미설정"}`,
+  };
+}
