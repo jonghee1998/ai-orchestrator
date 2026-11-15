@@ -1,6 +1,6 @@
 "use client";
 import { Card } from "@/components/ui";
-import { LiveStatus } from "@/components/live/LiveStatus";
+import { LiveStatus, StaleNotice } from "@/components/live/LiveStatus";
 import { refreshCenter } from "@/components/live/refresh";
 import { useAuthedJson, type Live } from "@/components/live/useAuthedJson";
 import { GitHubProgressPanel, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
@@ -31,14 +31,16 @@ export function ProgressDashboard() {
 }
 
 const RuntimeHead = () => <div className="mb-2"><h2 className="text-sm font-semibold text-text-muted">내부 런타임 기록 <span className="rounded bg-bg-raised px-1.5 py-0.5 text-[10px] text-text-faint">오케스트레이터 저장소</span></h2><p className="text-[11px] text-text-faint">오케스트레이터가 dispatch·콜백으로 기록한 실행만 집계 (GitHub 이슈/코멘트 미포함)</p></div>;
-function InternalRuntime({ runs, wfs, reload }: { runs: { state: Live<RunRow[]> }; wfs: { state: Live<WorkflowRow[]> }; reload: () => void }) {
-  if (runs.state.kind !== "ok") return <section aria-label="내부 런타임 기록"><RuntimeHead /><LiveStatus s={runs.state} reload={reload} what="내부 실행 현황" /></section>;
+function InternalRuntime({ runs, wfs, reload }: { runs: { state: Live<RunRow[]>; error: string | null }; wfs: { state: Live<WorkflowRow[]>; error: string | null }; reload: () => void }) {
+  if (runs.state.kind !== "ok") return <section aria-label="내부 런타임 기록"><RuntimeHead /><LiveStatus s={runs.state} reload={reload} what="내부 실행 현황" error={runs.error} /></section>;
   const cards = buildCards(runs.state.data, wfs.state.kind === "ok" ? wfs.state.data : []);
   const sum = summarize(cards);
   return (
     <section aria-label="내부 런타임 기록">
       <RuntimeHead />
+      <StaleNotice error={runs.error} />
       {wfs.state.kind !== "ok" && <div className="mb-3"><LiveStatus s={wfs.state} reload={reload} what="협업 워크플로(브랜치/PR 정보)" /></div>}
+      {wfs.state.kind === "ok" && <StaleNotice error={wfs.error} />}
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {(Object.keys(sum) as Bucket[]).map((b) => <div key={b} className={`rounded-xl px-3 py-2 text-center ${TONE[b]}`}><div className="text-lg font-semibold">{sum[b]}</div><div className="text-[11px]">{BUCKET_LABEL[b]}</div></div>)}
       </div>

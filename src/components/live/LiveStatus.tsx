@@ -3,9 +3,14 @@ import Link from "next/link";
 import { Card } from "@/components/ui";
 import type { Live } from "./useAuthedJson";
 
+/** #83: 마지막 정상 데이터를 유지한 채 갱신(자동 폴링 포함)이 실패했음을 알린다. error 가 없으면 null. */
+export function StaleNotice({ error }: { error: string | null | undefined }) {
+  return error ? <p role="status" className="text-xs text-warn">최신 갱신 실패 ({error}) — 마지막 정상 데이터를 표시 중입니다.</p> : null;
+}
+
 /** Renders every non-ok state honestly. Returns null when data is ready. */
-export function LiveStatus({ s, reload, what }: { s: Live<unknown>; reload: () => void; what: string }) {
-  if (s.kind === "ok") return null;
+export function LiveStatus({ s, reload, what, error }: { s: Live<unknown>; reload: () => void; what: string; error?: string | null }) {
+  if (s.kind === "ok") return <StaleNotice error={error} />;
   if (s.kind === "loading") return <p className="text-sm text-text-faint">불러오는 중…</p>;
   const msg = {
     notoken: <>토큰이 없습니다. <Link href="/" className="text-accent">홈</Link>에서 토큰을 입력하면 {what}을(를) 실제 데이터로 표시합니다.</>,
