@@ -30,7 +30,15 @@ export interface PullEvidence {
   /** Revision rounds: revise signals that were followed by at least one later commit. */
   revisions: number;
   /** Latest approve/revise signal. headMoved: a PM marker named a SHA that is no longer the PR head. */
-  decision?: { kind: "approve" | "revise"; at: string; source: DecisionSource; by: string; url?: string; commitsAfter: number; headMoved: boolean; stackedPulls: number[] };
+  decision?: {
+    kind: "approve" | "revise"; at: string; source: DecisionSource; by: string; url?: string; commitsAfter: number;
+    /** SHA the decision is bound to: official review commit_id, PM marker SHA, or the single full SHA named in a comment. */
+    sha?: string;
+    /** exact = bound to the current head; stale = bound to another SHA; unknown = no SHA evidence. Timestamps never decide this. */
+    headMatch: "exact" | "stale" | "unknown";
+    /** = headMatch === "stale" (kept for display compatibility). */
+    headMoved: boolean; stackedPulls: number[];
+  };
   /** Latest PM "codex review" request marker; onHead = it names the current head SHA. */
   reviewRequest?: { at: string; url: string; sha: string; onHead: boolean };
   /** A bot (e.g. Codex connector) submitted a review on the current head SHA. */
@@ -69,6 +77,16 @@ export function headline(body: string | null | undefined): string {
   const line = (body ?? "").replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/).map((l) => l.replace(/^[#>\s*_`-]+|[*_`]+$/g, "").replace(/\*\*/g, "").trim()).find((l) => l.length > 0) ?? "";
   return line.slice(0, 160);
 }
+const PENDING_APPROVAL = new RegExp([
+  "승인\\s*(?:이\\s*)?(?:필요|대기|요청|전|후|여부|예정|바랍니다|해\\s*주|부탁|검토|진행\\s*중|기다)",
+  "(?:승인을?|승인)\\s*(?:받아야|기다리|요청)",
+  "\\b(?:await(?:s|ing)?|pending|waiting\\s+(?:for|on)|needs?|requires?|required|request(?:s|ed|ing)?|seeking|for)\\s+(?:\\w+\\s+)?approv",
+  "\\bapproval\\s+(?:is\\s+)?(?:required|needed|pending|requested)",
+  "\\bplease\\s+approve\\b",
+  "\\bto\\s+be\\s+approved\\b",
+].join("|"), "i");
+const NEGATED_APPROVAL = /\b(?:not|no|un|never)\s*(?:yet\s+)?approv|미승인|승인\s*(?:불가|거부|거절|보류|취소|안\s*됨|하지\s*않|되지\s*않)|비승인/i;
+const AFFIRMATIVE_APPROVAL = /\b(?:approved|LGTM)\b|^\W*(?:verdict\s*:\s*)?approve\b|승인\s*(?:함|합니다|했습니다|하였습니다|했|완료|됨|되었습니다|처리)|^\W*(?:PM\s*)?승인\s*(?:$|[—–:\-.!✅])/i;
 /** Classifies a comment by its headline only — body prose like "no merge until approved" must not count. */
 export function classifyComment(body: string | null | undefined): EvidenceKind {
   // Parentheticals carry dedupe keys like "(dedupe pr56:…:opus:revise:1)" — never a decision by themselves.
@@ -77,7 +95,9 @@ export function classifyComment(body: string | null | undefined): EvidenceKind {
   const h = raw.replace(/\([^)]*\)/g, " ");
   if (/\bcompletion\b|완료 보고/i.test(h)) return "completion";
   if (/\b(changes requested|request(?:ing)? changes|revise|revision required|needs revision)\b|수정 요청|재작업/i.test(h)) return "revise";
-  if (/\b(approved?|LGTM)\b|승인/i.test(h) && !/\b(not|no|un)\s*approved?\b|미승인/i.test(h)) return "approve";
+  // Only an affirmative verdict counts. Pending/required/requested approval language ("소유자 승인 필요",
+  // "승인 대기", "awaiting approval", "please approve") is status, never a decision (PR #61 P2).
+  if (!PENDING_APPROVAL.test(h) && !NEGATED_APPROVAL.test(h) && AFFIRMATIVE_APPROVAL.test(h)) return "approve";
   if (/\breview\b|검수|리뷰/i.test(h)) return "review";
   return "other";
 }
@@ -113,17 +133,26 @@ export function pmMarkers(c: RawComment): PmMarker[] {
   }));
 }
 
+const FULL_SHA = /\b[a-f0-9]{40}\b/g;
+/** The one full commit SHA a comment names, or undefined when it names none or several (ambiguous). */
+export function boundSha(body: string | null | undefined): string | undefined {
+  const shas = new Set((body ?? "").replace(/<!--[\s\S]*?-->/g, " ").toLowerCase().match(FULL_SHA) ?? []);
+  return shas.size === 1 ? [...shas][0] : undefined;
+}
+
 const REVIEW_DECISION: Record<string, "approve" | "revise" | undefined> = { APPROVED: "approve", CHANGES_REQUESTED: "revise" };
 export function pullEvidence(p: RawPull, linkedBy: PullEvidence["linkedBy"], detail?: { reviews: RawReview[]; commits: RawCommit[]; commitsTruncated: boolean }, conversation: RawComment[] = [], markers: PmMarker[] = [], stacked: RawPull[] = []): PullEvidence {
   const comments = conversation.map(toComment).sort((a, b) => a.at.localeCompare(b.at));
+  const commentSha = new Map(conversation.map((c) => [c.id, boundSha(c.body)]));
   const reviews: ReviewEvidence[] = (detail?.reviews ?? [])
     .filter((r) => typeof r.submitted_at === "string")
     .map((r) => ({ id: r.id, url: r.html_url, at: r.submitted_at as string, login: r.user?.login ?? "unknown", state: r.state, commit: r.commit_id ?? undefined }))
     .sort((a, b) => a.at.localeCompare(b.at));
   const commitTimes = (detail?.commits ?? []).map((c) => c.commit?.committer?.date).filter((d): d is string => typeof d === "string").sort();
   const signals = [
-    ...reviews.flatMap((r) => (REVIEW_DECISION[r.state] ? [{ kind: REVIEW_DECISION[r.state]!, at: r.at, source: "review" as const, by: r.login, url: r.url }] : [])),
-    ...comments.flatMap((c) => (c.kind === "approve" || c.kind === "revise" ? [{ kind: c.kind, at: c.at, source: "comment" as const, by: c.login, url: c.url }] : [])),
+    // Official reviews keep their commit_id so approval freshness is SHA-bound, not timestamp-bound (PR #61 P1).
+    ...reviews.flatMap((r) => (REVIEW_DECISION[r.state] ? [{ kind: REVIEW_DECISION[r.state]!, at: r.at, source: "review" as const, by: r.login, url: r.url, sha: r.commit }] : [])),
+    ...comments.flatMap((c) => (c.kind === "approve" || c.kind === "revise" ? [{ kind: c.kind, at: c.at, source: "comment" as const, by: c.login, url: c.url, sha: commentSha.get(c.id) }] : [])),
     ...markers.filter((m) => m.kind === "revise_request").map((m) => ({ kind: "revise" as const, at: m.at, source: "pm-marker" as const, by: m.agent ? `PM→${m.agent}` : "PM", url: m.url, sha: m.sha })),
   ].sort((a, b) => a.at.localeCompare(b.at)) as Array<{ kind: "approve" | "revise"; at: string; source: DecisionSource; by: string; url?: string; sha?: string }>;
   const after = (at: string) => commitTimes.filter((t) => t > at).length;
@@ -140,7 +169,10 @@ export function pullEvidence(p: RawPull, linkedBy: PullEvidence["linkedBy"], det
     commits: { count: commitTimes.length, truncated: detail?.commitsTruncated ?? false, latestAt: commitTimes[commitTimes.length - 1] },
     reviews, comments,
     revisions: detail ? signals.filter((s) => s.kind === "revise" && addressed(s)).length : 0,
-    decision: last && detail ? { kind: last.kind, at: last.at, source: last.source, by: last.by, url: last.url, commitsAfter: after(last.at), headMoved: !!last.sha && last.sha !== p.head.sha, stackedPulls: stackedAfter(last.at) } : undefined,
+    decision: last && detail ? (() => {
+      const headMatch = !last.sha ? "unknown" as const : last.sha.toLowerCase() === p.head.sha.toLowerCase() ? "exact" as const : "stale" as const;
+      return { kind: last.kind, at: last.at, source: last.source, by: last.by, url: last.url, commitsAfter: after(last.at), sha: last.sha, headMatch, headMoved: headMatch === "stale", stackedPulls: stackedAfter(last.at) };
+    })() : undefined,
     reviewRequest: reviewRequest ? { at: reviewRequest.at, url: reviewRequest.url, sha: reviewRequest.sha, onHead: reviewRequest.sha === p.head.sha } : undefined,
     botReviewOnHead: botReviewOnHead ? { at: botReviewOnHead.at, login: botReviewOnHead.login, url: botReviewOnHead.url } : undefined,
     detail: detail ? "loaded" : "skipped",
@@ -167,9 +199,14 @@ export function nextAction(i: { state: "open" | "closed"; agent: string; status:
   if (d?.kind === "revise") return d.commitsAfter > 0 || d.headMoved
     ? { code: "pm_rereview", label: `PR #${pr.number} 수정 반영됨(${d.headMoved ? "head 변경" : `커밋 ${d.commitsAfter}건`}) — 재검수`, actor: "PM/Codex" }
     : { code: "agent_revision", label: `PR #${pr.number} 수정 요청 반영 대기`, actor: agent };
-  if (d?.kind === "approve") return d.commitsAfter > 0
-    ? { code: "pm_rereview", label: `PR #${pr.number} 승인 후 새 커밋 ${d.commitsAfter}건 — 재검수`, actor: "PM/Codex" }
-    : { code: "owner_merge_decision", label: `PR #${pr.number} 승인됨 — 소유자 병합/배포 승인 필요`, actor: "소유자" };
+  if (d?.kind === "approve") {
+    // Approval counts only when bound to the exact current head SHA (cherry-pick/rebase can keep older timestamps).
+    if (d.headMatch === "stale") return { code: "pm_rereview", label: `PR #${pr.number} 승인 SHA ${d.sha!.slice(0, 7)} ≠ 현재 head ${pr.headSha.slice(0, 7)} — 재검수`, actor: "PM/Codex" };
+    if (d.headMatch === "unknown") return { code: "pm_decision", label: `PR #${pr.number} 승인 대상 SHA 확인 불가 — 현재 head ${pr.headSha.slice(0, 7)} 기준 PM 판정 필요`, actor: "PM" };
+    return d.commitsAfter > 0
+      ? { code: "pm_rereview", label: `PR #${pr.number} 승인 후 새 커밋 ${d.commitsAfter}건 — 재검수`, actor: "PM/Codex" }
+      : { code: "owner_merge_decision", label: `PR #${pr.number} 현재 head ${pr.headSha.slice(0, 7)} 승인됨 — 소유자 병합/배포 승인 필요`, actor: "소유자" };
+  }
   if (pr.botReviewOnHead) return { code: "pm_decision", label: `PR #${pr.number} ${pr.botReviewOnHead.login} 리뷰 완료(현재 head) — PM 판정 필요`, actor: "PM" };
   if (pr.reviewRequest?.onHead) return { code: "codex_review", label: `PR #${pr.number} Codex 리뷰 요청됨(현재 head) — 결과 대기`, actor: "Codex" };
   return { code: "pm_review", label: `PR #${pr.number} 검수 대기`, actor: "PM/Codex" };

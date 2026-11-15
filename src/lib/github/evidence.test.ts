@@ -59,10 +59,12 @@ test("review → revision → re-review → approval → owner decision from Git
   assert.equal(ev.nextAction.code, "pm_rereview");
   assert.equal(ev.pulls[0].revisions, 1);
 
-  const pmApprove = comment(20, 6, "Approved by PM", "2026-01-01T04:00:00Z");
+  // PR #61 P1: a comment approval must name the exact current head SHA to count.
+  const pmApprove = comment(20, 6, `Approved by PM\nhead ${"a".repeat(40)}`, "2026-01-01T04:00:00Z");
   ev = build(issues, pulls, [pmApprove], detail).issues[0];
   assert.equal(ev.nextAction.code, "owner_merge_decision");
   assert.equal(ev.pulls[0].decision?.source, "comment");
+  assert.equal(ev.pulls[0].decision?.headMatch, "exact");
 });
 
 test("skipped detail is reported, not guessed; merged and closed issues map deterministically", () => {
@@ -139,4 +141,61 @@ test("revise addressed by a PR stacked on the head branch points PM at the stack
   assert.equal(ev.pulls[0].revisions, 1);
   assert.equal(ev.nextAction.code, "pm_rereview");
   assert.match(ev.nextAction.label, /#8/);
+});
+
+test("PR #61 P1: official approval is bound to its commit_id, never to timestamps", () => {
+  const head = "a".repeat(40), older = "e".repeat(40);
+  const issues = [issue(5, ["agent:opus", "status:review"])];
+  const pulls = [pull(6, "feat — Refs #5")];
+  // Current head A was cherry-picked/rebased with a committer date OLDER than the review of SHA B.
+  const commits = [commit("2026-01-01T01:00:00Z")];
+  const review = (commit_id: string | null) => ({ id: 3, state: "APPROVED", submitted_at: "2026-01-01T05:00:00Z", commit_id, html_url: "https://x/r3", user: { login: "pm" } });
+
+  let ev = build(issues, pulls, [], new Map([[6, { reviews: [review(older)], commits, commitsTruncated: false }]])).issues[0];
+  assert.equal(ev.pulls[0].decision?.commitsAfter, 0, "timestamps alone would have looked fresh");
+  assert.equal(ev.pulls[0].decision?.sha, older);
+  assert.equal(ev.pulls[0].decision?.headMatch, "stale");
+  assert.equal(ev.pulls[0].decision?.headMoved, true);
+  assert.equal(ev.nextAction.code, "pm_rereview");
+  assert.notEqual(ev.nextAction.code, "owner_merge_decision");
+
+  ev = build(issues, pulls, [], new Map([[6, { reviews: [review(null)], commits, commitsTruncated: false }]])).issues[0];
+  assert.equal(ev.pulls[0].decision?.headMatch, "unknown");
+  assert.equal(ev.nextAction.code, "pm_decision");
+
+  ev = build(issues, pulls, [], new Map([[6, { reviews: [review(head)], commits, commitsTruncated: false }]])).issues[0];
+  assert.equal(ev.pulls[0].decision?.headMatch, "exact");
+  assert.equal(ev.nextAction.code, "owner_merge_decision");
+
+  // Comment approvals: no SHA or several SHAs → unknown; another single SHA → stale.
+  const detail = new Map([[6, { reviews: [], commits, commitsTruncated: false }]]);
+  for (const [body, match, code] of [
+    ["Approved — LGTM", "unknown", "pm_decision"],
+    [`Approved — base ${older} head ${head}`, "unknown", "pm_decision"],
+    [`Approved at ${older}`, "stale", "pm_rereview"],
+    [`승인 완료 ${head.toUpperCase()}`, "exact", "owner_merge_decision"],
+  ] as const) {
+    ev = build(issues, pulls, [comment(40, 6, body, "2026-01-01T05:00:00Z")], detail).issues[0];
+    assert.equal(ev.pulls[0].decision?.headMatch, match, body);
+    assert.equal(ev.nextAction.code, code, body);
+  }
+});
+
+test("PR #61 P2: only affirmative approval counts; pending/required approval phrases do not", () => {
+  for (const h of ["소유자 승인 필요", "## 승인 대기", "**소유자 승인 필요** — PR #61", "PM 승인 요청", "승인 전 검토 중", "병합 승인 필요",
+    "Awaiting approval", "Pending owner approval", "Approval required before merge", "Needs approval", "Please approve", "Ready for approval",
+    "Not yet approved", "미승인", "승인 불가", "승인 보류"]) {
+    assert.notEqual(classifyComment(h), "approve", h);
+  }
+  for (const h of ["Approved — LGTM", "LGTM", "Verdict: APPROVE", "승인합니다", "PM 승인 완료", "✅ 승인", "승인됨 (head abc)", "승인 — 병합 가능"]) {
+    assert.equal(classifyComment(h), "approve", h);
+  }
+  const issues = [issue(5, ["agent:opus", "status:review"])];
+  const pulls = [pull(6, "feat — Refs #5")];
+  const detail = new Map([[6, { reviews: [], commits: [commit("2026-01-01T01:00:00Z")], commitsTruncated: false }]]);
+  for (const body of [`소유자 승인 필요\nhead ${"a".repeat(40)}`, `승인 대기 ${"a".repeat(40)}`]) {
+    const ev = build(issues, pulls, [comment(41, 6, body, "2026-01-01T05:00:00Z")], detail).issues[0];
+    assert.equal(ev.pulls[0].decision, undefined, body);
+    assert.notEqual(ev.nextAction.code, "owner_merge_decision", body);
+  }
 });
