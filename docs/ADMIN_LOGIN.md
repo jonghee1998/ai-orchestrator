@@ -59,6 +59,15 @@
 - 클라이언트 식별: `x-forwarded-for`/`x-real-ip`/`forwarded`는 **절대 신뢰하지 않는다**. 플랫폼이 덮어쓰는
   `x-vercel-forwarded-for`만, Vercel(`VERCEL=1`) 또는 `LOGIN_TRUST_PROXY=vercel` 일 때 사용한다. 그 외에는 모든 호출자가
   하나의 `unattributed` 버킷을 공유한다(이 경우 공격자의 실패가 소유자를 일시 차단할 수 있음 — 알려진 한계).
+- **IPv6 /64 정규화:** IPv6 클라이언트는 `/64` 프리픽스 단위로 한 버킷에 묶는다(대소문자·`::` 압축·앞자리 0·zone id가 달라도 동일 키).
+  IPv4-mapped(`::ffff:a.b.c.d`)는 해당 IPv4 키로 취급하고, 파싱 불가/비정상 값은 `unattributed`이다. 한 가입자가 /64 안에서
+  주소를 바꿔 가며 전역 50회 상한을 소진하는 것을 막기 위함이며, 서로 다른 /64 또는 IPv4는 별도 버킷이고 전역 상한은 우회되지 않는다.
+- **신뢰 프록시 오버라이드(`LOGIN_TRUST_PROXY=vercel`)는 신뢰할 수 있는 Vercel ingress 뒤에서만** 설정한다. 이 값은 앱이 직접 인터넷에
+  노출되거나 `x-vercel-forwarded-for`를 덮어쓰지 않는 프록시 뒤에 있을 때 켜면 안 된다(호출자가 헤더로 버킷을 선택할 수 있게 됨).
+  `VERCEL=1` 환경에서는 Vercel이 헤더를 덮어쓴다. Vercel 앞단에 CDN/프록시를 두면 `x-vercel-forwarded-for`는 그 CDN의 egress IP가 될 수
+  있어 모든 사용자가 한 버킷을 공유한다(소유자 일시 차단 가능). 이 경우 CDN 레벨 제한을 별도로 구성한다.
+- **잔여 한계:** 카운터는 인스턴스별 메모리이며(인스턴스 간 공유 없음), 전역 50회 상한은 인스턴스마다 따로 적용된다.
+  서로 다른 /64를 다수 보유한 공격자(≥10개 프리픽스)는 여전히 전역 상한에 도달할 수 있다.
 - 레거시 `{token}` 교환은 Origin/Sec-Fetch-Site가 없는 Host-only 스크립트(curl 등)를 허용한다. 근거: CSRF는 브라우저가 필요하고
   브라우저는 교차 출처 POST에 Origin을 항상 붙이며, 본문에 유효한 서버 토큰이 있어야 하고 쿠키는 SameSite=Strict이다.
   Origin/Sec-Fetch-Site가 있으면 반드시 same-origin이어야 하고, 비밀번호 로그인·로그아웃은 계속 엄격하다.

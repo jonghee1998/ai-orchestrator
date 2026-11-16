@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes, scryptSync } from "node:crypto";
 import { handleSession } from "./http";
-import { clientKey, LoginLimiter, LOGIN_ATTEMPTS, LOGIN_GLOBAL_ATTEMPTS, LOGIN_MAX_CLIENTS, LOGIN_WINDOW_MS, UNATTRIBUTED } from "./rate-limit";
+import { clientKey, normalizeIp, LoginLimiter, LOGIN_ATTEMPTS, LOGIN_GLOBAL_ATTEMPTS, LOGIN_MAX_CLIENTS, LOGIN_WINDOW_MS, UNATTRIBUTED } from "./rate-limit";
 import { legacyHostOnly, sameOrigin } from "./session";
 import { PASSWORD_PREFIX } from "./password";
 
@@ -126,4 +126,51 @@ test("concurrency: parallel failures cannot exceed the per-client budget; refund
   for (let i = 1; i < LOGIN_ATTEMPTS; i++) assert.ok(m.take(later).allowed);
   assert.equal(m.take(later).allowed, false); // stale refund did not erase the new window's reservation
   b.release?.("refund"); assert.ok(m.take(later).allowed);
+});
+
+test("IPv6 is bucketed by /64: equivalent forms collapse, /128 rotation cannot exhaust the global ceiling", async () => {
+  const V = { VERCEL: "1" };
+  const key = (ip: string) => clientKey(browser({ "x-vercel-forwarded-for": ip }), V);
+  const p = "2001:db8:1:2::/64";
+  for (const ip of ["2001:db8:1:2::1", "2001:0DB8:0001:0002:0000:0000:0000:ffff", "2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::1%eth0", "2001:db8:1:2:0:0:0:1"])
+    assert.equal(key(ip), p, ip);
+  assert.notEqual(key("2001:db8:1:3::1"), p);       // distinct prefixes stay distinct
+  assert.notEqual(key("2001:db8:2:2::1"), p);
+  assert.equal(key("::ffff:203.0.113.9"), "203.0.113.9"); // IPv4-mapped -> IPv4 key
+  assert.equal(key("::ffff:cb00:7109"), "203.0.113.9");
+  assert.equal(key("0:0:0:0:0:ffff:203.0.113.9"), "203.0.113.9");
+  assert.equal(key("203.0.113.9"), "203.0.113.9");
+  assert.equal(key("::1"), "0:0:0:0::/64");
+  for (const bad of ["", "garbage", "1:2:3", "2001:db8::1::2", "1.2.3.4.5", "999.1.1.1", "2001:db8:1:2::1,", "g::1", "12345::1", "::ffff:999.1.1.1", " "])
+    assert.equal(normalizeIp(bad), UNATTRIBUTED, bad);
+  assert.equal(clientKey(browser({ "x-vercel-forwarded-for": "x".repeat(100) }), V), UNATTRIBUTED);
+  assert.equal(clientKey(browser(), V), UNATTRIBUTED);
+
+  // regression (M1): one /64 rotating addresses is limited as ONE client and leaves the owner able to log in.
+  const l = new LoginLimiter();
+  let ok = 0, limited = 0;
+  for (let i = 0; i < 200; i++) {
+    const r = await post(browser({ "x-vercel-forwarded-for": `2001:db8:1:2::${(i + 1).toString(16)}` }), bad, l, { ...env, ...V });
+    if (r.status === 401) ok++; else if (r.status === 429) limited++;
+  }
+  assert.equal(ok, LOGIN_ATTEMPTS); assert.equal(limited, 200 - LOGIN_ATTEMPTS);
+  assert.equal((await post(browser({ "x-vercel-forwarded-for": "198.51.100.7" }), good, l, { ...env, ...V })).status, 200);
+  // IPv4 and its mapped form share a bucket; distinct /64s are independent buckets and still hit the global ceiling.
+  const m = new LoginLimiter();
+  for (let i = 0; i < LOGIN_ATTEMPTS; i++) assert.equal((await post(browser({ "x-vercel-forwarded-for": "203.0.113.9" }), bad, m, { ...env, ...V })).status, 401);
+  assert.equal((await post(browser({ "x-vercel-forwarded-for": "::ffff:203.0.113.9" }), bad, m, { ...env, ...V })).status, 429);
+  const g = new LoginLimiter(); let allowed = 0;
+  for (let i = 0; i < LOGIN_GLOBAL_ATTEMPTS + 20; i++) if (g.take(NOW, key(`2001:db8:${i.toString(16)}::1`)).allowed) allowed++;
+  assert.equal(allowed, LOGIN_GLOBAL_ATTEMPTS); // global ceiling is not bypassed
+});
+
+test("malformed x-vercel-forwarded-for shares the unattributed bucket and concurrent /64 rotation is counted once", async () => {
+  const e = { ...env, VERCEL: "1" };
+  const l = new LoginLimiter();
+  const r = await Promise.all(Array.from({ length: 12 }, (_, i) => post(browser({ "x-vercel-forwarded-for": `2001:db8:9:9::${i + 1}` }), bad, l, e)));
+  assert.equal(r.filter(x => x.status === 401).length, LOGIN_ATTEMPTS);
+  assert.equal(r.filter(x => x.status === 429).length, 12 - LOGIN_ATTEMPTS);
+  const u = new LoginLimiter();
+  for (let i = 0; i < LOGIN_ATTEMPTS; i++) assert.equal((await post(browser({ "x-vercel-forwarded-for": `junk${i}` }), bad, u, e)).status, 401);
+  assert.equal((await post(browser(), bad, u, e)).status, 429);
 });
