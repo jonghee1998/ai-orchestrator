@@ -17,6 +17,7 @@ export interface GitHubIssue {
   body: string | null;
   html_url: string;
   state?: string;
+  state_reason?: string | null;
   labels: Array<string | { name?: string | null }>;
   pull_request?: unknown;
   milestone?: { number: number; title: string; description?: string | null } | null;
@@ -25,6 +26,8 @@ export interface GitHubIssue {
 export interface WorkQueueTask {
   project?: { id: string; name: string; goal?: string };
   issueState?: "open" | "closed";
+  /** GitHub close reason; absent when not provided by the source (treated as unverified, never as accepted). */
+  stateReason?: "completed" | "not_planned" | "duplicate" | "unknown";
   description?: string;
   id: string;
   title: string;
@@ -97,6 +100,7 @@ export function normalizeIssues(issues: GitHubIssue[]): WorkQueueTask[] {
       return {
         ...(project ? { project } : {}),
         ...(issue.state === "open" || issue.state === "closed" ? { issueState: issue.state } : {}),
+        ...(issue.state === "closed" && issue.state_reason ? { stateReason: (["completed", "not_planned", "duplicate"].includes(issue.state_reason) ? issue.state_reason : "unknown") as "completed" | "not_planned" | "duplicate" | "unknown" } : {}),
         ...(issue.body ? { description: issue.body } : {}),
         id: String(issue.number),
         title: issue.title,
