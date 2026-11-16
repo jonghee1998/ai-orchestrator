@@ -8,9 +8,11 @@ export type CompletionType = "deploy" | "integration" | "nondeploy" | "unknown";
 export type LifecyclePhase = "remaining" | "reported" | "active" | "review" | "blocked" | "done" | "unknown";
 export type Completion = "complete" | "deployment_pending" | "incomplete" | "unknown";
 export type CloseReason = "completed" | "not_planned" | "duplicate" | "unknown";
-/** verified = PM acceptance (self-reported marker, NOT GitHub approval) or official non-author approval on the exact head.
- *  comment-only = a plain approve-looking comment/review: never acceptance. */
-export type ReviewState = "verified" | "stale" | "unverified" | "comment-only" | "none";
+/** verified = OFFICIAL non-author GitHub approval on the exact head.
+ *  pm-accepted = PM self-reported acceptance marker on the exact head (NOT GitHub approval, NOT authentication).
+ *  comment-only = a plain approve-looking comment/review: never acceptance.
+ *  Neither verified nor pm-accepted authorizes execution/merge/deploy (see Lifecycle.authorizesExecution). */
+export type ReviewState = "verified" | "pm-accepted" | "stale" | "unverified" | "comment-only" | "none";
 export type MissingEvidence = "completion_type" | "merged_pr" | "main_merge" | "deployment" | "pr_association" | "issue_closed" | "integration_target" | "review_current" | "close_reason" | "open_pr" | "acceptance_current" | "stranded_stack" | "merge_order" | "evidence_partial";
 
 export interface Lifecycle {
@@ -26,6 +28,8 @@ export interface Lifecycle {
   /** Commits/PR prove work occurred, not that anything is currently running. */
   workOccurred: boolean;
   review: ReviewState;
+  /** Always false: lifecycle completion, a PM marker or an official review are evidence only — never execution authorization. */
+  authorizesExecution: false;
   pr?: { number: number; state: PullEvidence["state"]; base: string; /** branch ref */ head: string; headSha: string };
 }
 
@@ -83,6 +87,8 @@ export function universe(proof: IssueEvidence | undefined): StackRef[] {
 }
 /** Boundary PRs for target T. Strictly base === T; a PR with head === T is OUTGOING from T and never counts. */
 export const boundaries = (u: StackRef[], target: string) => u.filter(p => p.base === target && p.head !== target && p.state !== "closed");
+/** Closed-unmerged PRs into T: never a boundary (nothing delivered), but their live descendants are stranded (R9). */
+const closedBoundaries = (u: StackRef[], target: string) => u.filter(p => p.base === target && p.head !== target && p.state === "closed");
 /** PRs stacked on `root` (Q.base === parent.head, transitive) with their parent. Cycle-safe. */
 export function upstack(u: StackRef[], root: StackRef): { q: StackRef; parent: StackRef }[] {
   const out: { q: StackRef; parent: StackRef }[] = [], seen = new Set<number>([root.number]);
@@ -97,14 +103,19 @@ export function upstack(u: StackRef[], root: StackRef): { q: StackRef; parent: S
 const ts = (s?: string) => (s ? Date.parse(s) : NaN);
 /** PM acceptance (self-reported marker) or official non-author approval, bound to B's current head SHA and target. */
 function acceptanceOf(b: StackRef, target: string, acc: Acceptance[]): "current" | "stale" | "none" {
+  const s = acceptanceSources(b, target, acc);
+  return s.pm || s.official ? "current" : s.stale ? "stale" : "none";
+}
+/** PM self-reported marker and official review kept apart; they are never merged into one "verified" signal. */
+function acceptanceSources(b: StackRef, target: string, acc: Acceptance[]): { pm: boolean; official: boolean; stale: boolean } {
   const mine = acc.filter(a => a.pr === b.number && a.target === target);
-  if (mine.some(a => a.sha.toLowerCase() === b.headSha.toLowerCase()) || b.officialApproved) return "current";
-  return mine.length ? "stale" : "none";
+  const pm = mine.some(a => a.sha.toLowerCase() === b.headSha.toLowerCase());
+  return { pm, official: !!b.officialApproved, stale: mine.length > 0 && !pm };
 }
 
 const reviewFor = (pull: PullEvidence | undefined, ref: StackRef | undefined, target: string | undefined, acc: Acceptance[]): ReviewState => {
-  if (ref && target) { const a = acceptanceOf(ref, target, acc); if (a !== "none") return a === "current" ? "verified" : "stale"; }
-  else if (ref?.officialApproved) return "verified";
+  if (ref?.officialApproved) return "verified";
+  if (ref && target) { const a = acceptanceSources(ref, target, acc); if (a.pm) return "pm-accepted"; if (a.stale) return "stale"; }
   const d = pull?.decision;
   if (!d || d.kind !== "approve") return "none";
   // A plain comment/review "approval" is never acceptance (A5): at most a comment-only signal.
@@ -115,11 +126,16 @@ type Pending = Exclude<MissingEvidence, "completion_type" | "integration_target"
 /** Integration into T. Returns the missing evidence and whether merge ordering could not be established. */
 function integration(u: StackRef[], target: string, acc: Acceptance[]): { missing: Pending[]; orderUnknown: boolean; primary?: StackRef } {
   const bd = boundaries(u, target);
-  if (!bd.length) return { missing: ["merged_pr"], orderUnknown: false };
   const missing = new Set<Pending>(); let orderUnknown = false;
+  if (!bd.length) missing.add("merged_pr");
+  // R9 at the boundary: a closed-unmerged boundary PR delivered nothing, so any live (open/merged) descendant is stranded.
+  for (const b of closedBoundaries(u, target)) if (upstack(u, b).some(({ q }) => q.state !== "closed")) missing.add("stranded_stack");
+  if (!bd.length) return { missing: [...missing], orderUnknown: false };
   for (const b of bd) {
     if (b.state === "open") missing.add("merged_pr");
     for (const { q, parent } of upstack(u, b)) {
+      // R9: a closed-unmerged ancestor never delivered its branch; any live (open/merged) descendant is stranded, however deep.
+      if (parent.state === "closed" && q.state !== "closed") missing.add("stranded_stack");
       if (q.state === "open") missing.add("open_pr");
       else if (q.state === "merged" && parent.state === "merged") {
         const a = ts(q.mergedAt), p = ts(parent.mergedAt);
@@ -196,7 +212,7 @@ export function classify(task: Pick<WorkQueueTask, "status" | "dependsOn" | "iss
     phase, completionType, completion, missingEvidence: [...new Set(missing)],
     receipt, signal, execution: "unverified",
     workOccurred: pulls.length > 0,
-    review,
+    review, authorizesExecution: false,
     // `head` is the branch REF (same meaning as PullEvidence.head); the commit is `headSha`.
     ...(prRef ? { pr: { number: prRef.number, state: prRef.state, base: prRef.base, head: prRef.head, headSha: prRef.headSha } } : {}),
   };
@@ -207,10 +223,11 @@ export const COMPLETION_LABEL: Record<Completion, string> = { complete: "완료 
 /** Visible wording: a status label alone is NOT a reported receipt. */
 export const SIGNAL_LABEL: Record<"ack" | "label", string> = { ack: "접수 보고됨 · 실행 미확인", label: "상태 라벨만 확인됨 · 접수 보고 없음 · 실행 미확인" };
 
-export interface ProjectRollup { done: number; active: number; reported: number; remaining: number; stage: string }
+export interface ProjectRollup { /** Complete per criteria. May rest on a PM self-reported marker. */ done: number; /** Tasks in `done` that lack an official non-author review (PM self-report or issue closure only). */ doneWithoutOfficialReview: number; active: number; reported: number; remaining: number; stage: string }
 /** Project complete only when every task meets its explicit completion criteria. */
-export function rollup(phases: { phase: LifecyclePhase; completion: Completion; signal?: Lifecycle["signal"] }[]): ProjectRollup {
+export function rollup(phases: { phase: LifecyclePhase; completion: Completion; signal?: Lifecycle["signal"]; review?: ReviewState }[]): ProjectRollup {
   const done = phases.filter(t => t.completion === "complete").length;
+  const doneWithoutOfficialReview = phases.filter(t => t.completion === "complete" && t.review !== "verified").length;
   const active = phases.filter(t => t.phase === "active" || t.phase === "review").length;
   const reported = phases.filter(t => t.phase === "reported").length;
   const stage = phases.length && done === phases.length ? "업무 완료"
@@ -219,5 +236,5 @@ export function rollup(phases: { phase: LifecyclePhase; completion: Completion; 
     : phases.some(t => t.phase === "review") ? "검수 중" : phases.some(t => t.phase === "active") ? "진행 중"
     : reported ? SIGNAL_LABEL[phases.some(t => t.phase === "reported" && t.signal === "ack") ? "ack" : "label"]
     : phases.some(t => t.completion === "unknown" && t.phase === "unknown") ? "확인 필요" : "시작 준비";
-  return { done, active, reported, remaining: phases.length - done, stage };
+  return { done, doneWithoutOfficialReview, active, reported, remaining: phases.length - done, stage };
 }

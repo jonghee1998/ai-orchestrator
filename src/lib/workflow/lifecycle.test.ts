@@ -109,7 +109,7 @@ test("comment/review-looking approval is never acceptance; stale or unknown SHA 
   assert.notEqual(c.phase, "done"); assert.equal(c.review, "comment-only"); assert.ok(c.missingEvidence.includes("acceptance_current"));
   assert.equal(run(task(), proof([pull({ decision: approve("stale") })])).review, "stale");
   assert.equal(run(task(), proof([pull({ decision: approve("unknown") })])).review, "unverified");
-  assert.equal(run(task(), proof([pull()], 0, { acceptances: [accept()] })).review, "verified");
+  assert.equal(run(task(), proof([pull()], 0, { acceptances: [accept()] })).review, "pm-accepted");
   assert.equal(run(task(), proof([pull()])).review, "none");
 });
 test("multiple PRs: open beats historical merged for display; ambiguous display pick is unknown for non-integration", () => {
@@ -282,7 +282,7 @@ test("e2e: #105-style `Refs #104 #99 #102` links #105 to #99; stack read from AL
   assert.deepEqual(i.pulls.map(p => p.number), [100, 103, 105]);
   const noAcc = e2eRun(i); assert.equal(noAcc.completion, "incomplete"); assert.deepEqual(noAcc.missingEvidence, ["acceptance_current"]);
   const ok = e2e({ comments: [rawComment(1, 100, `PM 수락 기록\n<!-- gpt-pm-accept:v1 issue99:pr100:${M2}:target=${T} -->`)] });
-  const l = e2eRun(ok); assert.equal(l.completion, "complete"); assert.equal(l.review, "verified");
+  const l = e2eRun(ok); assert.equal(l.completion, "complete"); assert.equal(l.review, "pm-accepted");
   // marker bound to another issue number is ignored
   assert.equal(e2eRun(e2e({ comments: [rawComment(1, 100, `<!-- gpt-pm-accept:v1 issue98:pr100:${M2}:target=${T} -->`)] })).completion, "incomplete");
   // up-stack PR not linked at all (no Refs) but stacked on #103 is still seen
@@ -311,4 +311,52 @@ test("#18 one model: a closed issue that is not complete is not 'done' in nextAc
   const c = closed("completed"); assert.equal(c.nextAction.code, "done"); assert.equal(e2eRun(c, "closed", "completed").phase, "done");
   const n = closed("not_planned"); assert.equal(n.nextAction.code, "closed_unverified"); assert.notEqual(e2eRun(n, "closed", "not_planned").phase, "done");
   const noAcc = e2e({ issue: { state: "closed", state_reason: "completed" } }); assert.equal(noAcc.nextAction.code, "closed_unverified"); assert.equal(e2eRun(noAcc, "closed", "completed").phase, "unknown");
+});
+
+// ---- Issue #110 (T1) ----
+const S2 = "b".repeat(40), S3 = "c".repeat(40);
+const chain = (bState: PullEvidence["state"]) => [
+  pull({ number: 10, base: "feature", head: "a", headSha: SHA, state: "merged", mergedAt: "2026-01-01T00:00:10Z" }),
+  pull({ number: 11, base: "a", head: "b", headSha: S2, state: bState, linkedBy: ["body"], mergedAt: bState === "merged" ? "2026-01-01T00:00:20Z" : undefined }),
+  pull({ number: 12, base: "b", head: "c", headSha: S3, state: "merged", linkedBy: ["body"], mergedAt: "2026-01-01T00:00:30Z" }),
+];
+test("T1/R9: int←A merged, A←B closed, B←C merged is stranded, never complete", () => {
+  const l = run(task(), proof(chain("closed"), 0, { acceptances: [accept({ pr: 10 })] }));
+  assert.notEqual(l.completion, "complete"); assert.ok(l.missingEvidence.includes("stranded_stack"));
+});
+test("T1/R9: closed ancestor with open descendant is stranded too; closed leaf alone is not", () => {
+  const open = chain("closed"); open[2] = { ...open[2], state: "open", mergedAt: undefined };
+  assert.ok(run(task(), proof(open)).missingEvidence.includes("stranded_stack"));
+  const leaf = chain("closed").slice(0, 2);
+  assert.ok(!run(task(), proof(leaf, 0, { acceptances: [accept({ pr: 10 })] })).missingEvidence.includes("stranded_stack"));
+});
+test("T1: PM marker → pm-accepted, official approval → verified; never authorizes execution", () => {
+  const pm = run(task(), proof([pull()], 0, { acceptances: [accept()] }));
+  assert.equal(pm.review, "pm-accepted"); assert.equal(pm.authorizesExecution, false);
+  const off = run(task(), proof([pull({ officialApproval: { by: "r", at: "", sha: SHA, url: "" } })]));
+  assert.equal(off.review, "verified"); assert.equal(off.authorizesExecution, false);
+});
+test("T1: rollup separates complete tasks without official review", () => {
+  const r = rollup([{ phase: "done", completion: "complete", review: "pm-accepted" }, { phase: "done", completion: "complete", review: "verified" }]);
+  assert.equal(r.done, 2); assert.equal(r.doneWithoutOfficialReview, 1);
+});
+
+// ---- Issue #113 (T1 revision 1) ----
+test("T1r1/P2: closed-unmerged boundary with a live descendant is stranded (not a review target)", () => {
+  const pulls = [
+    pull({ number: 10, base: "feature", head: "a", headSha: SHA, state: "closed", mergedAt: undefined }),
+    pull({ number: 11, base: "a", head: "b", headSha: S2, state: "merged", linkedBy: ["body"], mergedAt: "2026-01-01T00:00:20Z" }),
+  ];
+  const l = run(task(), proof(pulls));
+  assert.notEqual(l.completion, "complete"); assert.ok(l.missingEvidence.includes("stranded_stack")); assert.ok(l.missingEvidence.includes("merged_pr"));
+  const open = [pulls[0], { ...pulls[1], state: "open" as const, mergedAt: undefined }];
+  assert.ok(run(task(), proof(open)).missingEvidence.includes("stranded_stack"));
+  // closed boundary alone, or with only closed descendants: not stranded
+  assert.ok(!run(task(), proof([pulls[0]])).missingEvidence.includes("stranded_stack"));
+  assert.ok(!run(task(), proof([pulls[0], { ...pulls[1], state: "closed", mergedAt: undefined }])).missingEvidence.includes("stranded_stack"));
+});
+test("T1r1/P3: official approval SHA matches case-insensitively on both sides", () => {
+  const up = SHA.toUpperCase();
+  const l = run(task(), proof([pull({ headSha: up, officialApproval: { by: "r", at: "", sha: SHA, url: "" } })]));
+  assert.equal(l.review, "verified");
 });
