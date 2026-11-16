@@ -80,9 +80,10 @@ export function tipFrom(baseSha, branch, cmp) {
 }
 
 /**
- * F3: canonical ROOT request. A revision issue / replacement chain carries `<!-- orch-root-request:v1 #<N> -->` in its
- * body (only honoured from the trusted PM author). No marker => the issue is its own root. Returns the marker target
- * or null (none). Multiple conflicting markers => "ambiguous".
+ * Canonical ROOT request (Issue #144: explicit, never inferred). Every request issue in a chain, the root itself
+ * (self-reference) and every revision, MUST carry `<!-- orch-root-request:v1 #<root> -->` in its body, honoured only
+ * from the trusted PM author. Returns the marker target, `null` (missing / untrusted => callers fail closed; there is
+ * NO implicit "unmarked issue is its own root" fallback) or "ambiguous" (conflicting markers).
  */
 const ROOT_RE = /<!--\s*orch-root-request:v1\s+#(\d+)\s*-->/g;
 export function rootMarker(issue) {
@@ -91,11 +92,15 @@ export function rootMarker(issue) {
   return set.size === 0 ? null : set.size === 1 ? [...set][0] : "ambiguous";
 }
 
-/** F8: replacement marker `<!-- orch-supersedes:v1 pr<N> -->` in the PR body, trusted PM author only. */
-const SUPERSEDES_RE = /<!--\s*orch-supersedes:v1\s+pr(\d+)\s*-->/g;
+/**
+ * Replacement marker in the PR body, trusted PM author only: `<!-- orch-supersedes:v1 pr<N> -->` or
+ * `<!-- orch-supersedes:v1 none -->` (original PR of the chain). Returns N, "none", `null` (missing / untrusted =>
+ * callers fail closed, no implicit "none") or "ambiguous" (any conflicting or repeated-different markers).
+ */
+const SUPERSEDES_RE = /<!--\s*orch-supersedes:v1\s+(?:pr(\d+)|(none))\s*-->/g;
 export function supersedesMarker(pr) {
   if (!isTrustedPm(pr?.user)) return null;
-  const set = new Set([...(pr.body ?? "").matchAll(SUPERSEDES_RE)].map((m) => Number(m[1])));
+  const set = new Set([...(pr.body ?? "").matchAll(SUPERSEDES_RE)].map((m) => (m[2] ? "none" : Number(m[1]))));
   return set.size === 0 ? null : set.size === 1 ? [...set][0] : "ambiguous";
 }
 

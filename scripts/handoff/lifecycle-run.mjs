@@ -12,28 +12,63 @@ export function configFromEnv(env = process.env) {
   return parseConfig({ allowlist: list, expectedBase: env.HANDOFF_LIFECYCLE_EXPECTED_BASE });
 }
 
-const MAX_ROOT_HOPS = 5;
-/** F3: follow `orch-root-request` markers from the linked (revision) issue to the canonical root request. Cycles/ambiguity fail closed. */
+/**
+ * Canonical root request (Issue #144). The linked issue MUST carry an explicit trusted root marker, and the root it
+ * names MUST carry a trusted SELF marker (`#<root>` on issue <root>). Missing / ambiguous / non-self-terminating
+ * markers fail closed; nothing falls back to "the linked issue is its own root".
+ */
 export async function resolveRoot(gh, linked) {
-  const seen = new Set();
-  let n = linked;
-  for (let hop = 0; hop <= MAX_ROOT_HOPS; hop++) {
-    if (seen.has(n)) return { error: "root_request_cycle" };
-    seen.add(n);
-    const m = rootMarker(await gh.getIssue(n));
-    if (m === "ambiguous") return { error: "root_request_ambiguous" };
-    if (m === null || m === n) return { root: n, chain: [...seen] };
-    n = m;
+  const m = rootMarker(await gh.getIssue(linked));
+  if (m === "ambiguous") return { error: "root_request_ambiguous", detail: { issue: linked } };
+  if (m === null) return { error: "root_marker_missing", detail: { issue: linked } };
+  if (m !== linked) {
+    const rm = rootMarker(await gh.getIssue(m));
+    if (rm === "ambiguous") return { error: "root_request_ambiguous", detail: { issue: m } };
+    if (rm !== m) return { error: "root_not_self_marked", detail: { root: m } };
   }
-  return { error: "root_request_chain_too_deep" };
+  return { root: m };
+}
+
+/**
+ * Verified replacement chain (Issue #144): from `pr` follow `orch-supersedes:v1 pr<N>` until an explicit `none`.
+ * Every member must have a trusted marker (missing/ambiguous/cycle => fail closed) and every member's linked issue
+ * must resolve to the SAME root. Bounded to MAX_ROUNDS + 2 PRs (original + MAX_ROUNDS revisions + one over-cap probe).
+ * @returns {{chain:object[], error?:string, detail?:object}} chain[0] = pr, last = original PR.
+ */
+export async function resolveChain(gh, pr, root) {
+  const chain = [pr];
+  const seen = new Set([pr.number]);
+  for (let cur = pr; ; ) {
+    const m = supersedesMarker(cur);
+    if (m === null) return { chain, error: "supersedes_marker_missing", detail: { pr: cur.number } };
+    if (m === "ambiguous") return { chain, error: "supersedes_ambiguous", detail: { pr: cur.number } };
+    if (m === "none") break;
+    if (seen.has(m)) return { chain, error: "supersedes_cycle", detail: { pr: m } };
+    if (chain.length >= MAX_ROUNDS + 2) return { chain, error: "round_cap_exceeded", detail: { max: MAX_ROUNDS } };
+    const next = await gh.getPull(m);
+    if (!next || next.number !== m) return { chain, error: "superseded_unavailable", detail: { pr: m } };
+    seen.add(m); chain.push(next); cur = next;
+  }
+  for (const p of chain.slice(1)) {
+    const l = reqFromPr(p);
+    const r = l ? await resolveRoot(gh, l) : { error: "req_unresolvable" };
+    if (r.error || r.root !== root) return { chain, error: "chain_root_mismatch", detail: { pr: p.number, ...(r.root ? { root: r.root } : {}) } };
+  }
+  return { chain };
 }
 
 const mergeById = (...lists) => { const seen = new Set(); return lists.flat().filter((c) => (c?.id === undefined || !seen.has(c.id)) && (seen.add(c?.id), true)); };
 
-/** Round = 1 + number of distinct rounds already closed out by a `revise` done record for this request. */
-export const roundFor = (comments, req) => {
+/**
+ * Round semantics (Issue #144). The ORIGINAL PR of a chain (`supersedes none`) is round 1 (initial work, no revision).
+ * Each replacement PR is one revision: round = number of revision PRs in the verified chain, so PR137 (original) = r1,
+ * PR139 (rev 1) = r1, PR142 (rev 2) = r2, the #144 PR (rev 3) = r3. MAX_ROUNDS = 3 revisions; a 4th revision PR
+ * (depth 4) is `round_cap_exceeded`. The round is the MAX of the chain-derived depth and the durable bot records
+ * (closed-out `revise` rounds + 1), so neither source alone can lower it, and a remediation never resets the count.
+ */
+export const roundFor = (comments, req, chainDepth = 0) => {
   const done = new Set(allRecords(comments).filter((r) => r.parsed.req === req && r.parsed.step === "revise" && r.state === "done").map((r) => r.parsed.round));
-  return Math.min(done.size + 1, MAX_ROUNDS + 1);
+  return Math.min(Math.max(chainDepth, done.size + 1, 1), MAX_ROUNDS + 1);
 };
 
 /** @returns the dry-run plan (always mode:"dry-run", live:false). Any load/shape failure fails closed as `blocked`. */
@@ -48,22 +83,24 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     if (!linked) return fail("req_unresolvable", { refs: linkedIssueNumbers(pr) });
     // F3: canonical root request; durable records/rounds are read from the ROOT issue + this PR (+ the superseded PR), not just this PR.
     const rootRes = await resolveRoot(gh, linked);
-    if (rootRes.error) return fail(rootRes.error, { linked });
+    if (rootRes.error) return fail(rootRes.error, { linked, ...rootRes.detail });
     const req = rootRes.root;
-    // F8: superseded PR (replacement chain) loaded and ancestry-verified here, through the real entrypoint.
-    const sm = supersedesMarker(pr);
-    if (sm === "ambiguous") return fail("supersedes_ambiguous");
-    const superseded = sm ? await gh.getPull(sm) : undefined;
+    // Issue #144: explicit verified chain (supersedes marker or explicit `none`, same root all the way down).
+    const ch = await resolveChain(gh, pr, req);
+    if (ch.error) return fail(ch.error, ch.detail);
+    const depth = ch.chain.length - 1; // revision PRs in the chain
+    const superseded = ch.chain[1];
     const ancestry = superseded ? ancestryFrom(superseded.head?.sha, pr.head?.sha, await gh.compare(superseded.head?.sha, pr.head?.sha)) : undefined;
+    // Durable records: root issue + EVERY PR of the verified chain (bounded), merged by comment id.
     const prComments = await gh.listIssueComments(prNumber);
     const rootComments = req === prNumber ? [] : await gh.listIssueComments(req);
-    const oldComments = superseded ? await gh.listIssueComments(superseded.number) : [];
+    const oldComments = (await Promise.all(ch.chain.slice(1).map((p) => gh.listIssueComments(p.number)))).flat();
     const comments = mergeById(rootComments, oldComments, prComments);
     const reviews = normalizeCodexReviews(comments);
     // Expected head: explicit (event/dispatch) else the exact SHA of the trusted Codex verdict being acted on.
     const head = expectedHead ?? reviews.at(-1)?.commit_sha;
     const input = {
-      req, round: roundFor(comments, req), config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry,
+      req, round: roundFor(comments, req, depth), config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry,
       acceptIssues: [...new Set([req, linked])],
       pmAccepts: pmAcceptMarkers(comments), pmRevises: pmRevises(comments), records: comments,
     };

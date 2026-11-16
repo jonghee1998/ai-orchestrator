@@ -186,7 +186,7 @@ Files:
   There is **no verified automated trigger for the post-merge phase**: no `check_run`/`status`/`deployment_status` trigger exists, and a
   `pull_request: closed` run is unobserved. The merged phase is exercised by the manual route and fixtures only. Live is not enabled; no main/prod path.
 - **F3 root request:** the PR's linked issue is resolved to the canonical **root request** by following
-  `<!-- orch-root-request:v1 #<N> -->` in issue bodies (trusted PM author only; cycle/ambiguity/depth>5 fail closed; no marker = own root).
+  `<!-- orch-root-request:v1 #<N> -->` in issue bodies (trusted PM author only). **Superseded by #144: no marker is NOT an own root.**
   Records/rounds are read from the root issue + current PR + superseded PR (dedup by comment id); keys are `orch:v1:req<ROOT>:…`, so the
   3-round cap and "complete once" hold across replacement PRs. `eventPlan` is now called from the planner (`complete` once per request,
   `blocked` once per request+round) and is a planned write only. **Revision issues must carry the root marker** for the chain to be provable.
@@ -199,3 +199,21 @@ Files:
 - **F8:** `<!-- orch-supersedes:v1 pr<N> -->` in the PR body (trusted author) makes `runLifecycle` load the superseded PR and compare
   `superseded.head → replacement.head`, so `validateTarget` runs through the real entrypoint.
 - **Not observed:** no live workflow run; no authenticated PM authority (T6).
+
+## Issue #144 — explicit root / supersedes markers and round cap (remediation of Opus #143; NOT a cap reset)
+
+- **Root marker is mandatory.** Every request issue (root and revisions) carries `<!-- orch-root-request:v1 #<root> -->` (trusted PM author).
+  The root issue carries the **self** marker. Missing → `root_marker_missing`; ambiguous → `root_request_ambiguous`; named root without a self
+  marker → `root_not_self_marked`. There is no implicit fallback to "the linked issue is the root" (that silently treated #141 as root).
+- **Supersedes marker is mandatory.** Every PR carries `<!-- orch-supersedes:v1 pr<N> -->` or `<!-- orch-supersedes:v1 none -->` (original PR).
+  Missing → `supersedes_marker_missing`; ambiguous → `supersedes_ambiguous`; cycle → `supersedes_cycle`; unreadable link → `superseded_unavailable`.
+- **Verified chain.** `resolveChain` follows supersedes markers to `none` (bounded: original + 3 revisions + 1 probe; deeper → `round_cap_exceeded`)
+  and requires every member's linked issue to resolve to the same root (`chain_root_mismatch`). Durable records are read from the root issue and
+  **all** chain PRs.
+- **Round semantics (existing chain #136 → #138 → #141 → #144).** Original PR (PR137, `none`) is r1 (no revision). Each replacement PR is one revision:
+  round = revision PRs in the chain → PR139 = r1, PR142 = r2, PR for #144 = r3. `MAX_ROUNDS = 3` revisions. round = max(chain depth, closed `revise`
+  records + 1), so bot records (the bot never ran live) cannot lower it and nothing resets it. At r3 an unresolved finding is
+  `round_cap_reached_before_revision` (no 4th revision dispatch); a 4th revision PR is `round_cap_exceeded`.
+- **Required marker edits** (markers only, no code provenance change): #136 self; #138, #141, #144 → #136; PR137 `none`; PR139 `pr137`; PR142 `pr139`;
+  the #144 PR `pr142`.
+- Post-merge CI/deploy re-evaluation remains a **manual** T5 route (`main.mjs --pr <N>`); it is not automatic completion. Dry-run only, no live mode.

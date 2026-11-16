@@ -219,20 +219,22 @@ test("adapter: real bot payload shape, forged/untrusted/malformed ignored", () =
 });
 
 // ---- ACTUAL entrypoint (handle) with fixture HTTP: dry-run only, read-only, no writes -----------
+// #144: markers are explicit now. Fixture PRs get `supersedes none` unless they already carry a supersedes marker (or rawBody).
+const withMarker = (p, raw) => (raw || /orch-supersedes:v1/.test(p?.body ?? "") ? p : { ...p, body: `${p?.body ?? ""}\n<!-- orch-supersedes:v1 none -->` });
 function fixtureFetch(world, calls) {
   return async (url, init) => {
     const u = new URL(url); const path = u.pathname.replace("/repos/o/r", ""); calls.push(`${init.method} ${path}`);
     const j = (b) => ({ ok: true, status: 200, json: async () => b });
     let m;
-    if (path === "/pulls/9") return j(world.pr);
+    if (path === "/pulls/9") return j(withMarker(world.pr, world.rawBody));
     if ((m = /^\/issues\/(\d+)\/comments$/.exec(path))) return j(world.commentsBy?.[m[1]] ?? (m[1] === "9" ? world.comments : []));
-    if ((m = /^\/issues\/(\d+)$/.exec(path))) return j(world.issues?.[m[1]] ?? { number: Number(m[1]), labels: [{ name: "agent:claude" }] });
+    if ((m = /^\/issues\/(\d+)$/.exec(path))) return j(world.issues?.[m[1]] ?? { number: Number(m[1]), user: OWNER, labels: [{ name: "agent:claude" }], body: `<!-- orch-root-request:v1 #${m[1]} -->` });
     if ((m = /^\/commits\/(\w+)$/.exec(path))) return j({ sha: m[1], parents: world.parents });
     if (path.startsWith("/branches/")) return j({ commit: { sha: world.tip } });
     if ((m = /^\/compare\/(\w+)\.\.\.(\w+)$/.exec(path))) return j({ status: world.cmp(m[1], m[2]) });
     if (path.endsWith("/check-runs")) return j({ total_count: world.checks.length, check_runs: world.checks });
     if ((m = /^\/commits\/(\w+)\/status$/.exec(path))) return j(world.status(m[1]));
-    if (path.startsWith("/pulls/")) { const x = world.pulls?.[path.slice(7)]; if (x) return j(x); }
+    if (path.startsWith("/pulls/")) { const x = world.pulls?.[path.slice(7)]; if (x) return j(withMarker(x, world.rawBody)); }
     return { ok: false, status: 404, json: async () => ({}) };
   };
 }
@@ -335,10 +337,11 @@ test("F2 entrypoint: pull_request event (same repo) runs the lifecycle dry-run, 
   assert.equal(fork.lines[0].reason, "fork_or_unknown_pull_request");
 });
 
-const rootIssue = (n, root) => ({ number: n, user: OWNER, labels: [], body: root ? `<!-- orch-root-request:v1 #${root} -->` : "root" });
+const rootIssue = (n, root = n) => ({ number: n, user: OWNER, labels: [], body: `<!-- orch-root-request:v1 #${root} -->` });
 test("F3: root request marker (trusted author only), unmarked issue is its own root", () => {
   assert.equal(rootMarker(rootIssue(138, 136)), 136);
-  assert.equal(rootMarker(rootIssue(136)), null);
+  assert.equal(rootMarker(rootIssue(136)), 136, "root carries an explicit self marker");
+  assert.equal(rootMarker({ user: OWNER, body: "root" }), null, "#144: no marker => null (callers fail closed, no implicit self-root)");
   assert.equal(rootMarker({ ...rootIssue(138, 136), user: MAL }), null, "untrusted author ignored");
   assert.equal(rootMarker({ user: OWNER, body: "<!-- orch-root-request:v1 #1 --><!-- orch-root-request:v1 #2 -->" }), "ambiguous");
 });
@@ -358,7 +361,7 @@ test("F3 entrypoint: replacement PR (closes revision #138) uses root #136 record
   const acceptRoot = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, comments: [{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` }] });
   assert.equal((await entry(acceptRoot)).lifecycle.why, "review_accepted_awaiting_merge_and_integration_evidence");
   // cycle / ambiguity fail closed
-  assert.equal((await entry(baseWorld({ pr: pr({ body: "Closes #138" }), issues: { 138: rootIssue(138, 139), 139: rootIssue(139, 138) } }))).lifecycle.reason, "root_request_cycle");
+  assert.equal((await entry(baseWorld({ pr: pr({ body: "Closes #138" }), issues: { 138: rootIssue(138, 139), 139: rootIssue(139, 138) } }))).lifecycle.reason, "root_not_self_marked", "cycle never terminates in a self-marked root");
 });
 
 test("F3: eventPlan is integrated: complete once per request across PR chain, blocked once per request+round", () => {
@@ -436,7 +439,7 @@ test("F7: lifecycle diagnostic is emitted even when the legacy run throws; the e
 });
 
 test("F8: superseded PR is loaded by the real entrypoint and ancestry is verified (replacement chain)", async () => {
-  const supPr = { number: 7, state: "closed", merged: false, base: { ref: T, sha: BASE }, head: { ref: "claude/old", sha: OLD } };
+  const supPr = { number: 7, user: OWNER, body: "Closes #136", state: "closed", merged: false, base: { ref: T, sha: BASE }, head: { ref: "claude/old", sha: OLD } };
   const w = (cmp, extra = {}) => baseWorld({ pr: pr({ body: "Refs #136\n<!-- orch-supersedes:v1 pr7 -->", created_at: "x" }), pulls: { 7: supPr }, cmp, ...extra });
   const good = (a, b) => (a === OLD && b === SHA ? "ahead" : "ahead");
   const r = await entry(w(good));
@@ -450,4 +453,109 @@ test("F8: superseded PR is loaded by the real entrypoint and ancestry is verifie
   assert.equal((await entry(baseWorld({ pr: pr({ body: "Refs #136\n<!-- orch-supersedes:v1 pr7 --><!-- orch-supersedes:v1 pr8 -->", created_at: "x" }) }))).lifecycle.reason, "supersedes_ambiguous");
   assert.equal(supersedesMarker({ user: MAL, body: "<!-- orch-supersedes:v1 pr7 -->" }), null, "untrusted marker ignored");
   assert.equal(supersedesMarker({ user: OWNER, body: "no marker" }), null);
+});
+
+// ================= Issue #144: explicit root / supersedes markers, chain-derived round cap =================
+// REAL bodies as they exist on GitHub today (markers absent): Issue #141 and PR142 (only the parts that matter to parsing).
+const REAL_141 = { number: 141, user: OWNER, labels: [], body: "Completion type: integration\nIntegration target: codex/issue-92-mobile-v2\nGPT review ... This is T5 revision round 2 (root request #136; prior revision #138). Start replacement branch FROM PR139 exact head, direct PR to integration; preserve all prior changes." };
+const REAL_PR142_BODY = "Closes #141. Root request #136; prior revision #138 / PR139 (head 59ad3031159f78589f0c49f29bc35e8f327104e9, preserved as parent). Replacement branch started from that exact head, PR directly to the integration branch.\n\n- F3: canonical root request via `orch-root-request:v1` marker; records and rounds read across the chain.\n- F8: superseded PR and ancestry loaded and verified by the real entrypoint (`orch-supersedes:v1` marker).";
+const ROOT = (n, root = 136) => ({ number: n, user: OWNER, labels: [], body: `Completion type: integration\n<!-- orch-root-request:v1 #${root} -->` });
+const PRX = (number, body, headSha, ref, extra = {}) => ({ number, user: OWNER, state: "open", merged: false, body, head: { ref, sha: headSha }, base: { ref: T, sha: BASE }, ...extra });
+const H139 = H("3"), H142 = H("4"), H137 = H("7");
+// Corrected chain as it must look on GitHub: PR(new, #144) -> PR142 (#141) -> PR139 (#138) -> PR137 (#136), all root #136.
+const chainWorld = (x = {}) => {
+  const pulls = {
+    142: PRX(142, "Closes #141\n<!-- orch-supersedes:v1 pr139 -->", H142, "claude/r142"),
+    139: PRX(139, "Closes #138\n<!-- orch-supersedes:v1 pr137 -->", H139, "claude/r139"),
+    137: PRX(137, "Closes #136\n<!-- orch-supersedes:v1 none -->", H137, "claude/r137"),
+  };
+  const issues = { 136: ROOT(136), 138: ROOT(138), 141: ROOT(141), 144: ROOT(144) };
+  return baseWorld({ pr: pr({ body: "Closes #144\n<!-- orch-supersedes:v1 pr142 -->" }), issues, pulls, ...x });
+};
+
+test("#144: markers parse strictly: supersedes pr<N> | none; missing/untrusted => null, repeated different => ambiguous", () => {
+  assert.equal(supersedesMarker({ user: OWNER, body: "<!-- orch-supersedes:v1 pr142 -->" }), 142);
+  assert.equal(supersedesMarker({ user: OWNER, body: "<!-- orch-supersedes:v1 none -->" }), "none");
+  assert.equal(supersedesMarker({ user: OWNER, body: "<!-- orch-supersedes:v1 none --><!-- orch-supersedes:v1 pr1 -->" }), "ambiguous");
+  assert.equal(supersedesMarker({ user: OWNER, body: "<!-- orch-supersedes:v1 pr1 --><!-- orch-supersedes:v1 pr1 -->" }), 1, "identical repeat is not ambiguous");
+  assert.equal(supersedesMarker({ user: MAL, body: "<!-- orch-supersedes:v1 none -->" }), null);
+  assert.equal(supersedesMarker({ user: OWNER, body: "supersedes none" }), null);
+  assert.equal(supersedesMarker({ user: OWNER, body: REAL_PR142_BODY }), null, "real PR142 body: prose mentions are not markers");
+});
+
+test("#144: ACTUAL #141 / PR142 bodies (markers missing) are blocked, never silently req141 / skipped ancestry", async () => {
+  // PR142 as it exists today, linked issue #141 as it exists today.
+  const w = baseWorld({ rawBody: true, pr: pr({ body: REAL_PR142_BODY }), issues: { 141: REAL_141 } });
+  const r = (await entry(w)).lifecycle;
+  assert.equal(r.action, "blocked"); assert.equal(r.reason, "root_marker_missing"); assert.deepEqual(r.detail, { linked: 141, issue: 141 });
+  assert.equal(r.live, false); assert.deepEqual(r.writes, []);
+  // root marker present on #141 but PR142 still has no supersedes marker => still blocked, ancestry not skipped
+  const w2 = { ...w, issues: { 141: ROOT(141), 136: ROOT(136) } };
+  assert.equal((await entry(w2)).lifecycle.reason, "supersedes_marker_missing");
+  // root named by the revision issue does not itself carry a self marker => blocked
+  assert.equal((await entry({ ...w2, pr: pr({ body: `${REAL_PR142_BODY}\n<!-- orch-supersedes:v1 none -->` }), rawBody: true, issues: { 141: ROOT(141), 136: { number: 136, user: OWNER, body: "root" } } })).lifecycle.reason, "root_not_self_marked");
+  // untrusted author's markers do not count
+  assert.equal((await entry({ ...w2, issues: { 141: { ...ROOT(141), user: MAL } } })).lifecycle.reason, "root_marker_missing");
+  // ambiguous root markers
+  assert.equal((await entry({ ...w2, issues: { 141: { ...ROOT(141), body: "<!-- orch-root-request:v1 #136 --><!-- orch-root-request:v1 #138 -->" } } })).lifecycle.reason, "root_request_ambiguous");
+});
+
+test("#144: corrected markers => req136 round 3, PR142 ancestry validated by the real entrypoint (cap not reset)", async () => {
+  const w = chainWorld();
+  const { lifecycle: p, calls } = await entry(w);
+  assert.equal(p.action, "plan");
+  assert.equal(p.key, "orch:v1:req136:pr9:accept:r3", "root #136, round 3 = third revision PR in the chain");
+  assert.ok(calls.includes("GET /pulls/142") && calls.includes("GET /pulls/139") && calls.includes("GET /pulls/137"), "full chain traversed");
+  assert.ok(calls.some((c) => c.includes(`/compare/${H142}...${SHA}`)), "ancestry of the superseded head compared at the exact SHAs");
+  assert.ok(calls.every((c) => c.startsWith("GET ")));
+  // the SAME corrected PR142 evaluated on its own (head e4721c8 equivalent) is round 2 with PR139 ancestry
+  const p142 = (await entry({ ...chainWorld(), pr: PRX(9, "Closes #141\n<!-- orch-supersedes:v1 pr139 -->", SHA, "claude/x") })).lifecycle;
+  assert.equal(p142.key, "orch:v1:req136:pr9:accept:r2");
+  assert.ok((await entry({ ...chainWorld(), pr: PRX(9, "Closes #141\n<!-- orch-supersedes:v1 pr139 -->", SHA, "claude/x") })).calls.some((c) => c.includes(`/compare/${H139}...${SHA}`)));
+  // ancestry failure on the chain's direct predecessor blocks
+  assert.equal((await entry(chainWorld({ cmp: (a, b) => (a === H142 && b === SHA ? "diverged" : "ahead") }))).lifecycle.reason, "replacement_ancestry_unproven");
+});
+
+test("#144: bot records alone cannot lower the round; chain depth is the floor, records can only raise it", async () => {
+  // no durable records at all, chain says round 3
+  assert.equal((await entry(chainWorld())).lifecycle.key, "orch:v1:req136:pr9:accept:r3");
+  // records on the root issue closing rounds 1-3 raise to the cap-exceeded state
+  const revDone = (r) => rec(orchKey({ req: 136, pr: 100 + r, step: "revise", round: r }), "done", 200 + r);
+  const w = chainWorld({ commentsBy: { 136: [revDone(1), revDone(2), revDone(3)] } });
+  assert.equal((await entry(w)).lifecycle.reason, "round_cap_exceeded");
+  // forged records by non-bot accounts never count
+  const forged = chainWorld({ commentsBy: { 136: [{ id: 5, user: OWNER, body: recordMarker(orchKey({ req: 136, pr: 101, step: "revise", round: 1 }), "done", 201) }] } });
+  assert.equal((await entry(forged)).lifecycle.key, "orch:v1:req136:pr9:accept:r3");
+});
+
+test("#144: cap 3 across the chain: round 3 may not dispatch a revision; a 4th revision PR is capped; over-deep chains fail closed", async () => {
+  // third revision PR with unresolved findings => no further revision dispatch
+  const unresolved = chainWorld({ comments: [{ id: 1, user: BOT, body: codexBody(SHA, true) }] });
+  assert.equal((await entry(unresolved)).lifecycle.reason, "round_cap_reached_before_revision");
+  // a 4th revision PR (depth 4) => round_cap_exceeded
+  const pulls4 = { ...chainWorld().pulls, 143: PRX(143, "Closes #144\n<!-- orch-supersedes:v1 pr142 -->", H("5"), "claude/r143") };
+  const w4 = chainWorld({ pr: pr({ body: "Closes #145\n<!-- orch-supersedes:v1 pr143 -->" }), pulls: pulls4, issues: { ...chainWorld().issues, 145: ROOT(145) } });
+  const four = (await entry({ ...w4, issues: { ...w4.issues, 144: ROOT(144) } })).lifecycle;
+  assert.equal(four.reason, "round_cap_exceeded");
+  // chain deeper than the bound is capped without unbounded traversal
+  const deep = {}; for (let n = 200; n < 212; n++) deep[n] = PRX(n, `Closes #144\n<!-- orch-supersedes:v1 pr${n + 1} -->`, H("6"), `claude/d${n}`);
+  const r = (await entry(chainWorld({ pr: pr({ body: "Closes #144\n<!-- orch-supersedes:v1 pr200 -->" }), pulls: deep }))).lifecycle;
+  assert.equal(r.reason, "round_cap_exceeded"); assert.deepEqual(r.detail, { max: MAX_ROUNDS });
+});
+
+test("#144: chain members must share the root; cycles and missing links fail closed", async () => {
+  const w = chainWorld();
+  assert.equal((await entry({ ...w, issues: { ...w.issues, 138: ROOT(138, 150), 150: ROOT(150, 150) } })).lifecycle.reason, "chain_root_mismatch");
+  assert.equal((await entry({ ...w, pulls: { ...w.pulls, 139: PRX(139, "Closes #138\n<!-- orch-supersedes:v1 pr142 -->", H139, "claude/r139") } })).lifecycle.reason, "supersedes_cycle");
+  assert.equal((await entry({ ...w, pulls: { ...w.pulls, 139: PRX(139, "Closes #138", H139, "claude/r139") }, rawBody: true })).lifecycle.reason, "supersedes_marker_missing", "a chain member without a marker is not assumed to be the original");
+  assert.equal((await entry({ ...w, pulls: { ...w.pulls, 139: undefined } })).lifecycle.action, "blocked", "unreadable chain member fails closed");
+});
+
+test("#144: workflow stays dry-run, no live/main/prod; note: post-merge CI/deploy re-evaluation is manual (T5 scope)", () => {
+  const wf = readFileSync(new URL("../../.github/workflows/handoff-coordinator.yml", import.meta.url), "utf8");
+  assert.ok(!/pull_request_target/.test(wf));
+  assert.match(wf, /vars\.HANDOFF_COORDINATOR_MODE == 'live'/);
+  const doc = readFileSync(new URL("../../docs/HANDOFF_COORDINATOR.md", import.meta.url), "utf8");
+  assert.match(doc, /orch-supersedes:v1 none/);
+  assert.match(doc, /manual/i);
 });
