@@ -36,11 +36,38 @@ export function decide(env, activationText) {
   if (env.GITHUB_REF !== `refs/heads/${PROBE_BRANCH}`) reasons.push("ref is not the probe branch");
   if (env.GITHUB_ACTOR !== "jonghee1998") reasons.push("actor is not the owner");
   if ((activationText ?? "").trim() !== ACTIVATION_TOKEN) reasons.push("activation file missing or token mismatch");
+  if (env.GITHUB_RUN_ATTEMPT !== "1") reasons.push("re-run (GITHUB_RUN_ATTEMPT must be 1)");
   if (env.PROBE_DRY_RUN === "true") reasons.push("PROBE_DRY_RUN=true");
   return { mode: reasons.length ? "dry-run" : "apply", reasons };
 }
 
-// api(method, path, body?) -> parsed JSON. Injected for tests.
+export const PER_PAGE = 100;
+export const MAX_PAGES = 10; // bounded: up to 1000 issues, then fail closed
+
+export class ProbeError extends Error {}
+
+// Exact marker: a whole line of the body equals MARKER (no substring/search matching).
+export function hasMarker(body) {
+  return typeof body === "string" && body.split(/\r?\n/).some((l) => l.trim() === MARKER);
+}
+
+// Direct, strongly-consistent listing of ALL repo issues (open+closed). Fails closed on anything unexpected.
+export async function markerExists(api, repo) {
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const items = await api("GET", `/repos/${repo}/issues?state=all&per_page=${PER_PAGE}&page=${page}`);
+    if (!Array.isArray(items)) throw new ProbeError(`malformed issues response (page ${page}): not an array`);
+    for (const i of items) {
+      if (!i || typeof i !== "object" || !Number.isInteger(i.number) || !(i.body === null || typeof i.body === "string")) {
+        throw new ProbeError(`malformed issues response (page ${page}): bad item`);
+      }
+      if (!i.pull_request && hasMarker(i.body)) return true;
+    }
+    if (items.length < PER_PAGE) return false; // last page reached
+  }
+  throw new ProbeError(`pagination bound exceeded (${MAX_PAGES} pages); refusing to create`);
+}
+
+// api(method, path, body?) -> parsed JSON; throws on non-2xx/network error. Injected for tests.
 export async function run({ env, activationText, api, log = console.log }) {
   const { mode, reasons } = decide(env, activationText);
   const repo = env.GITHUB_REPOSITORY;
@@ -49,14 +76,20 @@ export async function run({ env, activationText, api, log = console.log }) {
     log(`would create issue: ${TITLE} labels=${LABELS.join(",")}`);
     return { created: false, mode };
   }
-  // Dedupe: any issue (open or closed) already carrying the marker blocks creation.
-  const q = encodeURIComponent(`repo:${repo} is:issue in:body "claude-routine-probe:t4-v1"`);
-  const found = await api("GET", `/search/issues?q=${q}`);
-  if (found.items?.some((i) => i.body?.includes(MARKER))) {
+  if (await markerExists(api, repo)) {
     log("probe issue already exists; skipping");
     return { created: false, mode, deduped: true };
   }
-  const issue = await api("POST", `/repos/${repo}/issues`, { title: TITLE, body: buildBody(), labels: LABELS });
+  // Single POST, never retried. Any error or unrecognizable response is ambiguous: the issue may exist.
+  let issue;
+  try {
+    issue = await api("POST", `/repos/${repo}/issues`, { title: TITLE, body: buildBody(), labels: LABELS });
+  } catch (e) {
+    throw new ProbeError(`ambiguous POST (${e.message}); NOT retrying. Check issues for the marker before any manual action`);
+  }
+  if (!issue || !Number.isInteger(issue.number)) {
+    throw new ProbeError("ambiguous POST response (no issue number); NOT retrying. Check issues for the marker");
+  }
   log(`created issue #${issue.number}`);
   return { created: true, mode, number: issue.number };
 }

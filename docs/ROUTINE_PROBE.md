@@ -17,7 +17,11 @@ Goal: exercise the Routine `issues.opened` trigger once, with no main mutation.
 2. Job `if`: repo, exact ref, actor `jonghee1998`.
 3. Script refuses to write unless `.github/probe/claude-routine-t4.activate` contains
    `ACTIVATE claude-routine-probe t4-v1`; otherwise dry-run (no API calls).
-4. Dedupe via body marker search (open or closed) + `concurrency`.
+4. Fail-closed one-shot dedupe: the script lists `GET /repos/{repo}/issues?state=all&per_page=100` (direct, not the
+   eventually-consistent search index), up to 10 pages, matching the marker as an exact body line (PRs ignored).
+   Non-array/malformed items, API errors, or hitting the page bound abort **without creating**. Plus `concurrency`.
+4a. Rerun guard: writes only when `GITHUB_RUN_ATTEMPT == 1`; "Re-run jobs" is a dry-run.
+4b. The create POST is sent once and never retried. Any error or response without an issue number fails the job as ambiguous.
 5. Permissions: `issues: write`, `contents: read`; no secrets, no paid API.
 
 ## Dry-run / test
@@ -32,6 +36,15 @@ echo "ACTIVATE claude-routine-probe t4-v1" > .github/probe/claude-routine-t4.act
 git add .github/probe && git commit -m "activate T4 probe" && git push origin probe/claude-routine-t4
 ```
 Expect one new issue "[Sonnet] T4 probe …" with `agent:claude`, `status:ready`. Re-pushing creates no second issue (dedupe).
+
+## Trigger / actor / deployment notes
+- Trigger is `push` to `probe/claude-routine-t4` touching the activation file; `github.actor` must be `jonghee1998` (the pusher).
+- Pushing a branch may also create a **Vercel preview deployment** for that branch (never production, which only follows `main`). Not a deploy action of this probe.
+
+## Recovery after an uncertain POST
+If the job fails with `ambiguous POST`, the issue may or may not exist. Do NOT re-run the job and do NOT re-push to retry.
+Search issues (state=all) for the marker `<!-- claude-routine-probe:t4-v1 -->`. If found, the probe fired; if not, delete the probe
+branch and treat the probe as not activated (reactivation only by an explicit new PM decision, e.g. a new marker version). No automatic reactivation.
 
 ## Cleanup
 `git push origin --delete probe/claude-routine-t4`; close the probe issue; optionally remove the workflow + `scripts/probe` in a later PR.

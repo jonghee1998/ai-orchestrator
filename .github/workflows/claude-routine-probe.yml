@@ -2,7 +2,7 @@
 # - `push` workflows run from the pushed ref's own workflow file, so this works without default-branch
 #   registration, and nothing on main/integration/PR branches can fire it (branch filter + in-script guard).
 # - Creates exactly one issue (labels agent:claude, status:ready) via repo GITHUB_TOKEN issues:write.
-# - Dedupe by body marker + concurrency. No secrets, no paid API, no checkout of untrusted code.
+# - Dedupe: direct paginated issues listing (state=all), fail closed; apply only when run_attempt == 1. No secrets, no paid API, no checkout of untrusted code.
 # See docs/ROUTINE_PROBE.md for activation and cleanup.
 name: claude-routine-probe
 on:
