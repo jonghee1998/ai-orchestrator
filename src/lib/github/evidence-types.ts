@@ -50,7 +50,7 @@ export interface PullEvidence {
 export type NextActionCode =
   | "done" | "closed_unverified" | "blocked" | "await_ack" | "agent_implementing" | "await_pr" | "pm_review"
   | "agent_revision" | "pm_rereview" | "owner_merge_decision" | "pr_merged" | "triage" | "codex_review" | "pm_decision"
-  | "stranded_stack" | "completed_open" | "acceptance_incomplete";
+  | "stranded_stack" | "completed_open" | "acceptance_incomplete" | "completion_unverified";
 export interface NextAction { code: NextActionCode; label: string; actor: string }
 export interface IssueEvidence {
   number: number; title: string; url: string; state: "open" | "closed"; agent: string; status: string;

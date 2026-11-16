@@ -161,6 +161,9 @@ export function nextAction(i: { state: "open" | "closed"; agent: string; status:
     if (i.status === "review") return { code: "await_pr", label: "검수 상태이나 연결된 PR 증거 없음 — 완료 보고 확인", actor: "PM" };
     return { code: "agent_implementing", label: `${agent} 구현 중 (PR 미생성)`, actor: agent };
   }
+  // Fail closed: with lifecycle evidence available, a merged PR on an OPEN issue is never "close the issue" unless the lifecycle proved completion
+  // (handled above). Unknown (partial/missing metadata/merge order) or incomplete completion must not fall through to pr_merged.
+  if (pr.state === "merged" && lc) return { code: "completion_unverified", label: `PR #${pr.number} 병합됨 — 완료 기준 ${lc.completion === "unknown" ? "확인 불가" : "미충족"}${miss.length ? ` (${miss.join(", ")})` : ""}. 이슈 종료 판단 불가, PM 확인 필요`, actor: "PM" };
   if (pr.state === "merged") return { code: "pr_merged", label: `PR #${pr.number} 병합됨 — 이슈 종료 판단`, actor: "PM" };
   const d = pr.decision;
   if (d?.kind === "revise" && d.commitsAfter === 0 && !d.headMoved && d.stackedPulls.length)
@@ -256,7 +259,7 @@ export function buildEvidence(input: EvidenceInput): EvidenceReport {
           input.pulls.filter((q) => q.number !== n && q.base.ref === pullsByNum.get(n)!.head.ref)));
       const explicitNums = [...(links.get(i.number) ?? new Map<number, Set<string>>()).entries()].filter(([, how]) => ["title", "body", "issue-body"].some((h) => how.has(h as never))).map(([n]) => n);
       const allRefs = input.pulls.map((q) => toRef(q, explicitNums.includes(q.number)));
-      const stack = stackUniverse(allRefs.filter((r) => r.explicit).map((r) => ({ ...r, officialApproved: pulls.find((x) => x.number === r.number)?.officialApproval?.sha === r.headSha.toLowerCase() || undefined })), allRefs);
+      const stack = stackUniverse(allRefs.filter((r) => r.explicit).map((r) => ({ ...r, officialApproved: pulls.find((x) => x.number === r.number)?.officialApproval?.sha.toLowerCase() === r.headSha.toLowerCase() || undefined })), allRefs);
       const stackNums = new Set(stack.map((r) => r.number));
       const acceptances = [
         ...(byThread.get(i.number) ?? []).flatMap(pmAcceptances),

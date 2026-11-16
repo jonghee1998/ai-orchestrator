@@ -87,6 +87,8 @@ export function universe(proof: IssueEvidence | undefined): StackRef[] {
 }
 /** Boundary PRs for target T. Strictly base === T; a PR with head === T is OUTGOING from T and never counts. */
 export const boundaries = (u: StackRef[], target: string) => u.filter(p => p.base === target && p.head !== target && p.state !== "closed");
+/** Closed-unmerged PRs into T: never a boundary (nothing delivered), but their live descendants are stranded (R9). */
+const closedBoundaries = (u: StackRef[], target: string) => u.filter(p => p.base === target && p.head !== target && p.state === "closed");
 /** PRs stacked on `root` (Q.base === parent.head, transitive) with their parent. Cycle-safe. */
 export function upstack(u: StackRef[], root: StackRef): { q: StackRef; parent: StackRef }[] {
   const out: { q: StackRef; parent: StackRef }[] = [], seen = new Set<number>([root.number]);
@@ -124,8 +126,11 @@ type Pending = Exclude<MissingEvidence, "completion_type" | "integration_target"
 /** Integration into T. Returns the missing evidence and whether merge ordering could not be established. */
 function integration(u: StackRef[], target: string, acc: Acceptance[]): { missing: Pending[]; orderUnknown: boolean; primary?: StackRef } {
   const bd = boundaries(u, target);
-  if (!bd.length) return { missing: ["merged_pr"], orderUnknown: false };
   const missing = new Set<Pending>(); let orderUnknown = false;
+  if (!bd.length) missing.add("merged_pr");
+  // R9 at the boundary: a closed-unmerged boundary PR delivered nothing, so any live (open/merged) descendant is stranded.
+  for (const b of closedBoundaries(u, target)) if (upstack(u, b).some(({ q }) => q.state !== "closed")) missing.add("stranded_stack");
+  if (!bd.length) return { missing: [...missing], orderUnknown: false };
   for (const b of bd) {
     if (b.state === "open") missing.add("merged_pr");
     for (const { q, parent } of upstack(u, b)) {

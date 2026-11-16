@@ -340,3 +340,23 @@ test("T1: rollup separates complete tasks without official review", () => {
   const r = rollup([{ phase: "done", completion: "complete", review: "pm-accepted" }, { phase: "done", completion: "complete", review: "verified" }]);
   assert.equal(r.done, 2); assert.equal(r.doneWithoutOfficialReview, 1);
 });
+
+// ---- Issue #113 (T1 revision 1) ----
+test("T1r1/P2: closed-unmerged boundary with a live descendant is stranded (not a review target)", () => {
+  const pulls = [
+    pull({ number: 10, base: "feature", head: "a", headSha: SHA, state: "closed", mergedAt: undefined }),
+    pull({ number: 11, base: "a", head: "b", headSha: S2, state: "merged", linkedBy: ["body"], mergedAt: "2026-01-01T00:00:20Z" }),
+  ];
+  const l = run(task(), proof(pulls));
+  assert.notEqual(l.completion, "complete"); assert.ok(l.missingEvidence.includes("stranded_stack")); assert.ok(l.missingEvidence.includes("merged_pr"));
+  const open = [pulls[0], { ...pulls[1], state: "open" as const, mergedAt: undefined }];
+  assert.ok(run(task(), proof(open)).missingEvidence.includes("stranded_stack"));
+  // closed boundary alone, or with only closed descendants: not stranded
+  assert.ok(!run(task(), proof([pulls[0]])).missingEvidence.includes("stranded_stack"));
+  assert.ok(!run(task(), proof([pulls[0], { ...pulls[1], state: "closed", mergedAt: undefined }])).missingEvidence.includes("stranded_stack"));
+});
+test("T1r1/P3: official approval SHA matches case-insensitively on both sides", () => {
+  const up = SHA.toUpperCase();
+  const l = run(task(), proof([pull({ headSha: up, officialApproval: { by: "r", at: "", sha: SHA, url: "" } })]));
+  assert.equal(l.review, "verified");
+});
