@@ -15,6 +15,7 @@ const STAGE_OF: Record<NextActionCode, GitHubStage> = {
   await_ack: "await_ack", agent_implementing: "implementing",
   await_pr: "review", pm_review: "review", pm_rereview: "review", codex_review: "review", pm_decision: "review",
   agent_revision: "revision", owner_merge_decision: "owner_decision", pr_merged: "done",
+  stranded_stack: "blocked", completed_open: "owner_decision", acceptance_incomplete: "review",
   blocked: "blocked", triage: "triage", closed_unverified: "closed_unverified", done: "done",
 };
 export const stageOf = (i: Pick<IssueEvidence, "nextAction">): GitHubStage => STAGE_OF[i.nextAction.code] ?? "triage";
@@ -35,6 +36,8 @@ export interface GitHubIssueRow {
 }
 function reviewText(p: PullEvidence): string {
   if (p.detail === "skipped") return "리뷰 상세 미조회(unknown)";
+  // Official non-author GitHub approval is reported separately from PM self-reported acceptance markers.
+  if (p.officialApproval) return `공식 리뷰 승인(비작성자 · 현재 head)`;
   const d = p.decision;
   if (d) return `${d.kind === "approve" ? "승인" : "수정 요청"} · ${d.source} · SHA ${d.headMatch === "exact" ? "현재 head 일치" : d.headMatch === "stale" ? "이전 head" : "확인 불가"}`;
   if (p.botReviewOnHead) return `${p.botReviewOnHead.login} 리뷰(현재 head)`;

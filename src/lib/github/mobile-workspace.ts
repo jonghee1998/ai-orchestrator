@@ -9,7 +9,7 @@ export const PHASE_LABEL: Record<WorkPhase, string> = { remaining: "시작 대�
 /** Wording for a task's phase; a label-only "reported" phase never claims a receipt. */
 export const phaseLabel = (lc: Lifecycle): string => lc.phase === "reported" ? SIGNAL_LABEL[lc.signal === "ack" ? "ack" : "label"] : PHASE_LABEL[lc.phase];
 export type Work = WorkQueueTask & { phase: WorkPhase; next: string; waiting: string; proof?: IssueEvidence; lifecycle: Lifecycle };
-export interface Project { id: string; name: string; goal?: string; tasks: Work[]; done: number; active: number; reported: number; remaining: number; stage: string }
+export interface Project { id: string; name: string; goal?: string; tasks: Work[]; done: number; doneWithoutOfficialReview: number; active: number; reported: number; remaining: number; stage: string }
 export interface Runtime { generatedAt: string; agents: { key: string; enabled: boolean; effective: boolean; running: number; queued: number; held: number; lastHeartbeat: string | null; lastAck: string | null }[]; runs: { dispatchId: string; issueNumber: number; agent: string; status: string; requestedAt?: string; ackAt?: string | null; startedAt?: string | null; finishedAt?: string | null; execution?: { tests: { command: string; exitCode: number }[] } | null; lastActivityAt?: string; lastError?: string | null; evidence?: { kind: string; url: string }[] }[]; audit: { at: string; actor: string; action: string; detail: string }[] }
 export function workspace(tasks: WorkQueueTask[], evidence?: EvidenceReport): { projects: Project[]; tasks: Work[] } {
   const proofOf = (id: string) => evidence?.issues.find(i => String(i.number) === id);
@@ -32,7 +32,7 @@ export function workspace(tasks: WorkQueueTask[], evidence?: EvidenceReport): { 
   const grouped = new Map<string, Project>();
   for (const t of rows) {
     const id = t.project?.id ?? "unclassified";
-    if (!grouped.has(id)) grouped.set(id, { id, name: t.project?.name ?? "미분류", goal: t.project?.goal, tasks: [], done: 0, active: 0, reported: 0, remaining: 0, stage: "시작 준비" });
+    if (!grouped.has(id)) grouped.set(id, { id, name: t.project?.name ?? "미분류", goal: t.project?.goal, tasks: [], done: 0, doneWithoutOfficialReview: 0, active: 0, reported: 0, remaining: 0, stage: "시작 준비" });
     grouped.get(id)!.tasks.push(t);
   }
   for (const p of grouped.values()) Object.assign(p, rollup(p.tasks.map(t => t.lifecycle)));

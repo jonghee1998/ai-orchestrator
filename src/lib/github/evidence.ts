@@ -7,7 +7,7 @@ import type {
   CommentEvidence, DecisionSource, EvidenceKind, IssueEvidence, NextAction, PullEvidence, RawComment, RawIssue, RawPull, RawReview, RawCommit, ReviewEvidence, EvidenceReport, StackRef, Acceptance,
 } from "./evidence-types";
 export type * from "./evidence-types";
-import { classify } from "../workflow/lifecycle";
+import { classify, type Lifecycle } from "../workflow/lifecycle";
 
 const labelNames = (i: RawIssue) => i.labels.map((l) => (typeof l === "string" ? l : l.name)).filter((l): l is string => typeof l === "string");
 function namespaced(labels: string[], prefix: string): string {
@@ -144,9 +144,14 @@ export function pullEvidence(p: RawPull, linkedBy: PullEvidence["linkedBy"], det
 const AGENT_NAMES: Record<string, string> = { opus: "Claude Opus", claude: "Claude Sonnet", codex: "Codex" };
 /** `closedVerified`: the lifecycle (same model as the workspace) proved the closed issue complete. Otherwise a closed
  *  issue is never "done" here — it is `closed_unverified`, matching lifecycle phase `unknown`. */
-export function nextAction(i: { state: "open" | "closed"; agent: string; status: string; acks: unknown[]; pulls: PullEvidence[] }, closedVerified = false): NextAction {
+export function nextAction(i: { state: "open" | "closed"; agent: string; status: string; acks: unknown[]; pulls: PullEvidence[] }, lc?: Pick<Lifecycle, "completion" | "missingEvidence">): NextAction {
   const agent = AGENT_NAMES[i.agent] ?? `agent:${i.agent}`;
-  if (i.state === "closed") return closedVerified ? { code: "done", label: "완료 (완료 기준 충족 확인됨)", actor: "-" } : { code: "closed_unverified", label: "이슈 닫힘 — 완료 기준 확인되지 않음", actor: "PM" };
+  const miss = lc?.missingEvidence ?? [];
+  // Unified with lifecycle (same model as the workspace). Evidence only: none of these authorizes execution/merge/deploy.
+  if (miss.includes("stranded_stack")) return { code: "stranded_stack", label: "스택 단절 — 닫힌(미병합) 상위 PR 아래 PR이 대상 브랜치에 도달하지 않음. PM 정리 필요", actor: "PM" };
+  if (i.state === "closed") return lc?.completion === "complete" ? { code: "done", label: "완료 (완료 기준 충족 확인됨)", actor: "-" } : { code: "closed_unverified", label: "이슈 닫힘 — 완료 기준 확인되지 않음", actor: "PM" };
+  if (lc?.completion === "complete") return { code: "completed_open", label: "완료 기준 충족 — 이슈가 아직 열려 있음, PM 종료 판단 (실행 승인 아님)", actor: "PM" };
+  if (miss.includes("acceptance_current")) return { code: "acceptance_incomplete", label: "병합됨 — 현재 head 기준 수락(PM 표식 또는 공식 리뷰) 없음", actor: "PM" };
   if (i.status === "blocked") return { code: "blocked", label: "차단 — 이슈 코멘트의 차단 사유 해소 필요", actor: "PM/소유자" };
   if (i.agent === "none" || i.agent === "ambiguous" || i.status === "none" || i.status === "ambiguous")
     return { code: "triage", label: "agent:/status: 라벨 정리 필요", actor: "PM" };
@@ -258,6 +263,7 @@ export function buildEvidence(input: EvidenceInput): EvidenceReport {
         ...[...stackNums, ...pulls.map((x) => x.number)].flatMap((n) => (byThread.get(n) ?? []).flatMap(pmAcceptances).filter((a) => a.pr === n)),
       ].filter((a) => a.issue === i.number && stackNums.has(a.pr));
       const partial = [
+        ...(input.issuesTruncated ? ["issues_truncated"] : []),
         ...(input.pullsTruncated ? ["pulls_truncated"] : []), ...(input.commentsTruncated ? ["comments_truncated"] : []),
         ...pulls.filter((x) => stackNums.has(x.number) && x.detail === "skipped").map((x) => `pull_detail_skipped:#${x.number}`),
         ...pulls.filter((x) => stackNums.has(x.number) && x.commits.truncated).map((x) => `commits_truncated:#${x.number}`),
@@ -267,11 +273,10 @@ export function buildEvidence(input: EvidenceInput): EvidenceReport {
         agent: namespaced(labels, "agent:"), status: i.state === "closed" ? "done" : namespaced(labels, "status:"),
         acks: own.filter((c) => c.kind === "ack"), completions: own.filter((c) => c.kind === "completion"), comments: own.length, pulls,
       };
-      const closed = base.state === "closed";
       const rich = { ...base, stack, acceptances, partial };
-      // Same lifecycle model as the workspace decides whether a closed issue is "done" (I8 — one model).
-      const lc = closed ? classify({ status: base.status, dependsOn: [], issueState: "closed", stateReason: toReason(i.state_reason), description: i.body ?? undefined }, { ...rich, nextAction: nextAction(base) }, () => true) : undefined;
-      return { ...rich, nextAction: nextAction(base, lc?.completion === "complete") };
+      // Same lifecycle model as the workspace derives nextAction for open AND closed issues (I8 — one model).
+      const lc = classify({ status: base.status, dependsOn: [], issueState: base.state, stateReason: toReason(i.state_reason), description: i.body ?? undefined }, { ...rich, nextAction: nextAction(base) }, () => true);
+      return { ...rich, nextAction: nextAction(base, lc) };
     });
   return {
     source: "github", repo: input.repo, generatedAt: input.generatedAt, runtimeProof: "not_included",
