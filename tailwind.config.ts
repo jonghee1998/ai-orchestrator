@@ -7,12 +7,12 @@ const config: Config = {
       colors: {
         // 다크모드 기본 팔레트 (앱 전역 토큰)
         bg: {
-          DEFAULT: "#0a0b0e",
-          raised: "#13151a",
-          card: "#181b22",
+          DEFAULT: "#0B1220",
+          raised: "#101A2A",
+          card: "#151F30",
         },
         border: {
-          DEFAULT: "#262a33",
+          DEFAULT: "#29384D",
           subtle: "#1e222a",
         },
         text: {

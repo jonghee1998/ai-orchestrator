@@ -4,6 +4,7 @@ import { DemoProvider } from "@/components/workspace/DemoContext";
 import { BottomNav } from "@/components/BottomNav";
 import { DemoBanner } from "@/components/DemoBanner";
 import { GlobalRefresh } from "@/components/GlobalRefresh";
+import { SimulationProvider } from "@/components/workspace/SimulationContext";
 
 export const metadata: Metadata = {
   title: "AI Orchestrator",
@@ -14,7 +15,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0a0b0e",
+  themeColor: "#0B1220",
 };
 
 export default function RootLayout({
@@ -27,10 +28,12 @@ export default function RootLayout({
       <body>
         <div className="mx-auto flex min-h-dvh max-w-app flex-col">
           <DemoProvider>
+          <SimulationProvider>
           <GlobalRefresh />
           <DemoBanner />
           <main className="flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4">{children}</main>
           <BottomNav />
+          </SimulationProvider>
           </DemoProvider>
         </div>
       </body>

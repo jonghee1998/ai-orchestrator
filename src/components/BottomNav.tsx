@@ -4,10 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/", label: "홈", icon: "◆" },
   { href: "/projects", label: "프로젝트", icon: "▤" },
-  { href: "/agents", label: "에이전트", icon: "◉" },
-  { href: "/activity", label: "활동", icon: "↻" },
+  { href: "/agents", label: "AI 팀", icon: "◉" },
+  { href: "/briefing", label: "PM 브리핑", icon: "◆" },
 ];
 
 export function BottomNav() {
@@ -18,9 +17,9 @@ export function BottomNav() {
       <div className="mx-auto flex max-w-app items-stretch justify-around">
         {items.map((item) => {
           const active =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
+            item.href === "/projects"
+              ? pathname === "/" || pathname.startsWith("/projects")
+              : pathname.startsWith(item.href) || (item.href === "/briefing" && pathname.startsWith("/activity"));
           return (
             <Link
               key={item.href}

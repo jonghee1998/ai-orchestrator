@@ -1,2 +1,2 @@
-import { ActivityScreen } from "@/components/workspace/WorkspaceScreens";
-export default function Page() { return <ActivityScreen />; }
+import { redirect } from "next/navigation";
+export default function Page() { redirect("/briefing"); }
