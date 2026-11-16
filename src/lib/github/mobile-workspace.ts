@@ -1,13 +1,15 @@
 // One presentation model for all four tabs. Missing project/goal/evidence stays unknown.
 import type { WorkQueueTask } from "./work-queue";
 import type { EvidenceReport, IssueEvidence } from "./evidence";
-import { classify, rollup, type Lifecycle } from "../workflow/lifecycle";
+import { classify, rollup, SIGNAL_LABEL, type Lifecycle } from "../workflow/lifecycle";
 import { githubActivity } from "./evidence-views";
 export const AI_NAMES: Record<string, string> = { claude: "Claude Sonnet", opus: "Claude Opus", codex: "Codex", gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", unknown: "담당 미정" };
-export type WorkPhase = "remaining" | "active" | "review" | "blocked" | "done" | "unknown";
-export const PHASE_LABEL: Record<WorkPhase, string> = { remaining: "시작 대기", active: "진행 중", review: "검수·결정 필요", blocked: "도움 필요", done: "업무 완료", unknown: "확인되지 않음" };
+export type WorkPhase = "remaining" | "reported" | "active" | "review" | "blocked" | "done" | "unknown";
+export const PHASE_LABEL: Record<WorkPhase, string> = { remaining: "시작 대기", reported: "접수 보고됨 · 실행 미확인", active: "진행 중", review: "검수·결정 필요", blocked: "도움 필요", done: "업무 완료", unknown: "확인되지 않음" };
+/** Wording for a task's phase; a label-only "reported" phase never claims a receipt. */
+export const phaseLabel = (lc: Lifecycle): string => lc.phase === "reported" ? SIGNAL_LABEL[lc.signal === "ack" ? "ack" : "label"] : PHASE_LABEL[lc.phase];
 export type Work = WorkQueueTask & { phase: WorkPhase; next: string; waiting: string; proof?: IssueEvidence; lifecycle: Lifecycle };
-export interface Project { id: string; name: string; goal?: string; tasks: Work[]; done: number; active: number; remaining: number; stage: string }
+export interface Project { id: string; name: string; goal?: string; tasks: Work[]; done: number; active: number; reported: number; remaining: number; stage: string }
 export interface Runtime { generatedAt: string; agents: { key: string; enabled: boolean; effective: boolean; running: number; queued: number; held: number; lastHeartbeat: string | null; lastAck: string | null }[]; runs: { dispatchId: string; issueNumber: number; agent: string; status: string; requestedAt?: string; ackAt?: string | null; startedAt?: string | null; finishedAt?: string | null; execution?: { tests: { command: string; exitCode: number }[] } | null; lastActivityAt?: string; lastError?: string | null; evidence?: { kind: string; url: string }[] }[]; audit: { at: string; actor: string; action: string; detail: string }[] }
 export function workspace(tasks: WorkQueueTask[], evidence?: EvidenceReport): { projects: Project[]; tasks: Work[] } {
   const proofOf = (id: string) => evidence?.issues.find(i => String(i.number) === id);
@@ -23,14 +25,14 @@ export function workspace(tasks: WorkQueueTask[], evidence?: EvidenceReport): { 
     const phase: WorkPhase = lc.phase;
     const unmet = t.dependsOn.filter(id => !done(id));
     return { ...t, phase, lifecycle: lc, proof: proofOf(t.id),
-      next: lc.completion === "deployment_pending" ? "main 병합 후 배포 증거를 확인하세요" : phase === "done" ? "종료된 업무와 결과를 확인하세요" : phase === "review" ? "결과를 읽고 검수·결정 내용을 확인하세요" : phase === "blocked" ? "대기 중인 내용이나 선행 작업을 확인하세요" : phase === "active" ? "다음 진행 소식을 기다려 주세요" : phase === "remaining" ? "담당과 선행 작업을 확인한 뒤 시작을 준비하세요" : "작업 상태를 먼저 확인하세요",
-      waiting: unmet.length ? `선행 작업 ${unmet.map(id => `#${id}`).join(", ")} 확인 대기` : lc.completion === "deployment_pending" ? "배포 확인 대기" : phase === "blocked" ? "추가 정보 또는 결정 대기" : phase === "review" ? "검수·결정 대기" : phase === "remaining" ? "작업 시작 대기" : phase === "unknown" ? (lc.missingEvidence.length ? `확인 필요: ${lc.missingEvidence.join(", ")}` : "진행 정보 확인 필요") : "대기 사항 없음",
+      next: lc.completion === "deployment_pending" ? "main 병합 후 배포 증거를 확인하세요" : phase === "done" ? "종료된 업무와 결과를 확인하세요" : phase === "review" ? "결과를 읽고 검수·결정 내용을 확인하세요" : phase === "blocked" ? "대기 중인 내용이나 선행 작업을 확인하세요" : phase === "reported" ? "실행 여부는 확인되지 않았습니다. 진행 증거(결과 PR·보고)를 확인하세요" : phase === "active" ? "다음 진행 소식을 기다려 주세요" : phase === "remaining" ? "담당과 선행 작업을 확인한 뒤 시작을 준비하세요" : "작업 상태를 먼저 확인하세요",
+      waiting: unmet.length ? `선행 작업 ${unmet.map(id => `#${id}`).join(", ")} 확인 대기` : lc.completion === "deployment_pending" ? "배포 확인 대기" : phase === "blocked" ? "추가 정보 또는 결정 대기" : phase === "review" ? "검수·결정 대기" : phase === "reported" ? (lc.signal === "ack" ? "접수 보고만 확인됨 · 실행 증거 없음" : "상태 라벨만 확인됨 · 접수 보고 없음 · 실행 증거 없음") : phase === "remaining" ? "작업 시작 대기" : phase === "unknown" ? (lc.missingEvidence.length ? `확인 필요: ${lc.missingEvidence.join(", ")}` : "진행 정보 확인 필요") : "대기 사항 없음",
     };
   });
   const grouped = new Map<string, Project>();
   for (const t of rows) {
     const id = t.project?.id ?? "unclassified";
-    if (!grouped.has(id)) grouped.set(id, { id, name: t.project?.name ?? "미분류", goal: t.project?.goal, tasks: [], done: 0, active: 0, remaining: 0, stage: "시작 준비" });
+    if (!grouped.has(id)) grouped.set(id, { id, name: t.project?.name ?? "미분류", goal: t.project?.goal, tasks: [], done: 0, active: 0, reported: 0, remaining: 0, stage: "시작 준비" });
     grouped.get(id)!.tasks.push(t);
   }
   for (const p of grouped.values()) Object.assign(p, rollup(p.tasks.map(t => t.lifecycle)));

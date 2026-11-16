@@ -35,11 +35,12 @@ test("#65: progress counts come from GitHub state; label-only done is NOT comple
     issue(1, ["agent:opus", "status:done"]),          // label says done but issue is open
     issue(2, ["agent:codex", "status:ready"]),         // no ACK
     issue(3, ["agent:claude", "status:in-progress"]),  // ACKed
-    issue(4, ["agent:opus", "status:done"], "closed"), // actually closed
+    { ...issue(4, ["agent:opus", "status:done"], "closed", "Completion type: nondeploy"), state_reason: "completed" }, // closed, completed, explicit type
+    issue(5, ["agent:opus", "status:done"], "closed"), // closed without a completion type: NOT done (I8)
   ], [], [comment(10, 3, "ACK — started", "2026-01-01T00:00:00Z")]);
   const g = githubProgress(r);
-  assert.equal(g.total, 4); assert.equal(g.open, 3);
-  assert.equal(g.stages.done, 1, "only the closed issue counts as done");
+  assert.equal(g.total, 5); assert.equal(g.open, 3);
+  assert.equal(g.stages.done, 1, "only the closed issue with proven completion counts as done"); assert.equal(g.stages.closed_unverified, 1);
   assert.equal(g.stages.await_ack, 1); assert.ok(g.stages.implementing >= 1);
   const row1 = g.rows.find((x) => x.number === 1)!;
   assert.notEqual(row1.stage, "done"); assert.equal(row1.statusLabel, "done");

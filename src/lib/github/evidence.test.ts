@@ -72,7 +72,11 @@ test("skipped detail is reported, not guessed; merged and closed issues map dete
   assert.equal(ev.issues[0].pulls[0].detail, "skipped");
   assert.equal(ev.issues[0].pulls[0].decision, undefined);
   assert.equal(ev.issues[0].nextAction.code, "pr_merged");
-  assert.equal(ev.issues[1].nextAction.code, "done");
+  assert.equal(ev.issues[1].nextAction.code, "closed_unverified"); // closed but no completion type → never "done" (I8)
+  const ok = build([{ ...issue(4, ["agent:codex"], "closed", "Completion type: nondeploy"), state_reason: "completed" }], [], []);
+  assert.equal(ok.issues[0].nextAction.code, "done");
+  const cancelled = build([{ ...issue(4, ["agent:codex"], "closed", "Completion type: nondeploy"), state_reason: "not_planned" }], [], []);
+  assert.equal(cancelled.issues[0].nextAction.code, "closed_unverified");
 });
 
 test("ambiguous labels require triage", () => {
