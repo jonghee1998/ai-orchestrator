@@ -19,6 +19,12 @@ export function prFromEvent(name, payload, inputs = {}) {
     if (!isTrustedCodex(payload.comment?.user)) return { skip: "untrusted_author" };
     return { pr: payload.issue.number };
   }
+  if (name === "pull_request") {
+    // Same-repository PRs only (fork PRs never get here with a useful token, and are refused outright).
+    const p = payload.pull_request;
+    if (!p || p.head?.repo?.full_name !== p.base?.repo?.full_name) return { skip: "fork_or_unknown_pull_request" };
+    return Number.isInteger(p.number) ? { pr: p.number } : { skip: "invalid_pull_request" };
+  }
   if (name === "pull_request_review") {
     if (!isTrustedCodex(payload.review?.user)) return { skip: "untrusted_author" };
     return { pr: payload.pull_request.number };
@@ -30,19 +36,43 @@ export function prFromEvent(name, payload, inputs = {}) {
 export async function handle({ name, payload, gh, apply = false, repo, env = {}, out }) {
   const target = prFromEvent(name, payload, payload.inputs ?? {});
   if (target.skip) return out({ mode: apply ? "live" : "dry-run", event: name, result: "skip", reason: target.skip });
-  const result = await run(gh, target.pr, { apply, repo, writerLogin: env.HANDOFF_WRITER_LOGIN || undefined, log: out });
-  out({ mode: apply ? "live" : "dry-run", event: name, pr: target.pr, ...result });
+  // F7 (#141): the lifecycle dry-run diagnostic is emitted even when the legacy run() throws. The error is then
+  // rethrown, so the job still fails closed.
+  let legacyError;
+  try {
+    const result = await run(gh, target.pr, { apply, repo, writerLogin: env.HANDOFF_WRITER_LOGIN || undefined, log: out });
+    out({ mode: apply ? "live" : "dry-run", event: name, pr: target.pr, ...result });
+  } catch (e) {
+    legacyError = e;
+    out({ mode: apply ? "live" : "dry-run", event: name, pr: target.pr, result: "legacy_run_failed", message: String(e?.message).slice(0, 200) });
+  }
   // T5 lifecycle planner (Issue #138): dry-run only, read-only GitHub access, never runs in --apply mode.
   if (!apply) {
-    const expectedHead = name === "pull_request_review" ? payload.pull_request?.head?.sha : undefined;
+    const expectedHead = name === "pull_request_review" || name === "pull_request" ? payload.pull_request?.head?.sha : undefined;
     const lifecycle = await runLifecycle(gh, target.pr, { config: configFromEnv(env), expectedHead });
     out({ mode: "dry-run", event: name, pr: target.pr, lifecycle });
   }
+  if (legacyError) throw legacyError;
+}
+
+/**
+ * Manual proof route (F2, #141): `GITHUB_TOKEN=<read token> GITHUB_REPOSITORY=o/r HANDOFF_LIFECYCLE_ALLOWLIST=<branch> \
+ *   node scripts/handoff/main.mjs --pr <N>` runs the dry-run (legacy + lifecycle) for any PR, merged or open, from a
+ * checkout of the integration branch. Always read-only: `--apply` is rejected with `--pr`.
+ */
+export function manualInvocation(argv) {
+  const i = argv.indexOf("--pr");
+  if (i < 0) return null;
+  if (argv.includes("--apply")) throw new Error("--pr is dry-run only; --apply is refused");
+  const n = Number(argv[i + 1]);
+  if (!Number.isInteger(n) || n < 1) throw new Error("--pr needs a positive PR number");
+  return { name: "workflow_dispatch", payload: { inputs: { pr: String(n) } } };
 }
 
 async function main() {
+  const manual = manualInvocation(process.argv);
   const apply = process.argv.includes("--apply");
-  const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+  const payload = manual ? manual.payload : JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
   const out = (o) => {
     const line = JSON.stringify(o);
     console.log(line);
@@ -50,7 +80,7 @@ async function main() {
   };
   const repo = process.env.GITHUB_REPOSITORY;
   const gh = createClient({ token: process.env.GITHUB_TOKEN, repo });
-  await handle({ name: process.env.GITHUB_EVENT_NAME, payload, gh, apply, repo, env: process.env, out });
+  await handle({ name: manual ? manual.name : process.env.GITHUB_EVENT_NAME, payload, gh, apply, repo, env: process.env, out });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

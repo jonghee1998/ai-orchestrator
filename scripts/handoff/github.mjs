@@ -56,8 +56,8 @@ export function createClient({ token, repo, fetchImpl = fetch, sleep = (ms) => n
     getBranch: (name) => req("GET", `/branches/${encodeURIComponent(name)}`),
     compare: (base, head) => req("GET", `/compare/${base}...${head}?per_page=1`),
     listCheckRuns: (sha) => req("GET", `/commits/${sha}/check-runs?per_page=100`),
-    listDeployments: (sha) => req("GET", `/deployments?sha=${sha}&per_page=100`),
-    listDeploymentStatuses: (id) => req("GET", `/deployments/${id}/statuses?per_page=1`),
+    // Vercel reports a COMMIT STATUS on this repo (not a GitHub deployment environment) — Issue #141 F5.
+    getCombinedStatus: (sha) => req("GET", `/commits/${sha}/status?per_page=100`),
     listIssueComments: async (n) => (await paged(`/issues/${n}/comments`, 10)).items,
     createIssueComment: (n, body) => req("POST", `/issues/${n}/comments`, { body }),
     updateIssueComment: (id, body) => req("PATCH", `/issues/comments/${id}`, { body }),

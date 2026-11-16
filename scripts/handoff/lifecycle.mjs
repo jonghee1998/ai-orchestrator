@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 export const KEY_VERSION = "v1";
 export const STEPS = Object.freeze(["dispatch", "review", "revise", "accept", "complete", "blocked"]);
 export const MAX_ROUNDS = 3;
+export const DEPLOY_SOURCE = "vercel_commit_status";
 export const FORBIDDEN_TARGETS = new Set(["main", "master", "production", "prod", "release"]);
 const SHA_RE = /^[a-f0-9]{40}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9_./-]{0,200}$/;
@@ -32,8 +33,8 @@ export function parseOrchKey(s) {
 
 /**
  * Config validation, fail closed. The integration target must be an EXACT member of a configured allowlist
- * (no globs, no forbidden branches) and the expected base must be a full 40-hex SHA.
- * @returns {{ok:true, allowlist:string[], expectedBase:string} | {ok:false, reason:string}}
+ * (no globs, no forbidden branches). The base is verified against the LIVE branch tip (see validateTarget).
+ * @returns {{ok:true, allowlist:string[]} | {ok:false, reason:string}}
  */
 export function parseConfig({ allowlist, expectedBase } = {}) {
   if (!Array.isArray(allowlist) || allowlist.length === 0) return { ok: false, reason: "allowlist_missing" };
@@ -41,8 +42,10 @@ export function parseConfig({ allowlist, expectedBase } = {}) {
     if (typeof b !== "string" || !BRANCH_RE.test(b) || b.includes("..") || /[*?[\]\\]/.test(b)) return { ok: false, reason: "allowlist_malformed" };
     if (FORBIDDEN_TARGETS.has(b.toLowerCase())) return { ok: false, reason: "allowlist_forbidden_branch" };
   }
-  if (typeof expectedBase !== "string" || !SHA_RE.test(expectedBase)) return { ok: false, reason: "expected_base_invalid" };
-  return { ok: true, allowlist: [...allowlist], expectedBase };
+  // F1 (#141): a hardcoded base SHA goes stale as soon as the integration branch moves, so it is NOT a gate any
+  // more. It is optional and, when present, must still be well formed (a malformed value is a config error).
+  if (expectedBase !== undefined && expectedBase !== "" && (typeof expectedBase !== "string" || !SHA_RE.test(expectedBase))) return { ok: false, reason: "expected_base_invalid" };
+  return { ok: true, allowlist: [...allowlist] };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -67,6 +70,7 @@ export function recordsFor(items, key, writerLogin = WRITER_LOGIN) {
   return allRecords(items, writerLogin).filter((r) => r.key === key).map(({ state, ref }) => ({ state, ref }));
 }
 
+const EVENT_STEPS = new Set(["complete", "blocked"]);
 const RANK = { claimed: 1, issue: 2, done: 3 };
 /**
  * Durable state of one key from persisted records. States: none | claimed | issue | done | ambiguous.
@@ -79,7 +83,10 @@ export function keyState(items, key, writerLogin) {
   const refs = new Set(recs.filter((r) => r.ref !== undefined).map((r) => r.ref));
   if (refs.size > 1) return { state: "ambiguous", why: "conflicting_refs", refs: [...refs] };
   const top = recs.reduce((a, r) => (RANK[r.state] > RANK[a.state] ? r : a));
-  if ((top.state === "issue" || top.state === "done") && refs.size === 0 && top.state === "issue") return { state: "ambiguous", why: "issue_without_ref" };
+  // F6 (#141): dispatching steps create an issue, so both `issue` and `done` need a ref. Event steps
+  // (complete/blocked) legitimately record `done` with no ref.
+  const refRequired = !EVENT_STEPS.has(parseOrchKey(key)?.step);
+  if (refRequired && (top.state === "issue" || top.state === "done") && refs.size === 0) return { state: "ambiguous", why: top.state === "done" ? "done_without_ref" : "issue_without_ref" };
   return { state: top.state, ...(refs.size ? { ref: [...refs][0] } : {}) };
 }
 
@@ -110,7 +117,7 @@ export function applySimulated(items, plan, { ref, writerLogin = WRITER_LOGIN } 
  * (`ancestry` = compare of superseded head -> replacement head, echoing both exact SHAs). The superseded PR
  * is NOT required to be closed: open / closed-unmerged are accepted, merged is a distinct failure.
  */
-export function validateTarget({ pr, config, integrationTarget, expectedHead, expectedBase, superseded, ancestry }) {
+export function validateTarget({ pr, config, integrationTarget, expectedHead, expectedBase, superseded, ancestry, tip }) {
   const cfg = config ?? parseConfig({ allowlist: [integrationTarget].filter(Boolean), expectedBase });
   if (!cfg.ok) return `config_${cfg.reason}`;
   if (typeof integrationTarget !== "string" || !cfg.allowlist.includes(integrationTarget)) return "integration_target_not_allowlisted";
@@ -120,7 +127,15 @@ export function validateTarget({ pr, config, integrationTarget, expectedHead, ex
   if (pr.state !== "open" && !(pr.state === "closed" && merged)) return pr.state === "closed" ? "pr_closed_unmerged" : "pr_malformed";
   if (pr.base?.ref !== integrationTarget) return "base_not_integration_target";
   if (!SHA_RE.test(expectedHead ?? "") || pr.head?.sha !== expectedHead) return "head_mismatch";
-  if (!merged && pr.base?.sha !== cfg.expectedBase) return "base_mismatch";
+  if (!merged) {
+    // F1 (#141): open PR base must be an ANCESTOR of the LIVE integration tip. `tip` = {sha, cmp:{baseSha,headSha,status}}
+    // where cmp compares pr.base.sha -> tip.sha. Tip movement (base behind tip) is fine; unknown/diverged fails closed.
+    if (!SHA_RE.test(pr.base?.sha ?? "")) return "base_mismatch";
+    if (!tip || !SHA_RE.test(tip.sha ?? "")) return "base_tip_unverified";
+    const c = tip.cmp;
+    if (!c || c.baseSha !== pr.base.sha || c.headSha !== tip.sha) return "base_tip_unverified";
+    if (c.status !== "ahead" && c.status !== "identical") return c.status === "unknown" ? "base_tip_unverified" : "base_not_ancestor_of_tip";
+  }
   if (superseded) {
     if (!SHA_RE.test(superseded.head?.sha ?? "")) return "superseded_malformed";
     if (superseded.merged === true) return "superseded_merged";
@@ -143,7 +158,7 @@ export function validateTarget({ pr, config, integrationTarget, expectedHead, ex
  * (pre-parsed to `pmAccepts`). It is posted from the owner account that also authors work, so it is only a
  * SELF-REPORT: T5 never treats any marker as authenticated authority.
  */
-export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevises = [], req, integrationTarget }) {
+export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevises = [], req, acceptIssues, integrationTarget }) {
   const mine = reviews.filter((r) => r?.trusted === true); // adapter-set after login+id+type check
   const exact = mine.filter((r) => r.commit_sha === sha && r.status === "completed" && r.user?.login !== pr.user?.login);
   const verdicts = new Set(exact.map((r) => r.has_unresolved_findings));
@@ -151,7 +166,8 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   const stale = mine.some((r) => r.commit_sha !== sha);
   const independent = !conflict && exact.length > 0 && verdicts.has(false);
   const unresolved = !conflict && verdicts.has(true);
-  const accepts = pmAccepts.filter((a) => a.issue === req && a.pr === pr.number && a.target === integrationTarget && a.sha === sha);
+  const issues = acceptIssues ?? [req]; // root request, plus the revision issue the PR actually closes
+  const accepts = pmAccepts.filter((a) => issues.includes(a.issue) && a.pr === pr.number && a.target === integrationTarget && a.sha === sha);
   const staleAccept = pmAccepts.some((a) => a.sha !== sha);
   const pmConflict = accepts.length > 0 && pmRevises.some((m) => m.sha === sha && m.pr === pr.number);
   const pm = accepts.length > 0 ? { sha, count: accepts.length } : null;
@@ -211,6 +227,16 @@ function claimGate({ key, records, lookup, writerLogin }) {
  *  merge {sha, headContained:boolean|"squash", tipContainsMerge:boolean}
  */
 export function planLifecycle(i) {
+  const plan = planCore(i);
+  // F3 (#141): blocked outcomes go through the durable event dedupe (once per request+round across the whole PR
+  // replacement chain). Planning only: the event is a planned write, nothing is posted.
+  if (plan.action === "blocked" && Number.isInteger(i.req) && i.req > 0 && Number.isInteger(i.round) && i.round >= 1 && Number.isInteger(i.pr?.number) && i.pr.number > 0) {
+    return { ...plan, event: eventPlan({ kind: "blocked", req: i.req, pr: i.pr.number, round: i.round, existing: i.records ?? [], payload: { reason: plan.reason } }) };
+  }
+  return plan;
+}
+
+function planCore(i) {
   const { req, round, pr } = i;
   if (!Number.isInteger(req) || req < 1) return blocked("invalid_req");
   if (!Number.isInteger(round) || round < 1) return blocked("invalid_round");
@@ -226,7 +252,7 @@ export function planLifecycle(i) {
 function planOpenReview(i) {
   const { req, round, pr, integrationTarget } = i;
   const sha = pr.head.sha;
-  const ev = reviewEvidence({ pr, sha, reviews: i.reviews, pmAccepts: i.pmAccepts, pmRevises: i.pmRevises, req, integrationTarget });
+  const ev = reviewEvidence({ pr, sha, reviews: i.reviews, pmAccepts: i.pmAccepts, pmRevises: i.pmRevises, req, acceptIssues: i.acceptIssues, integrationTarget });
   if (ev.conflict) return blocked("conflicting_review_evidence", { sha });
   if (ev.pmConflict) return blocked("conflicting_pm_evidence", { sha });
 
@@ -258,13 +284,14 @@ function planMerged(i) {
   if (m.sha !== mergeSha) return { ...base, step: "await_merge_evidence", why: "merge_sha_not_verified", completion: "withheld", ...evidence };
   if (m.tipContainsMerge !== true) return { ...base, step: "await_merge_evidence", why: "merge_sha_not_on_integration_target", completion: "withheld", ...evidence };
   if (m.headContained !== true) return { ...base, step: "await_merge_evidence", why: m.headContained === "squash" ? "head_ancestry_unproven_squash_or_rebase" : "head_not_ancestor_of_merge_sha", completion: "withheld", ...evidence };
-  // CI and dev deployment are bound to the MERGE SHA (never the PR head).
+  // CI and dev deployment are bound to the MERGE SHA (never the PR head). F5 (#141): deployment evidence is the
+  // Vercel commit status for that exact SHA (no GitHub "dev" environment is assumed). Anything else is withheld.
   const ci = i.ci?.sha === mergeSha && i.ci?.status === "success";
-  const dep = i.deployment?.sha === mergeSha && i.deployment?.env === "dev" && i.deployment?.status === "success";
+  const dep = i.deployment?.sha === mergeSha && i.deployment?.source === DEPLOY_SOURCE && i.deployment?.status === "success";
   if (!ci) return { ...base, step: "await_ci_deploy", why: "integration_ci_not_green_on_merge_sha", completion: "withheld", ...evidence };
   if (!dep) return { ...base, step: "await_ci_deploy", why: "dev_deployment_not_proven_on_merge_sha", completion: "withheld", ...evidence };
 
-  const ev = reviewEvidence({ pr, sha: head, reviews: i.reviews, pmAccepts: i.pmAccepts, pmRevises: i.pmRevises, req, integrationTarget: i.integrationTarget });
+  const ev = reviewEvidence({ pr, sha: head, reviews: i.reviews, pmAccepts: i.pmAccepts, pmRevises: i.pmRevises, req, acceptIssues: i.acceptIssues, integrationTarget: i.integrationTarget });
   if (ev.conflict) return blocked("conflicting_review_evidence", { sha: head });
   if (ev.pmConflict) return blocked("conflicting_pm_evidence", { sha: head });
   if (!ev.independent) return { ...base, step: "await_review", why: "no_independent_review_on_exact_head", completion: "withheld", ...evidence };
@@ -275,7 +302,10 @@ function planMerged(i) {
   const key = orchKey({ req, pr: pr.number, step: "complete", round });
   const gate = claimGate({ key, records: i.records ?? [], lookup: i.lookup, writerLogin: i.writerLogin });
   if (gate) return gate;
-  return { ...base, step: "complete", key, why: "pm_acceptance_not_authenticated_t6", authority: ev.authority, evidenceEligible: true, completion: "withheld", ...evidence };
+  // F3 (#141): `complete` is recorded once per request across all rounds and PRs of the replacement chain.
+  const evt = eventPlan({ kind: "complete", req, pr: pr.number, round, existing: i.records ?? [], payload: { mergeSha } });
+  if (evt.action === "noop") return evt;
+  return { ...base, event: evt, step: "complete", key, why: "pm_acceptance_not_authenticated_t6", authority: ev.authority, evidenceEligible: true, completion: "withheld", ...evidence };
 }
 
 /** Replay helper: evaluating the same input N times must collapse to one logical plan. */

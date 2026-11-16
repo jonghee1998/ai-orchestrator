@@ -168,3 +168,34 @@ Files:
 - **Replacement:** superseded PR may stay open/closed-unmerged (merged is a distinct block); compare must echo the exact
   superseded-head and replacement-head SHAs. Not yet wired into the entrypoint (pure `validateTarget` only).
 - **Not observed:** no live workflow run of this path; no authenticated PM authority; entrypoint tested with fixture HTTP.
+
+### T5 final correction (Issue #141, Opus F1–F8 on PR139) — still dry-run, no authority until T6
+
+- **F1 base SHA:** no hardcoded base SHA anywhere. An open PR's `base.sha` must be an **ancestor of the live integration
+  branch tip** (`getBranch` + `compare(base.sha → tip)`; `ahead`/`identical` only). Tip moved → still planned; diverged/behind →
+  `base_not_ancestor_of_tip`; unknown/unechoed compare → `base_tip_unverified` (fail closed).
+  `HANDOFF_LIFECYCLE_EXPECTED_BASE` is no longer a gate (optional, validated only if set).
+- **F2 triggers (honest limits):** `issue_comment` and `workflow_dispatch` always run the workflow file on the **default branch
+  (main)**, so they do **not** execute integration-branch code until this file reaches main. Reachable proof routes that do run
+  integration-branch code, both dry-run/read-only:
+  1. the `pull_request` trigger (opened/synchronize/reopened/closed on PRs into `codex/issue-92-mobile-v2`, same-repo only),
+     plan job only — the `apply` job is limited to `issue_comment`/`workflow_dispatch`;
+  2. manual, from a checkout of the integration branch with a read-only token:
+     `GITHUB_TOKEN=… GITHUB_REPOSITORY=jonghee1998/ai-orchestrator HANDOFF_LIFECYCLE_ALLOWLIST=codex/issue-92-mobile-v2 node scripts/handoff/main.mjs --pr <N>`
+     (`--apply` with `--pr` is refused).
+  There is **no verified automated trigger for the post-merge phase**: no `check_run`/`status`/`deployment_status` trigger exists, and a
+  `pull_request: closed` run is unobserved. The merged phase is exercised by the manual route and fixtures only. Live is not enabled; no main/prod path.
+- **F3 root request:** the PR's linked issue is resolved to the canonical **root request** by following
+  `<!-- orch-root-request:v1 #<N> -->` in issue bodies (trusted PM author only; cycle/ambiguity/depth>5 fail closed; no marker = own root).
+  Records/rounds are read from the root issue + current PR + superseded PR (dedup by comment id); keys are `orch:v1:req<ROOT>:…`, so the
+  3-round cap and "complete once" hold across replacement PRs. `eventPlan` is now called from the planner (`complete` once per request,
+  `blocked` once per request+round) and is a planned write only. **Revision issues must carry the root marker** for the chain to be provable.
+- **F4 CI:** check-runs `total_count` must be present and equal the runs returned (else `incomplete`); all-skipped/neutral is `all_skipped`, not green.
+- **F5 deployment:** evidence is the **Vercel commit status** (`context == "Vercel"`) for the exact merge SHA (`GET /commits/{sha}/status`);
+  `total_count` mismatch → `incomplete`, other SHA → `malformed`, newest status per context wins. No GitHub environment name is assumed.
+  Not live-verified: whether Vercel's `Vercel` status on the integration branch counts as "dev" is an owner decision; missing evidence stays withheld.
+- **F6:** `done`/`issue` records without a ref are `ambiguous` for issue-creating steps (complete/blocked event records carry no ref).
+- **F7:** `handle()` always emits the lifecycle dry-run output even if legacy `run()` throws, then rethrows (job still fails closed).
+- **F8:** `<!-- orch-supersedes:v1 pr<N> -->` in the PR body (trusted author) makes `runLifecycle` load the superseded PR and compare
+  `superseded.head → replacement.head`, so `validateTarget` runs through the real entrypoint.
+- **Not observed:** no live workflow run; no authenticated PM authority (T6).

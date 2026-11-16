@@ -4,6 +4,10 @@
 # Trigger notes: issue_comment and workflow_dispatch run the workflow file from the DEFAULT branch only;
 # pull_request_review runs it from the PR merge ref. No PR code is checked out for these events beyond
 # this repository's own scripts; the token never runs untrusted code (fork PRs get a read-only token).
+# Issue #141 (F2): a workflow file on a non-default branch is ONLY exercised by `pull_request` /
+# `pull_request_review` (PR merge ref). `issue_comment` and `workflow_dispatch` always run main's copy, so they do NOT
+# run integration-branch code until this file reaches main. `pull_request` below is the dry-run proof route that
+# executes on the integration branch; it is plan-only. No trigger exists for the post-merge phase (see docs).
 name: handoff-coordinator
 
 on:
@@ -11,6 +15,10 @@ on:
     types: [created, edited]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    # Dry-run proof route (plan job only). Same-repo PRs targeting the integration branch.
+    branches: [codex/issue-92-mobile-v2]
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
     inputs:
       pr:
@@ -30,7 +38,8 @@ jobs:
       github.repository == 'jonghee1998/ai-orchestrator' && (
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login == 'chatgpt-codex-connector[bot]') ||
-        (github.event_name == 'pull_request_review' && github.event.review.user.login == 'chatgpt-codex-connector[bot]')
+        (github.event_name == 'pull_request_review' && github.event.review.user.login == 'chatgpt-codex-connector[bot]') ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -39,7 +48,7 @@ jobs:
       issues: read
       pull-requests: read
       checks: read
-      deployments: read
+      statuses: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,15 +60,15 @@ jobs:
       - run: node scripts/handoff/main.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # T5 lifecycle dry-run config (Issue #138): exact allowlist + expected integration base SHA.
+          # T5 lifecycle dry-run config: exact allowlist only. No hardcoded base SHA (Issue #141 F1): the PR base is
+          # verified against the LIVE integration branch tip.
           HANDOFF_LIFECYCLE_ALLOWLIST: codex/issue-92-mobile-v2
-          HANDOFF_LIFECYCLE_EXPECTED_BASE: dc96b47703bee8a7a54889a6a50f4fdceb7b41aa
 
   apply:
     needs: plan
-    # pull_request_review runs PR-branch code, so it is plan-only (never writes). Live writes come from
+    # pull_request_review / pull_request run PR-branch code, so they are plan-only (never write). Live writes come from
     # issue_comment (Codex edits its summary comment on completion) / workflow_dispatch, i.e. default-branch code.
-    if: vars.HANDOFF_COORDINATOR_MODE == 'live' && github.event_name != 'pull_request_review'
+    if: vars.HANDOFF_COORDINATOR_MODE == 'live' && (github.event_name == 'issue_comment' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

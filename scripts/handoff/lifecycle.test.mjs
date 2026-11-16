@@ -12,6 +12,8 @@ const SHA = H("a"), OLD = H("b"), BASE = H("c"), MERGE = H("d");
 const T = "codex/issue-92-mobile-v2";
 const RAW = { allowlist: [T], expectedBase: BASE };
 const CFG = parseConfig(RAW);
+const TIP = H("e");
+const tipOk = (x = {}) => ({ sha: TIP, cmp: { baseSha: BASE, headSha: TIP, status: "ahead", ...x } });
 const BOT = { login: CODEX_BOT.login, id: CODEX_BOT.id, type: "Bot" };
 const OWNER = { login: "jonghee1998", id: 129052128, type: "User" };
 const WRITER = { login: "github-actions[bot]", id: 1, type: "Bot" };
@@ -20,9 +22,9 @@ const pr = (x = {}) => ({ number: 9, state: "open", merged: false, user: OWNER, 
 const mergedPr = (x = {}) => pr({ state: "closed", merged: true, merge_commit_sha: MERGE, ...x });
 const review = (x = {}) => ({ trusted: true, user: BOT, commit_sha: SHA, status: "completed", has_unresolved_findings: false, ...x });
 const acc = (x = {}) => ({ issue: 136, pr: 9, sha: SHA, target: T, ...x });
-const base = (x = {}) => ({ req: 136, round: 1, config: CFG, integrationTarget: T, pr: pr(), expectedHead: SHA, reviews: [review()], pmAccepts: [], pmRevises: [], records: [], ...x });
+const base = (x = {}) => ({ req: 136, round: 1, config: CFG, integrationTarget: T, pr: pr(), expectedHead: SHA, reviews: [review()], pmAccepts: [], pmRevises: [], records: [], tip: tipOk(), ...x });
 const mergedBase = (x = {}) => base({ pr: mergedPr(), reviews: [review()], pmAccepts: [acc()],
-  merge: { sha: MERGE, tipContainsMerge: true, headContained: true }, ci: { sha: MERGE, status: "success" }, deployment: { sha: MERGE, env: "dev", status: "success" }, ...x });
+  merge: { sha: MERGE, tipContainsMerge: true, headContained: true }, ci: { sha: MERGE, status: "success" }, deployment: { sha: MERGE, source: "vercel_commit_status", status: "success" }, ...x });
 const rec = (key, state, ref, user = WRITER) => ({ user, body: recordMarker(key, state, ref) });
 const K = (step, round = 1, p = 9) => orchKey({ req: 136, pr: p, step, round });
 
@@ -35,8 +37,9 @@ test("key format is strict", () => {
 
 test("config: exact allowlist and valid base SHA, malformed fails closed", () => {
   assert.equal(parseConfig(RAW).ok, true);
+  assert.equal(parseConfig({ allowlist: [T] }).ok, true, "F1: no hardcoded base SHA is required");
   for (const bad of [undefined, {}, { allowlist: [], expectedBase: BASE }, { allowlist: ["main"], expectedBase: BASE }, { allowlist: ["codex/*"], expectedBase: BASE },
-    { allowlist: [T], expectedBase: "abc" }, { allowlist: [T] }, { allowlist: [T], expectedBase: BASE.toUpperCase() }, { allowlist: [5], expectedBase: BASE }, { allowlist: ["a/../b"], expectedBase: BASE }]) {
+    { allowlist: [T], expectedBase: "abc" }, { allowlist: [T], expectedBase: BASE.toUpperCase() }, { allowlist: [5], expectedBase: BASE }, { allowlist: ["a/../b"], expectedBase: BASE }]) {
     assert.equal(parseConfig(bad).ok, false, JSON.stringify(bad));
   }
   assert.equal(planLifecycle(base({ config: { ok: false, reason: "x" } })).action, "blocked");
@@ -85,8 +88,8 @@ test("merged PR: separate merge-SHA evidence; eligible evidence shown but comple
 test("merged PR: CI/deploy bound to merge SHA, not PR head", () => {
   assert.equal(planLifecycle(mergedBase({ ci: { sha: SHA, status: "success" } })).why, "integration_ci_not_green_on_merge_sha");
   assert.equal(planLifecycle(mergedBase({ ci: { sha: MERGE, status: "pending" } })).why, "integration_ci_not_green_on_merge_sha");
-  assert.equal(planLifecycle(mergedBase({ deployment: { sha: SHA, env: "dev", status: "success" } })).why, "dev_deployment_not_proven_on_merge_sha");
-  assert.equal(planLifecycle(mergedBase({ deployment: { sha: MERGE, env: "production", status: "success" } })).why, "dev_deployment_not_proven_on_merge_sha");
+  assert.equal(planLifecycle(mergedBase({ deployment: { sha: SHA, source: "vercel_commit_status", status: "success" } })).why, "dev_deployment_not_proven_on_merge_sha");
+  assert.equal(planLifecycle(mergedBase({ deployment: { sha: MERGE, source: "github_deployment_production", status: "success" } })).why, "dev_deployment_not_proven_on_merge_sha");
   assert.equal(planLifecycle(mergedBase({ ci: undefined })).completion, "withheld");
 });
 
@@ -118,7 +121,7 @@ test("integration target only: head/base/main checks", () => {
   assert.equal(planLifecycle(base({ integrationTarget: "main", pr: pr({ base: { ref: "main", sha: BASE } }) })).reason, "integration_target_not_allowlisted");
   assert.equal(planLifecycle(base({ pr: pr({ base: { ref: "main", sha: BASE } }) })).reason, "base_not_integration_target");
   assert.equal(planLifecycle(base({ expectedHead: OLD })).reason, "head_mismatch");
-  assert.equal(planLifecycle(base({ config: parseConfig({ allowlist: [T], expectedBase: OLD }) })).reason, "base_mismatch");
+  assert.equal(planLifecycle(base({ pr: pr({ base: { ref: T, sha: "bad" } }) })).reason, "base_mismatch");
 });
 
 test("replacement PR: open or closed superseded OK; merged distinct; exact ancestry bound to both SHAs", () => {
@@ -222,14 +225,14 @@ function fixtureFetch(world, calls) {
     const j = (b) => ({ ok: true, status: 200, json: async () => b });
     let m;
     if (path === "/pulls/9") return j(world.pr);
-    if (path === "/issues/9/comments") return j(world.comments);
-    if (path === "/issues/136") return j({ number: 136, labels: [{ name: "agent:claude" }] });
+    if ((m = /^\/issues\/(\d+)\/comments$/.exec(path))) return j(world.commentsBy?.[m[1]] ?? (m[1] === "9" ? world.comments : []));
+    if ((m = /^\/issues\/(\d+)$/.exec(path))) return j(world.issues?.[m[1]] ?? { number: Number(m[1]), labels: [{ name: "agent:claude" }] });
     if ((m = /^\/commits\/(\w+)$/.exec(path))) return j({ sha: m[1], parents: world.parents });
     if (path.startsWith("/branches/")) return j({ commit: { sha: world.tip } });
     if ((m = /^\/compare\/(\w+)\.\.\.(\w+)$/.exec(path))) return j({ status: world.cmp(m[1], m[2]) });
-    if (path.endsWith("/check-runs")) return j({ check_runs: world.checks });
-    if (path === "/deployments") return j(world.deployments);
-    if (/^\/deployments\/\d+\/statuses$/.test(path)) return j([{ state: "success" }]);
+    if (path.endsWith("/check-runs")) return j({ total_count: world.checks.length, check_runs: world.checks });
+    if ((m = /^\/commits\/(\w+)\/status$/.exec(path))) return j(world.status(m[1]));
+    if (path.startsWith("/pulls/")) { const x = world.pulls?.[path.slice(7)]; if (x) return j(x); }
     return { ok: false, status: 404, json: async () => ({}) };
   };
 }
@@ -240,7 +243,8 @@ async function entry(world, env = ENV, event = ["workflow_dispatch", { inputs: {
   await handle({ name: event[0], payload: event[1], gh, apply: false, repo: "o/r", env, out: (o) => lines.push(o) });
   return { calls, lines, lifecycle: lines.find((l) => l.lifecycle)?.lifecycle };
 }
-const baseWorld = (x = {}) => ({ pr: { ...pr({ body: "Refs #136", created_at: "2026-11-16T00:00:00Z" }) }, comments: [{ id: 1, user: BOT, body: codexBody(SHA, false), created_at: "2026-11-16T01:00:00Z", updated_at: "2026-11-16T01:00:00Z" }], parents: [{}, {}], tip: MERGE, cmp: () => "ahead", checks: [], deployments: [], ...x });
+const vercel = (sha, state = "success") => ({ sha, total_count: 2, statuses: [{ context: "Vercel", state, updated_at: "2026-11-16T03:00:00Z" }, { context: "Vercel Preview Comments", state: "success", updated_at: "2026-11-16T03:00:00Z" }] });
+const baseWorld = (x = {}) => ({ pr: { ...pr({ body: "Refs #136", created_at: "2026-11-16T00:00:00Z" }) }, comments: [{ id: 1, user: BOT, body: codexBody(SHA, false), created_at: "2026-11-16T01:00:00Z", updated_at: "2026-11-16T01:00:00Z" }], parents: [{}, {}], tip: MERGE, cmp: () => "ahead", checks: [], status: (sha) => ({ sha, total_count: 0, statuses: [] }), ...x });
 
 test("entrypoint dry-run: open PR -> lifecycle plan from real fixtures, GET-only, live:false", async () => {
   const { calls, lifecycle } = await entry(baseWorld());
@@ -250,7 +254,7 @@ test("entrypoint dry-run: open PR -> lifecycle plan from real fixtures, GET-only
 });
 
 test("entrypoint dry-run: merged PR uses merge SHA evidence; eligible evidence, completion withheld", async () => {
-  const w = baseWorld({ pr: { ...mergedPr({ body: "Refs #136" }) }, checks: [{ head_sha: MERGE, status: "completed", conclusion: "success" }], deployments: [{ id: 5, sha: MERGE, environment: "dev", created_at: "2026-11-16T03:00:00Z" }],
+  const w = baseWorld({ pr: { ...mergedPr({ body: "Refs #136" }) }, checks: [{ head_sha: MERGE, status: "completed", conclusion: "success" }], status: (sha) => vercel(sha),
     comments: [{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` }] });
   const { calls, lifecycle } = await entry(w);
   assert.equal(lifecycle.phase, "merged"); assert.equal(lifecycle.mergeSha, MERGE);
@@ -276,4 +280,174 @@ test("entrypoint: apply mode never runs the lifecycle planner", async () => {
   const gh = createClient({ token: "t", repo: "o/r", fetchImpl: fixtureFetch(baseWorld(), calls), sleep: async () => {} });
   await handle({ name: "workflow_dispatch", payload: { inputs: { pr: "9" } }, gh, apply: true, repo: "o/r", env: ENV, out: (o) => lines.push(o) }).catch(() => {});
   assert.ok(!lines.some((l) => l.lifecycle));
+});
+
+// ================= Issue #141 regression tests (Opus F1-F8 on PR139) =================
+import { ciFromCheckRuns, deploymentFromCommitStatus, rootMarker, supersedesMarker } from "./lifecycle-evidence.mjs";
+import { manualInvocation } from "./main.mjs";
+import { readFileSync } from "node:fs";
+const TIP2 = H("f");
+
+test("F1: open PR base only needs to be an ancestor of the LIVE tip; no hardcoded SHA; tip movement tolerated", () => {
+  const p = planLifecycle(base({ pr: pr({ base: { ref: T, sha: OLD } }), tip: { sha: TIP2, cmp: { baseSha: OLD, headSha: TIP2, status: "ahead" } } }));
+  assert.equal(p.action, "plan", "base behind a moved tip is fine");
+  assert.equal(planLifecycle(base({ tip: tipOk({ status: "identical" }) })).action, "plan");
+  assert.equal(planLifecycle(base({ tip: tipOk({ status: "diverged" }) })).reason, "base_not_ancestor_of_tip");
+  assert.equal(planLifecycle(base({ tip: tipOk({ status: "behind" }) })).reason, "base_not_ancestor_of_tip");
+  assert.equal(planLifecycle(base({ tip: tipOk({ status: "unknown" }) })).reason, "base_tip_unverified");
+  assert.equal(planLifecycle(base({ tip: undefined })).reason, "base_tip_unverified");
+  assert.equal(planLifecycle(base({ tip: tipOk({ baseSha: OLD }) })).reason, "base_tip_unverified", "compare must echo pr.base.sha");
+  assert.equal(planLifecycle(base({ tip: { sha: TIP, cmp: { baseSha: BASE, headSha: TIP2, status: "ahead" } } })).reason, "base_tip_unverified", "compare must echo the tip sha");
+  assert.equal(parseConfig({ allowlist: [T], expectedBase: "zz" }).ok, false, "a malformed optional base is still a config error");
+  const wf = readFileSync(new URL("../../.github/workflows/handoff-coordinator.yml", import.meta.url), "utf8");
+  assert.ok(!/HANDOFF_LIFECYCLE_EXPECTED_BASE/.test(wf) && !/[a-f0-9]{40}/.test(wf), "workflow carries no hardcoded SHA");
+});
+
+test("F1 entrypoint: integration branch tip moved after PR was opened -> still planned; diverged tip fails closed", async () => {
+  const moved = baseWorld({ tip: TIP2, cmp: (a, b) => (a === BASE && b === TIP2 ? "ahead" : "ahead") });
+  assert.equal((await entry(moved)).lifecycle.action, "plan");
+  const forced = baseWorld({ tip: TIP2, cmp: () => "diverged" });
+  assert.equal((await entry(forced)).lifecycle.reason, "base_not_ancestor_of_tip");
+  const unknown = baseWorld({ tip: "nothex", cmp: () => "ahead" });
+  assert.equal((await entry(unknown)).lifecycle.reason, "base_tip_unverified");
+});
+
+test("F2: workflow documents default-branch limits, has a pull_request dry-run route, apply never from PR events; manual --pr is dry-run only", () => {
+  const wf = readFileSync(new URL("../../.github/workflows/handoff-coordinator.yml", import.meta.url), "utf8");
+  assert.match(wf, /pull_request:\s*\n\s*#[^\n]*\n\s*branches: \[codex\/issue-92-mobile-v2\]/);
+  assert.match(wf, /github\.event_name == 'issue_comment' \|\| github\.event_name == 'workflow_dispatch'\)/, "apply only from default-branch triggers");
+  assert.ok(!/deployments:/.test(wf));
+  assert.ok(!/pull_request_target/.test(wf));
+  assert.deepEqual(manualInvocation(["node", "main.mjs", "--pr", "139"]), { name: "workflow_dispatch", payload: { inputs: { pr: "139" } } });
+  assert.equal(manualInvocation(["node", "main.mjs"]), null);
+  assert.throws(() => manualInvocation(["node", "main.mjs", "--pr", "1", "--apply"]), /dry-run only/);
+  assert.throws(() => manualInvocation(["node", "main.mjs", "--pr", "x"]));
+});
+
+test("F2 entrypoint: pull_request event (same repo) runs the lifecycle dry-run, fork PR is skipped", async () => {
+  const w = baseWorld();
+  const ev = (full) => ["pull_request", { pull_request: { number: 9, head: { sha: SHA, repo: { full_name: full } }, base: { repo: { full_name: "o/r" } } } }];
+  const ok = await entry(w, ENV, ev("o/r"));
+  assert.equal(ok.lifecycle.action, "plan");
+  assert.ok(ok.calls.every((c) => c.startsWith("GET ")));
+  const fork = await entry(w, ENV, ev("evil/r"));
+  assert.equal(fork.lifecycle, undefined);
+  assert.equal(fork.lines[0].reason, "fork_or_unknown_pull_request");
+});
+
+const rootIssue = (n, root) => ({ number: n, user: OWNER, labels: [], body: root ? `<!-- orch-root-request:v1 #${root} -->` : "root" });
+test("F3: root request marker (trusted author only), unmarked issue is its own root", () => {
+  assert.equal(rootMarker(rootIssue(138, 136)), 136);
+  assert.equal(rootMarker(rootIssue(136)), null);
+  assert.equal(rootMarker({ ...rootIssue(138, 136), user: MAL }), null, "untrusted author ignored");
+  assert.equal(rootMarker({ user: OWNER, body: "<!-- orch-root-request:v1 #1 --><!-- orch-root-request:v1 #2 -->" }), "ambiguous");
+});
+
+test("F3 entrypoint: replacement PR (closes revision #138) uses root #136 records + rounds, cap enforced across PRs", async () => {
+  const issues = { 138: rootIssue(138, 136), 136: rootIssue(136) };
+  const revDone = (r, p) => rec(orchKey({ req: 136, pr: p, step: "revise", round: r }), "done", 100 + r);
+  const w = (rootComments) => baseWorld({ pr: pr({ body: "Closes #138", created_at: "2026-11-16T00:00:00Z" }), issues, commentsBy: { 136: rootComments } });
+  const r1 = (await entry(w([]))).lifecycle;
+  assert.equal(r1.key, "orch:v1:req136:pr9:accept:r1", "keyed by ROOT request, not the revision issue");
+  // two rounds already closed out on earlier PRs (root issue comments) -> this PR is round 3
+  const r3 = (await entry(w([revDone(1, 7), revDone(2, 8)]))).lifecycle;
+  assert.equal(r3.key, "orch:v1:req136:pr9:accept:r3");
+  // three closed rounds -> cap exceeded across the replacement chain
+  assert.equal((await entry(w([revDone(1, 7), revDone(2, 8), revDone(3, 9)]))).lifecycle.reason, "round_cap_exceeded");
+  // PM accept by root issue number is honoured on the replacement PR
+  const acceptRoot = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, comments: [{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` }] });
+  assert.equal((await entry(acceptRoot)).lifecycle.why, "review_accepted_awaiting_merge_and_integration_evidence");
+  // cycle / ambiguity fail closed
+  assert.equal((await entry(baseWorld({ pr: pr({ body: "Closes #138" }), issues: { 138: rootIssue(138, 139), 139: rootIssue(139, 138) } }))).lifecycle.reason, "root_request_cycle");
+});
+
+test("F3: eventPlan is integrated: complete once per request across PR chain, blocked once per request+round", () => {
+  const done = [rec(K("complete", 1, 7), "done")];
+  const p = planLifecycle(mergedBase({ records: done, pr: mergedPr({ number: 9 }) }));
+  assert.equal(p.reason, "event_already_recorded");
+  assert.equal(planLifecycle(mergedBase()).event.action, "emit_event");
+  const blk = planLifecycle(base({ round: 2, reviews: [review({ has_unresolved_findings: true })], pr: pr({ head: { ref: "x", sha: SHA } }), tip: undefined }));
+  assert.equal(blk.action, "blocked");
+  assert.equal(blk.event.action, "emit_event");
+  const again = planLifecycle(base({ round: 2, tip: undefined, records: [rec(K("blocked", 2, 7), "done")] }));
+  assert.equal(again.event.reason, "event_already_recorded", "other PR in chain already recorded this blocked round");
+  assert.deepEqual(again.writes, []);
+});
+
+test("F4: check-runs total_count incomplete fails closed; all-skipped is not green", () => {
+  const run = (c, s = "completed") => ({ head_sha: MERGE, status: s, conclusion: c });
+  assert.equal(ciFromCheckRuns(MERGE, { total_count: 1, check_runs: [run("success")] }).status, "success");
+  assert.equal(ciFromCheckRuns(MERGE, { total_count: 101, check_runs: [run("success")] }).status, "incomplete");
+  assert.equal(ciFromCheckRuns(MERGE, { check_runs: [run("success")] }).status, "incomplete", "total_count absent");
+  assert.equal(ciFromCheckRuns(MERGE, { total_count: 2, check_runs: [run("skipped"), run("skipped")] }).status, "all_skipped");
+  assert.equal(ciFromCheckRuns(MERGE, { total_count: 2, check_runs: [run("skipped"), run("neutral")] }).status, "all_skipped");
+  assert.equal(ciFromCheckRuns(MERGE, { total_count: 2, check_runs: [run("success"), run("skipped")] }).status, "success");
+  assert.equal(ciFromCheckRuns(MERGE, { total_count: 0, check_runs: [] }).status, "missing");
+  assert.equal(planLifecycle(mergedBase({ ci: { sha: MERGE, status: "incomplete" } })).why, "integration_ci_not_green_on_merge_sha");
+  assert.equal(planLifecycle(mergedBase({ ci: { sha: MERGE, status: "all_skipped" } })).completion, "withheld");
+});
+
+test("F5: dev deployment evidence = Vercel commit status on the exact SHA; missing/incomplete/other sha withheld", () => {
+  assert.equal(deploymentFromCommitStatus(MERGE, vercel(MERGE)).status, "success");
+  assert.equal(deploymentFromCommitStatus(MERGE, vercel(MERGE, "pending")).status, "pending");
+  assert.equal(deploymentFromCommitStatus(MERGE, vercel(SHA)).status, "malformed", "payload for another SHA");
+  assert.equal(deploymentFromCommitStatus(MERGE, { sha: MERGE, total_count: 150, statuses: vercel(MERGE).statuses }).status, "incomplete");
+  assert.equal(deploymentFromCommitStatus(MERGE, { sha: MERGE, total_count: 1, statuses: [{ context: "Vercel Preview Comments", state: "success" }] }).status, "missing", "other contexts are not deployment evidence");
+  assert.equal(deploymentFromCommitStatus(MERGE, undefined).status, "missing");
+  // a stale success must not mask a newer failure
+  const s2 = { sha: MERGE, total_count: 2, statuses: [{ context: "Vercel", state: "success", updated_at: "2026-11-16T01:00:00Z" }, { context: "Vercel", state: "failure", updated_at: "2026-11-16T02:00:00Z" }] };
+  assert.equal(deploymentFromCommitStatus(MERGE, s2).status, "failure");
+  assert.equal(planLifecycle(mergedBase({ deployment: { sha: MERGE, source: "vercel_commit_status", status: "pending" } })).why, "dev_deployment_not_proven_on_merge_sha");
+  assert.equal(planLifecycle(mergedBase({ deployment: { sha: MERGE, env: "dev", status: "success" } })).why, "dev_deployment_not_proven_on_merge_sha", "an assumed GitHub env 'dev' is not accepted");
+});
+
+test("F5 entrypoint: merged PR without Vercel status stays withheld; with it, eligible", async () => {
+  const w = baseWorld({ pr: mergedPr({ body: "Refs #136" }), checks: [{ head_sha: MERGE, status: "completed", conclusion: "success" }],
+    comments: [{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` }] });
+  assert.equal((await entry(w)).lifecycle.why, "dev_deployment_not_proven_on_merge_sha");
+  const ok = (await entry({ ...w, status: (s) => vercel(s) })).lifecycle;
+  assert.equal(ok.evidenceEligible, true); assert.equal(ok.completion, "withheld");
+  assert.equal((await entry({ ...w, checks: [{ head_sha: MERGE, status: "completed", conclusion: "skipped" }], status: (s) => vercel(s) })).lifecycle.why, "integration_ci_not_green_on_merge_sha");
+});
+
+test("F6: done record without a ref is ambiguous for issue-creating steps (events may omit it)", () => {
+  const k = K("revise");
+  assert.equal(keyState([rec(k, "done")], k).state, "ambiguous");
+  assert.equal(keyState([rec(k, "done")], k).why, "done_without_ref");
+  assert.equal(keyState([rec(k, "done", 5)], k).state, "done");
+  assert.equal(keyState([rec(k, "claimed"), rec(k, "done", 5)], k).ref, 5);
+  assert.equal(keyState([rec(K("complete"), "done")], K("complete")).state, "done", "event steps carry no ref");
+  assert.equal(planLifecycle(base({ records: [rec(K("accept"), "done")] })).reason, "record_conflict");
+});
+
+test("F7: lifecycle diagnostic is emitted even when the legacy run throws; the error still propagates (fail closed)", async () => {
+  const lines = [];
+  const world = baseWorld();
+  const calls = [];
+  let n = 0;
+  const base_ = fixtureFetch(world, calls);
+  // legacy run() reads /issues/136 via getIssue; fail only the first comments read (legacy path), lifecycle then proceeds.
+  const fetchImpl = async (url, init) => (new URL(url).pathname.endsWith("/issues/9/comments") && n++ === 0 ? { ok: false, status: 404, json: async () => ({}) } : base_(url, init));
+  const gh = createClient({ token: "t", repo: "o/r", fetchImpl, sleep: async () => {} });
+  await assert.rejects(handle({ name: "workflow_dispatch", payload: { inputs: { pr: "9" } }, gh, apply: false, repo: "o/r", env: ENV, out: (o) => lines.push(o) }), /404/);
+  assert.ok(lines.some((l) => l.result === "legacy_run_failed"));
+  const lc = lines.find((l) => l.lifecycle)?.lifecycle;
+  assert.ok(lc && lc.live === false && lc.mode === "dry-run", "lifecycle diagnostic present");
+});
+
+test("F8: superseded PR is loaded by the real entrypoint and ancestry is verified (replacement chain)", async () => {
+  const supPr = { number: 7, state: "closed", merged: false, base: { ref: T, sha: BASE }, head: { ref: "claude/old", sha: OLD } };
+  const w = (cmp, extra = {}) => baseWorld({ pr: pr({ body: "Refs #136\n<!-- orch-supersedes:v1 pr7 -->", created_at: "x" }), pulls: { 7: supPr }, cmp, ...extra });
+  const good = (a, b) => (a === OLD && b === SHA ? "ahead" : "ahead");
+  const r = await entry(w(good));
+  assert.equal(r.lifecycle.action, "plan");
+  assert.ok(r.calls.includes(`GET /pulls/7`) && r.calls.some((c) => c.includes(`/compare/${OLD}...${SHA}`)), "real entrypoint fetched superseded PR + compared exact SHAs");
+  assert.equal((await entry(w((a, b) => (a === OLD && b === SHA ? "diverged" : "ahead")))).lifecycle.reason, "replacement_ancestry_unproven");
+  assert.equal((await entry(w((a, b) => (a === OLD && b === SHA ? "behind" : "ahead")))).lifecycle.reason, "replacement_ancestry_unproven");
+  assert.equal((await entry(w(good, { pulls: { 7: { ...supPr, merged: true, state: "closed" } } }))).lifecycle.reason, "superseded_merged");
+  assert.equal((await entry(w(good, { pulls: { 7: { ...supPr, base: { ref: "main", sha: BASE } } } }))).lifecycle.reason, "superseded_wrong_base");
+  assert.equal((await entry(w(good, { pulls: { 7: { ...supPr, head: { ref: "claude/x", sha: OLD } } } }))).lifecycle.reason, "replacement_stack");
+  assert.equal((await entry(baseWorld({ pr: pr({ body: "Refs #136\n<!-- orch-supersedes:v1 pr7 --><!-- orch-supersedes:v1 pr8 -->", created_at: "x" }) }))).lifecycle.reason, "supersedes_ambiguous");
+  assert.equal(supersedesMarker({ user: MAL, body: "<!-- orch-supersedes:v1 pr7 -->" }), null, "untrusted marker ignored");
+  assert.equal(supersedesMarker({ user: OWNER, body: "no marker" }), null);
 });
