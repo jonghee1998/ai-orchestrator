@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { demoReadResponse } from "@/lib/demo/respond-http";
 import { requireRead } from "../_auth";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
 import { classifyStoreError } from "@/lib/runs/store-errors";
@@ -11,6 +12,8 @@ const H = { "Cache-Control": "no-store" };
 export async function GET(req: Request): Promise<NextResponse> {
   const denied = requireRead(req);
   if (denied) return denied;
+  const demo = demoReadResponse(req, "dashboard");
+  if (demo) return demo as NextResponse;
   try {
     const d = await getRunStore().read();
     return NextResponse.json(buildSnapshot(d, new Date().toISOString()), { headers: H });

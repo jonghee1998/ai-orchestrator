@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui";
-import { readToken } from "@/components/live/useAuthedJson";
+import { useRegisterRefresh } from "@/components/live/refresh";
+import { readToken, useSession } from "@/components/live/session";
 import { SAMPLE_TASKS } from "./fixtures";
 import { createRequestTracker, loadQueue, type Source } from "./loader";
 import {
@@ -32,22 +33,31 @@ const phaseMeta: Record<Phase, { label: string; color: string }> = {
 };
 
 export function WorkQueueDashboard() {
+  const sessVersion = useSession().version;
   const [src, setSrc] = useState<Source>({ kind: "loading" });
   const tracker = useRef(createRequestTracker()).current;
 
-  // 마운트·재시도·샘플 종료 모두 이 함수를 사용한다. 최신 요청만 반영한다.
-  const refresh = useCallback(() => {
+  const srcRef = useRef<Source>(src); srcRef.current = src;
+  // 마운트·재시도·샘플 종료·전역 새로고침 모두 이 함수를 사용한다. 최신 요청만 반영하고,
+  // #81: 이미 live 데이터가 있으면 로딩으로 비우지 않으며 실패 시 마지막 정상 데이터를 유지한다.
+  const [staleErr, setStaleErr] = useState<string | null>(null);
+  const refresh = useCallback(async (): Promise<boolean> => {
     const id = tracker.next();
-    setSrc({ kind: "loading" });
-    loadQueue(fetch, readToken()).then((next) => {
-      if (tracker.isCurrent(id)) setSrc(next);
-    });
+    const hadLive = srcRef.current.kind === "live" && srcRef.current.res.mode === "live";
+    if (!hadLive) setSrc({ kind: "loading" });
+    const next = await loadQueue(fetch, readToken());
+    if (!tracker.isCurrent(id)) return false;
+    const ok = next.kind === "live" && next.res.mode === "live";
+    if (ok || !hadLive || next.kind === "unauth" || next.kind === "notoken") { setSrc(next); setStaleErr(null); }
+    else setStaleErr(next.kind === "unavailable" ? next.reason : next.kind === "live" ? "서버 오류 응답" : "갱신 실패");
+    return ok;
   }, [tracker]);
 
   useEffect(() => {
-    refresh();
+    void refresh();
     return () => tracker.invalidate();
-  }, [refresh, tracker]);
+  }, [refresh, tracker, sessVersion]);
+  useRegisterRefresh("/api/work-queue", refresh);
 
   const showSample = useCallback(() => {
     tracker.invalidate(); // 진행 중인 응답이 샘플 화면을 덮어쓰지 않도록
@@ -66,7 +76,8 @@ export function WorkQueueDashboard() {
 
   return (
     <div className="space-y-4">
-      <StatusBanner src={src} onSample={showSample} onExit={refresh} onRetry={refresh} />
+      <StatusBanner src={src} onSample={showSample} onExit={() => void refresh()} onRetry={() => void refresh()} />
+      {staleErr && <p role="status" className="text-xs text-warn">최신 갱신 실패 ({staleErr}) — 마지막 정상 데이터를 표시 중입니다.</p>}
       {tasks.length > 0 && <Body model={model} sample={src.kind === "sample"} />}
       {src.kind === "live" && src.res.mode === "live" && tasks.length === 0 && (
         <Card className="text-sm text-text-muted">표시할 작업이 없습니다.</Card>
@@ -100,13 +111,13 @@ function StatusBanner({
   if (src.kind === "notoken")
     return (
       <Card className="text-sm">
-        토큰이 없습니다. <Link href="/" className="text-accent">홈</Link>에서 토큰을 입력하면 작업 큐를 실제 데이터로 표시합니다.
+        로그인이 필요합니다. <Link href="/" className="text-accent">홈</Link>에서 한 번 로그인하면 작업 큐를 실제 데이터로 표시합니다.
       </Card>
     );
   if (src.kind === "unauth")
     return (
       <Card className="text-sm">
-        토큰이 올바르지 않습니다 (401).{" "}
+        세션이 없거나 만료되었습니다 (401).{" "}
         <button onClick={onRetry} className="ml-2 text-xs text-accent underline">다시 시도</button>
       </Card>
     );

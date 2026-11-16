@@ -32,6 +32,8 @@ npm run build      # 프로덕션 빌드
 환경 변수는 `.env.example`를 참고해 `.env.local`에 작성합니다.
 토큰·API 키·인증정보는 **절대 저장소에 커밋하지 않습니다** (`.gitignore` 처리됨).
 
+관리자 아이디·비밀번호 최초 설정은 [docs/ADMIN_LOGIN.md](docs/ADMIN_LOGIN.md)를 참고합니다. 기본 계정은 없습니다.
+
 ## 화면 구성
 
 - **홈** — 전체 상태 요약 (연결 에이전트, 진행 프로젝트, 열린 작업)

@@ -5,9 +5,10 @@ import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
 import { parseEvidenceResponse } from "@/lib/github/evidence-views";
 import type { CommentEvidence, EvidenceReport, IssueEvidence, PullEvidence } from "@/lib/github/evidence";
+import { formatKst } from "@/lib/time/kst";
 
 const accept = parseEvidenceResponse;
-const when = (iso?: string) => (iso ? iso.replace("T", " ").slice(0, 16) + "Z" : "unknown");
+const when = (iso?: string) => formatKst(iso, "unknown");
 const Ext = ({ href, children }: { href?: string; children: React.ReactNode }) =>
   href ? <a href={href} target="_blank" rel="noreferrer" className="text-accent break-all">{children}</a> : <>{children}</>;
 
@@ -46,14 +47,14 @@ function Issue({ i }: { i: IssueEvidence }) {
 }
 
 export default function EvidencePage() {
-  const { state, reload } = useAuthedJson<EvidenceReport>("/api/evidence", accept, 60_000);
+  const { state, reload, error } = useAuthedJson<EvidenceReport>("/api/evidence", accept, 60_000);
   const r = state.kind === "ok" ? state.data : null;
   const open = r?.issues.filter((i) => i.state === "open") ?? [];
   const closed = r?.issues.filter((i) => i.state === "closed").slice(0, 10) ?? [];
   return (
     <div className="space-y-3">
       <PageTitle title="GitHub 증거" subtitle="이슈·ACK·PR·리뷰·수정·다음 조치 — GitHub API 실측, 읽기 전용" />
-      <LiveStatus s={state} reload={reload} what="GitHub 증거" />
+      <LiveStatus s={state} reload={reload} what="GitHub 증거" error={error} />
       {r && <>
         <Card>
           <p className="text-sm">출처: GitHub <code>{r.repo}</code> · 생성 {when(r.generatedAt)}</p>

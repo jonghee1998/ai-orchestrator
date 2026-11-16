@@ -1,8 +1,13 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
+import { LoginCard } from "@/components/LoginCard";
+import { csrfHeaders, useSession } from "@/components/live/session";
+import { SESSION_MARK } from "@/lib/session/client";
 import { ScopeNotice } from "@/components/ScopeNotice";
+import { sharedGet, useRegisterRefresh } from "@/components/live/refresh";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
+import { formatKst } from "@/lib/time/kst";
 
 type Agent = {
   key: string; provider: string; enabled: boolean; effective: boolean; blockedReason: string | null; cancelSupported: boolean;
@@ -21,53 +26,62 @@ type State = { kind: "loading" } | { kind: "unconfigured" } | { kind: "error" } 
 
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
 const PRESET_LABEL: Record<string, string> = { "gpt-only": "GPT만", "claude-only": "Claude만", "all-enabled": "전체 켜기", "all-paused": "전체 일시정지" };
-const t = (s: string | null) => (s ? s.replace("T", " ").slice(0, 19) + "Z" : "없음");
+const t = (s: string | null) => formatKst(s);
 
 export default function ControlDashboard() {
   const [s, setS] = useState<State>({ kind: "loading" });
-  const [token, setToken] = useState("");
+  const sess = useSession();
+  const token = sess.status === "authed" ? SESSION_MARK : "";
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const seq = useRef(0);
 
-  useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* storage unavailable */ } }, []);
-
-  const load = useCallback(async () => {
-    if (!token.trim()) { seq.current++; setS({ kind: "error" }); return; }
+  const good = useRef(false);
+  const [staleErr, setStaleErr] = useState(false);
+  // #81: 실패 시 마지막 정상 상태 유지, 성공 여부 반환.
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!token.trim()) { seq.current++; good.current = false; setStaleErr(false); setS({ kind: "error" }); return false; }
     const my = ++seq.current; // stale-response guard
+    const keep = (next: State) => { if (my !== seq.current) return false; if (good.current) setStaleErr(true); else setS(next); return false; };
     try {
-      const r = await fetch("/api/dashboard", { cache: "no-store", headers: { "x-admin-token": token.trim() } });
-      const j = await r.json();
-      if (my !== seq.current) return;
-      setS(j.mode === "unconfigured" ? { kind: "unconfigured" } : r.ok && j.mode === "live" ? { kind: "ok", snap: j } : { kind: "error" });
-    } catch { if (my === seq.current) setS({ kind: "error" }); }
+      const r = await sharedGet("/api/dashboard", token.trim());
+      if (my !== seq.current) return false;
+      const j = (r.body ?? {}) as Record<string, any>;
+      if (j.mode === "unconfigured") return keep({ kind: "unconfigured" });
+      if (r.status >= 200 && r.status < 300 && j.mode === "live") { good.current = true; setStaleErr(false); setS({ kind: "ok", snap: j as Snap }); return true; }
+      if (r.status === 401) { good.current = false; setStaleErr(false); setS({ kind: "error" }); return false; }
+      return keep({ kind: "error" });
+    } catch { return keep({ kind: "error" }); }
   }, [token]);
   useEffect(() => { load(); const id = setInterval(load, 15000); return () => clearInterval(id); }, [load]);
+
+  useRegisterRefresh("/api/dashboard", load);
 
   async function send(body: Record<string, unknown>) {
     setBusy(true); setMsg(null);
     try {
-      const r = await fetch("/api/control", { method: "POST", headers: { "content-type": "application/json", "x-admin-token": token.trim() }, body: JSON.stringify(body) });
+      const r = await fetch("/api/control", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      setMsg(r.ok ? "적용됨" : r.status === 401 ? "관리자 토큰이 올바르지 않습니다" : r.status === 503 ? "제어가 설정되지 않았습니다 (CONTROL_ADMIN_TOKEN)" : r.status === 409 ? `충돌/미지원: ${j.detail ?? j.error}` : `실패: ${j.error ?? r.status}`);
+      setMsg(r.ok ? "적용됨" : r.status === 401 ? "세션이 만료되었습니다. 다시 로그인하세요" : r.status === 403 ? "관리자 권한 또는 CSRF 검증 실패 (읽기 전용 세션이면 관리자 계정으로 로그인)" : r.status === 503 ? "서버 제어가 설정되지 않았습니다" : r.status === 409 ? `충돌/미지원: ${j.detail ?? j.error}` : `실패: ${j.error ?? r.status}`);
       await load();
     } catch { setMsg("요청 실패"); } finally { setBusy(false); }
   }
-  const saveToken = (v: string) => { setToken(v); try { sessionStorage.setItem("ctl-token", v); } catch { /* ignore */ } };
 
   return (
     <div>
       <PageTitle title="에이전트 제어" subtitle="서버 측 dispatch 게이트 · 실제 상태만 표시" />
       <div className="mb-3"><ScopeNotice /></div>
+      <div className="mb-3"><LoginCard /></div>
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">실행 저장소가 설정되지 않았습니다 (RUN_STORE_PATH). 연결되지 않은 상태이며 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p><button className="mt-2 rounded-lg border border-border px-3 py-2 text-xs" onClick={load}>다시 시도</button></Card>}
-      {s.kind === "ok" && <Body snap={s.snap} token={token} saveToken={saveToken} send={send} busy={busy} msg={msg} reload={load} />}
+      {s.kind === "ok" && staleErr && <p role="status" className="mb-2 text-xs text-warn">최신 갱신 실패 — 마지막 정상 데이터를 표시 중입니다.</p>}
+      {s.kind === "ok" && <Body snap={s.snap} send={send} busy={busy} msg={msg} reload={load} />}
     </div>
   );
 }
 
-function Body({ snap, token, saveToken, send, busy, msg, reload }: { snap: Snap; token: string; saveToken: (v: string) => void; send: (b: Record<string, unknown>) => void; busy: boolean; msg: string | null; reload: () => void }) {
+function Body({ snap, send, busy, msg, reload }: { snap: Snap; send: (b: Record<string, unknown>) => void; busy: boolean; msg: string | null; reload: () => void }) {
   const c = snap.control;
   const v = c.version;
   const sch = c.schedule;
@@ -81,8 +95,7 @@ function Body({ snap, token, saveToken, send, busy, msg, reload }: { snap: Snap;
       <p className="text-xs text-text-faint">마지막 갱신 {t(snap.lastUpdate)} · 설정 v{v} · 프리셋 {PRESET_LABEL[c.preset] ?? c.preset}</p>
 
       <Card>
-        <label className="text-xs text-text-muted">관리자 토큰 (변경 시 필요, 이 탭에만 저장)</label>
-        <input type="password" value={token} onChange={(e) => saveToken(e.target.value)} autoComplete="off" className="mt-1 w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm" />
+        <p className="text-xs text-text-muted">변경은 관리자 세션(서버 검증 쿠키 + CSRF)으로만 허용됩니다.</p>
         {msg && <p role="status" className="mt-2 text-xs">{msg}</p>}
       </Card>
 

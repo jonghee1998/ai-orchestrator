@@ -1,5 +1,7 @@
+import { demoDecision, demoBlockResponse } from "../demo/gate";
+import { demoRead } from "../demo/respond";
 import { agentSecret, verifyCallback } from "./callback-auth";
-import { checkAdmin, checkRead } from "../control/auth";
+import { authorize } from "../session/guard";
 import { isAgentKey } from "../control/model";
 import { checkExternalGate, signGateResponse } from "./external-gate";
 import { assignCollaboration, claimCollaboration, finishCollaboration, leaseCollaboration, quiesceCollaboration, reportCleanupFailure, type QuiescenceReport, type CleanupFailure, decideCollaboration, refreshCollaboration, CollaborationConflict, type Assignment, type ExecutionResult } from "./collaboration";
@@ -19,8 +21,15 @@ export async function deliver(d: Dependencies, w: { dispatchId?: string; stage: 
 }
 export async function handleCollaboration(method: string, headers: Headers, raw: string, d: Dependencies): Promise<Reply> {
   try {
-    const auth = method === "GET" ? checkRead(headers.get("x-admin-token"), d.env) : checkAdmin(headers.get("x-admin-token"), d.env);
+    const auth = authorize(method, headers, method === "GET" ? "read" : "admin", d.env, d.nowMs);
     if (!auth.ok) return reply(auth.status, { error: "unauthorized" });
+    const demo = demoDecision(headers, d.env);
+    const blocked = demoBlockResponse(demo, method !== "GET" && method !== "HEAD");
+    if (blocked) return { status: blocked.status, body: await blocked.text() };
+    if (demo.demo === true && method === "GET") {
+      const r = demoRead("collaboration", demo.scenario);
+      return reply(r.status, r.body);
+    }
     if (method === "GET") return reply(200, { workflows: Object.values((await d.store().read()).collaborations ?? {}) });
     if (raw.length > 16_384) return reply(413, { error: "too_large" });
     let b; try { b = JSON.parse(raw); } catch { return reply(400, { error: "bad_request" }); }

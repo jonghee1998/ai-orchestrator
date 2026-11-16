@@ -1,13 +1,16 @@
+import { demoRequestBlock } from "@/lib/demo/respond-http";
 import { NextResponse } from "next/server";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
-import { checkAdmin } from "@/lib/control/auth";
+import { authorize } from "@/lib/session/guard";
 import { mutateControl, requestCancel, type Mutation } from "@/lib/control/service";
 
 export const dynamic = "force-dynamic";
 const H = { "Cache-Control": "no-store" };
 
-export async function POST(req: Request): Promise<NextResponse> {
-  const auth = checkAdmin(req.headers.get("x-admin-token"));
+export async function POST(req: Request): Promise<Response> {
+  const blocked = demoRequestBlock(req);
+  if (blocked) return blocked;
+  const auth = authorize(req.method, req.headers, "admin");
   if (!auth.ok) return NextResponse.json({ error: auth.status === 503 ? "control_unconfigured" : "unauthorized" }, { status: auth.status, headers: H });
   const raw = await req.text();
   if (raw.length > 16 * 1024) return NextResponse.json({ error: "too_large" }, { status: 413, headers: H });

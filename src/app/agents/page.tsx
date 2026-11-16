@@ -5,6 +5,7 @@ import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
 import { GitHubAgentLine, GitHubAgentsUnmapped, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
 import { evidenceCoverage, githubAgents } from "@/lib/github/evidence-views";
+import { formatKst } from "@/lib/time/kst";
 
 type Agent = {
   key: string; provider: string; enabled: boolean; effective: boolean; blockedReason: string | null;
@@ -13,10 +14,10 @@ type Agent = {
   externalGate: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number };
 };
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
-const t = (s: string | null | undefined) => (s ? s.replace("T", " ").slice(0, 19) + "Z" : "없음");
+const t = (s: string | null | undefined) => formatKst(s);
 
 export default function AgentsPage() {
-  const { state, reload } = useAuthedJson<{ generatedAt: string; agents: Agent[] }>("/api/dashboard", (st, b) => {
+  const { state, reload, error } = useAuthedJson<{ generatedAt: string; agents: Agent[] }>("/api/dashboard", (st, b) => {
     const j = b as { mode?: string; agents?: unknown; generatedAt?: string } | null;
     if (j?.mode === "unconfigured") return "unconfigured";
     return st === 200 && j?.mode === "live" && Array.isArray(j.agents) ? (j as { generatedAt: string; agents: Agent[] }) : null;
@@ -28,7 +29,7 @@ export default function AgentsPage() {
     <div className="space-y-3">
       <PageTitle title="에이전트" subtitle="내부 런타임(ON/OFF·ACK·콜백)과 GitHub 증거(라벨·코멘트)를 분리 표시 · provider 사용량은 unknown" />
       <p className="text-[11px] text-text-faint">ON/OFF·dispatch·마지막 ACK는 내부 런타임 기록입니다. GitHub 줄은 코멘트 자기보고로, 런타임 OFF 상태를 바꾸지 않습니다.</p>
-      <LiveStatus s={state} reload={reload} what="에이전트 상태" />
+      <LiveStatus s={state} reload={reload} what="에이전트 상태" error={error} />
       {state.kind === "ok" && (
         <>
           <p className="text-xs text-text-faint">갱신 {t(state.data.generatedAt)}</p>

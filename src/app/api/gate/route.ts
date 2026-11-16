@@ -1,3 +1,4 @@
+import { demoRequestBlock } from "@/lib/demo/respond-http";
 import { NextResponse } from "next/server";
 import { getRunStore } from "@/lib/runs/store";
 import { handleGate } from "@/lib/runs/gate-http";
@@ -6,7 +7,9 @@ export const dynamic = "force-dynamic";
 const H = { "Cache-Control": "no-store", "Content-Type": "application/json" };
 
 /** Gate v2 (#34) for external routines — see src/lib/runs/gate-http.ts and docs/LIVE_INTEGRATION.md §3. POST only. */
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: Request): Promise<Response> {
+  const blocked = demoRequestBlock(req);
+  if (blocked) return blocked;
   const r = await handleGate(req.headers, await req.text(), () => getRunStore(), process.env, Date.now());
   return new NextResponse(r.body, { status: r.status, headers: r.signature ? { ...H, "x-signature": r.signature } : H });
 }
