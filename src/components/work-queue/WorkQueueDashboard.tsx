@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Card } from "@/components/ui";
 import { useRegisterRefresh } from "@/components/live/refresh";
-import { readToken } from "@/components/live/useAuthedJson";
+import { readToken, useSession } from "@/components/live/session";
 import { SAMPLE_TASKS } from "./fixtures";
 import { createRequestTracker, loadQueue, type Source } from "./loader";
 import {
@@ -33,6 +33,7 @@ const phaseMeta: Record<Phase, { label: string; color: string }> = {
 };
 
 export function WorkQueueDashboard() {
+  const sessVersion = useSession().version;
   const [src, setSrc] = useState<Source>({ kind: "loading" });
   const tracker = useRef(createRequestTracker()).current;
 
@@ -55,7 +56,7 @@ export function WorkQueueDashboard() {
   useEffect(() => {
     void refresh();
     return () => tracker.invalidate();
-  }, [refresh, tracker]);
+  }, [refresh, tracker, sessVersion]);
   useRegisterRefresh("/api/work-queue", refresh);
 
   const showSample = useCallback(() => {
@@ -110,13 +111,13 @@ function StatusBanner({
   if (src.kind === "notoken")
     return (
       <Card className="text-sm">
-        토큰이 없습니다. <Link href="/" className="text-accent">홈</Link>에서 토큰을 입력하면 작업 큐를 실제 데이터로 표시합니다.
+        로그인이 필요합니다. <Link href="/" className="text-accent">홈</Link>에서 한 번 로그인하면 작업 큐를 실제 데이터로 표시합니다.
       </Card>
     );
   if (src.kind === "unauth")
     return (
       <Card className="text-sm">
-        토큰이 올바르지 않습니다 (401).{" "}
+        세션이 없거나 만료되었습니다 (401).{" "}
         <button onClick={onRetry} className="ml-2 text-xs text-accent underline">다시 시도</button>
       </Card>
     );

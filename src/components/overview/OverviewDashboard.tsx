@@ -2,10 +2,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, PageTitle } from "@/components/ui";
+import { LoginCard } from "@/components/LoginCard";
+import { useSession } from "@/components/live/session";
+import { SESSION_MARK } from "@/lib/session/client";
 import { ScopeNotice } from "@/components/ScopeNotice";
 import { sharedGet, useRegisterRefresh } from "@/components/live/refresh";
 import { createOverviewLoader, type OverviewView } from "@/lib/refresh/overview-loader";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
+import { formatKst } from "@/lib/time/kst";
 
 type Agent = { key: string; enabled: boolean; effective: boolean; blockedReason: string | null; lastAck: string | null; lastHeartbeat: string | null; lastStatus: string | null; externalGate?: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number }; running: number; queued: number; held: number };
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; held: string | null; lastActivityAt: string; lastError: string | null };
@@ -14,15 +18,15 @@ type GH = { state: "unconfigured" | "configured_unverified" | "live" | "error"; 
 type Ready = { github?: GH; items: { id: string; label: string; state: "ok" | "missing" | "blocked"; detail: string }[]; releaseBlocked: boolean; githubEvidence?: { ready: boolean; detail: string } };
 
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
-const t = (s: string | null) => (s ? s.replace("T", " ").slice(0, 19) + "Z" : "없음");
+const t = (s: string | null) => formatKst(s);
 const DOT: Record<string, string> = { ok: "bg-green-500", missing: "bg-yellow-500", blocked: "bg-red-500" };
 
 export default function OverviewDashboard() {
-  const [token, setToken] = useState("");
+  const sess = useSession();
+  const token = sess.status === "authed" ? SESSION_MARK : "";
   const [view, setView] = useState<OverviewView<Snap, Ready>>({ state: { kind: "loading" }, ready: null, staleErr: null, readyError: null });
   const tokenRef = useRef(""); tokenRef.current = token;
   const loader = useRef<ReturnType<typeof createOverviewLoader<Snap, Ready>> | null>(null);
-  useEffect(() => { try { setToken(sessionStorage.getItem("ctl-token") ?? ""); } catch { /* ignore */ } }, []);
   // #83: 대시보드와 readiness 를 독립 추적(readiness 실패가 대시보드 성공을 가리지 않음), 오류 시 마지막 정상 데이터 유지.
   const load = useCallback(() => (loader.current ? loader.current.load() : Promise.resolve(false)), []);
   useEffect(() => {
@@ -34,18 +38,14 @@ export default function OverviewDashboard() {
   }, [token]);
   useRegisterRefresh("/api/dashboard+readiness", load);
   const s = view.state, staleErr = view.staleErr;
-  const save = (v: string) => { setToken(v); try { sessionStorage.setItem("ctl-token", v); } catch { /* ignore */ } };
 
   return (
     <div className="space-y-4">
       <PageTitle title="AI Orchestrator" subtitle="실제 상태 · 증거 기반 (가짜 텔레메트리 없음)" />
       <ScopeNotice />
-      <Card>
-        <label className="text-xs text-text-muted" htmlFor="tok">토큰 (읽기/관리자, 이 탭에만 저장)</label>
-        <input id="tok" type="password" value={token} onChange={(e) => save(e.target.value)} autoComplete="off" className="mt-1 w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm" />
-      </Card>
+      <LoginCard />
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
-      {s.kind === "notoken" && <Card><p className="text-sm">토큰을 입력하면 실제 상태를 불러옵니다. 연결 전에는 어떤 상태도 표시하지 않습니다.</p></Card>}
+      {s.kind === "notoken" && <Card><p className="text-sm">로그인하면 실제 상태를 불러옵니다. 연결 전에는 어떤 상태도 표시하지 않습니다.</p></Card>}
       {s.kind === "unauth" && <Card><p className="text-sm">{s.reason === "token_missing" ? "토큰이 비어 있습니다 (401)." : "토큰이 올바르지 않습니다 (401). 서버에는 토큰이 설정되어 있으나 입력값과 일치하지 않습니다."}</p></Card>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">서버 저장소/인증이 설정되지 않았습니다 (DATABASE_URL, CONTROL_*_TOKEN). 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p>{s.detail && <p className="mt-1 text-xs text-text-faint">{s.detail}</p>}<button className="mt-2 min-h-11 rounded-lg border border-border px-3 text-xs" onClick={load}>다시 시도</button></Card>}

@@ -5,6 +5,7 @@ import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
 import { GitHubAgentLine, GitHubAgentsUnmapped, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
 import { evidenceCoverage, githubAgents } from "@/lib/github/evidence-views";
+import { formatKst } from "@/lib/time/kst";
 
 type Agent = {
   key: string; provider: string; enabled: boolean; effective: boolean; blockedReason: string | null;
@@ -13,7 +14,7 @@ type Agent = {
   externalGate: { state: "none" | "fresh" | "stale"; lastAt?: string; lastAllowed?: boolean; count?: number };
 };
 const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Sonnet", "claude-opus": "Claude Opus", codex: "Codex" };
-const t = (s: string | null | undefined) => (s ? s.replace("T", " ").slice(0, 19) + "Z" : "없음");
+const t = (s: string | null | undefined) => formatKst(s);
 
 export default function AgentsPage() {
   const { state, reload, error } = useAuthedJson<{ generatedAt: string; agents: Agent[] }>("/api/dashboard", (st, b) => {

@@ -3,6 +3,8 @@
 // - 성공한 로더가 하나라도 있을 때만 마지막 성공 시각을 갱신한다. 실패는 목록으로 노출하고 기존 데이터는 각 로더가 유지한다.
 
 /** 로더는 성공하면 true, 실패(오류/비정상 응답)면 false 를 반환한다. 절대 throw 하지 않아야 하지만 방어적으로 처리한다. */
+import { tokenHeaders } from "../session/client";
+
 export type Loader = () => Promise<boolean>;
 export type RefreshSnapshot = { inFlight: boolean; lastSuccessAt: number | null; failed: string[]; registered: number };
 
@@ -41,7 +43,7 @@ export function createRefreshCenter(now: () => number = Date.now) {
 }
 
 export type SharedResponse = { status: number; body: unknown };
-type FetchLike = (input: string, init: { cache: "no-store"; headers: Record<string, string> }) => Promise<{ status: number; json: () => Promise<unknown> }>;
+type FetchLike = (input: string, init: { cache: "no-store"; credentials: "same-origin"; headers: Record<string, string> }) => Promise<{ status: number; json: () => Promise<unknown> }>;
 
 /** 같은 경로·토큰의 동시 GET 을 하나로 합친다. 완료 후에는 캐시하지 않으므로 매 호출이 신선한 재검증이다. */
 export function createSharedGet(fetchFn: FetchLike) {
@@ -51,7 +53,7 @@ export function createSharedGet(fetchFn: FetchLike) {
     const hit = pending.get(k);
     if (hit) return hit;
     const p = (async () => {
-      const r = await fetchFn(path, { cache: "no-store", headers: { "x-admin-token": token } });
+      const r = await fetchFn(path, { cache: "no-store", credentials: "same-origin", headers: tokenHeaders(token) });
       const body = await r.json().catch(() => null);
       return { status: r.status, body };
     })().finally(() => { pending.delete(k); });

@@ -1,5 +1,5 @@
 import { agentSecret, verifyCallback } from "./callback-auth";
-import { checkAdmin, checkRead } from "../control/auth";
+import { authorize } from "../session/guard";
 import { isAgentKey } from "../control/model";
 import { checkExternalGate, signGateResponse } from "./external-gate";
 import { assignCollaboration, claimCollaboration, finishCollaboration, leaseCollaboration, quiesceCollaboration, reportCleanupFailure, type QuiescenceReport, type CleanupFailure, decideCollaboration, refreshCollaboration, CollaborationConflict, type Assignment, type ExecutionResult } from "./collaboration";
@@ -19,7 +19,7 @@ export async function deliver(d: Dependencies, w: { dispatchId?: string; stage: 
 }
 export async function handleCollaboration(method: string, headers: Headers, raw: string, d: Dependencies): Promise<Reply> {
   try {
-    const auth = method === "GET" ? checkRead(headers.get("x-admin-token"), d.env) : checkAdmin(headers.get("x-admin-token"), d.env);
+    const auth = authorize(method, headers, method === "GET" ? "read" : "admin", d.env, d.nowMs);
     if (!auth.ok) return reply(auth.status, { error: "unauthorized" });
     if (method === "GET") return reply(200, { workflows: Object.values((await d.store().read()).collaborations ?? {}) });
     if (raw.length > 16_384) return reply(413, { error: "too_large" });

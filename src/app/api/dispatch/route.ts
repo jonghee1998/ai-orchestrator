@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { checkAdmin } from "@/lib/control/auth";
+import { authorize } from "@/lib/session/guard";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
 import { GitHubLabelAdapter, dispatchIssue, submitQueued } from "@/lib/runs/dispatcher";
 import { isAgentKey } from "@/lib/control/model";
@@ -9,7 +9,7 @@ const H = { "Cache-Control": "no-store" };
 
 /** Admin-only. Body: {issueNumber, agent} (new dispatch) or {dispatchId} (release a held record). Gate runs server-side immediately before submission. */
 export async function POST(req: Request): Promise<NextResponse> {
-  const auth = checkAdmin(req.headers.get("x-admin-token"));
+  const auth = authorize(req.method, req.headers, "admin");
   if (!auth.ok) return NextResponse.json({ error: auth.status === 503 ? "control_unconfigured" : "unauthorized" }, { status: auth.status, headers: H });
   const raw = await req.text();
   let b: Record<string, unknown>;

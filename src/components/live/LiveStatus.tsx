@@ -13,8 +13,8 @@ export function LiveStatus({ s, reload, what, error }: { s: Live<unknown>; reloa
   if (s.kind === "ok") return <StaleNotice error={error} />;
   if (s.kind === "loading") return <p className="text-sm text-text-faint">불러오는 중…</p>;
   const msg = {
-    notoken: <>토큰이 없습니다. <Link href="/" className="text-accent">홈</Link>에서 토큰을 입력하면 {what}을(를) 실제 데이터로 표시합니다.</>,
-    unauth: <>토큰이 올바르지 않습니다 (401).</>,
+    notoken: <>로그인이 필요합니다. <Link href="/" className="text-accent">홈</Link>에서 한 번 로그인하면 {what}을(를) 실제 데이터로 표시합니다.</>,
+    unauth: <>세션이 없거나 만료되었습니다 (401). 다시 로그인하세요.</>,
     unconfigured: <>서버 설정이 없어 {what}을(를) 불러올 수 없습니다 (unconfigured). 추정값은 표시하지 않습니다.</>,
     error: <>{what}을(를) 불러오지 못했습니다{s.kind === "error" ? ` (${s.detail})` : ""}.</>,
   }[s.kind];

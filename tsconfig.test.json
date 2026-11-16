@@ -7,6 +7,6 @@
     "moduleResolution": "Node",
     "outDir": ".test-build"
   },
-  "include": ["src/lib/github/work-queue.ts", "src/lib/github/github-read-queue.ts", "src/lib/github/*.test.ts", "src/lib/github/evidence.ts", "src/lib/github/evidence-reader.ts", "src/components/work-queue/loader.ts", "src/components/work-queue/loader.test.ts", "src/components/work-queue/viewModel.ts", "src/lib/runs/*.ts", "src/lib/runs/*.test.ts", "src/lib/control/*.ts", "src/components/progress/viewModel.ts", "src/components/progress/viewModel.test.ts", "src/components/progress/contract.test.ts", "src/lib/readiness.ts", "src/lib/readiness.test.ts", "src/lib/refresh/*.ts"],
+  "include": ["src/lib/github/work-queue.ts", "src/lib/github/github-read-queue.ts", "src/lib/github/*.test.ts", "src/lib/github/evidence.ts", "src/lib/github/evidence-reader.ts", "src/components/work-queue/loader.ts", "src/components/work-queue/loader.test.ts", "src/components/work-queue/viewModel.ts", "src/lib/runs/*.ts", "src/lib/runs/*.test.ts", "src/lib/control/*.ts", "src/components/progress/viewModel.ts", "src/components/progress/viewModel.test.ts", "src/components/progress/contract.test.ts", "src/lib/readiness.ts", "src/lib/readiness.test.ts", "src/lib/refresh/*.ts", "src/lib/time/*.ts", "src/lib/session/*.ts"],
   "exclude": []
 }

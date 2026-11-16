@@ -5,10 +5,11 @@ import { refreshCenter } from "@/components/live/refresh";
 import { useAuthedJson, type Live } from "@/components/live/useAuthedJson";
 import { GitHubProgressPanel, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
 import { BUCKET_LABEL, buildCards, parseRuns, parseWorkflows, summarize, type Bucket, type RunRow, type WorkflowRow } from "./viewModel";
+import { formatKst } from "@/lib/time/kst";
 
 const POLL_MS = 15000;
 const TONE: Record<Bucket, string> = { queued: "bg-warn/15 text-warn", running: "bg-accent/15 text-accent", completed: "bg-ok/15 text-ok", blocked: "bg-danger/15 text-danger", unknown: "bg-unknown/15 text-text-muted" };
-const ts = (s: string | null) => { const d = s ? new Date(s) : null; return d && !Number.isNaN(d.getTime()) ? d.toISOString().replace("T", " ").slice(0, 19) + "Z" : "unknown"; };
+const ts = (s: string | null) => formatKst(s, "unknown");
 const Row = ({ k, children }: { k: string; children: React.ReactNode }) => <div className="flex gap-2 text-xs"><dt className="w-16 shrink-0 text-text-faint">{k}</dt><dd className="min-w-0 break-all">{children}</dd></div>;
 
 export function ProgressDashboard() {

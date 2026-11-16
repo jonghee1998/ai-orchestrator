@@ -8,14 +8,14 @@ import { sharedGet, useRegisterRefresh } from "./refresh";
 export type { Live } from "@/lib/refresh/live-loader";
 
 /** Same per-tab token the home dashboard stores. Exported so every live loader (incl. /tasks) uses one source. */
-export const readToken = () => { try { return sessionStorage.getItem("ctl-token") ?? ""; } catch { return ""; } };
-/** Header set for authenticated read endpoints. */
-export const authHeaders = (token: string) => ({ "x-admin-token": token });
+import { readToken, useSession } from "./session";
+export { readToken };
 
 /** `accept` returns the data if the body is the live contract, "unconfigured" if the server says so, else null (=error).
  *  #81: 오류·네트워크 실패 시 마지막 정상 데이터를 유지하고(`error` 로 실패를 별도 노출), 401/토큰 없음만 상태를 교체한다.
  *  모든 인스턴스는 전역 새로고침에 등록되며, 같은 경로의 동시 GET 은 sharedGet 이 합친다. 폴링 주기는 그대로다. */
 export function useAuthedJson<T>(path: string, accept: Accept<T>, intervalMs = 15000) {
+  const sess = useSession().version; // 로그인/로그아웃/만료 시 재조회
   const [view, setView] = useState<LiveView<T>>({ state: { kind: "loading" }, error: null });
   const acceptRef = useRef(accept); acceptRef.current = accept;
   const loader = useRef<ReturnType<typeof createLiveLoader<T>> | null>(null);
@@ -26,7 +26,7 @@ export function useAuthedJson<T>(path: string, accept: Accept<T>, intervalMs = 1
     void l.load();
     const id = setInterval(() => { void l.load(); }, intervalMs);
     return () => { clearInterval(id); l.dispose(); loader.current = null; };
-  }, [path, intervalMs]);
+  }, [path, intervalMs, sess]);
   useRegisterRefresh(path, load);
   return { state: view.state as Live<T>, reload: load, error: view.error };
 }
