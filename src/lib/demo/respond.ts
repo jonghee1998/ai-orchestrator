@@ -1,5 +1,5 @@
 // 데모 모드 읽기 응답 (#85). 네트워크/DB/프로바이더 호출 없음. 시나리오로 성공/부분 실패/오류/빈 상태를 모사한다.
-import { demoDashboard, demoEvidence, demoQueue, demoReadiness, demoRuns } from "./fixtures";
+import { demoCollaborations, demoDashboard, demoEvidence, demoQueue, demoReadiness, demoRuns } from "./fixtures";
 import type { Scenario } from "./mode";
 
 export type DemoKind = "dashboard" | "readiness" | "runs" | "work-queue" | "evidence" | "collaboration";
@@ -15,6 +15,6 @@ export function demoRead(kind: DemoKind, scenario: Scenario): { status: number; 
     case "runs": return { status: 200, body: { mode: "live", runs: demoRuns(scenario) } };
     case "work-queue": return { status: 200, body: { mode: "live", tasks: demoQueue(scenario) } };
     case "evidence": return { status: 200, body: { mode: "live", report: demoEvidence(scenario) } };
-    case "collaboration": return { status: 200, body: { workflows: [] } };
+    case "collaboration": return { status: 200, body: { workflows: demoCollaborations(scenario) } };
   }
 }

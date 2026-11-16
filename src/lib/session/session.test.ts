@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { authorize } from "./guard";
+import { LoginLimiter } from "./rate-limit";
 import { handleSession } from "./http";
 import { cookieName, csrfToken, issueSession, SESSION_TTL_SEC, verifySession } from "./session";
 
@@ -10,11 +11,11 @@ const env = { NODE_ENV: "production", CONTROL_ADMIN_TOKEN: ADMIN, CONTROL_READ_T
 const NOW = Date.UTC(2026, 10, 16);
 const H = (o: Record<string, string>) => new Headers({ host: "app.example", ...o });
 const login = (token: string, e: Record<string, string | undefined> = env) =>
-  handleSession("POST", H({ origin: "https://app.example" }), JSON.stringify({ token }), e, NOW);
+  handleSession("POST", H({ origin: "https://app.example" }), JSON.stringify({ token }), e, NOW, new LoginLimiter());
 const cookieOf = (setCookie?: string) => (setCookie ?? "").split(";")[0];
 
-test("login with admin token issues HttpOnly Secure SameSite cookie; no raw token anywhere", () => {
-  const r = login(ADMIN);
+test("login with admin token issues HttpOnly Secure SameSite cookie; no raw token anywhere", async () => {
+  const r = await login(ADMIN);
   assert.equal(r.status, 200);
   const c = r.setCookie!;
   assert.match(c, /^__Host-orch_session=/);
@@ -23,23 +24,23 @@ test("login with admin token issues HttpOnly Secure SameSite cookie; no raw toke
   assert.ok(!c.includes(ADMIN) && !JSON.stringify(r.body).includes(ADMIN));
   assert.ok(!Buffer.from(c.split("=")[1].split(".")[0], "base64url").toString().includes(ADMIN));
 });
-test("wrong/empty token → 401 and no cookie; unconfigured → 503", () => {
-  for (const t of ["", "nope", ADMIN + "x"]) { const r = login(t); assert.equal(r.status, 401); assert.equal(r.setCookie, undefined); }
-  assert.equal(login(ADMIN, { NODE_ENV: "production" }).status, 503);
+test("wrong/empty token → 401 and no cookie; unconfigured → 503", async () => {
+  for (const t of ["", "nope", ADMIN + "x"]) { const r = await login(t); assert.equal(r.status, 401); assert.equal(r.setCookie, undefined); }
+  assert.equal((await login(ADMIN, { NODE_ENV: "production" })).status, 503);
 });
-test("login/logout CSRF: cross-origin POST/DELETE rejected", () => {
+test("login/logout CSRF: cross-origin POST/DELETE rejected", async () => {
   const evil = H({ origin: "https://evil.example" });
-  assert.equal(handleSession("POST", evil, JSON.stringify({ token: ADMIN }), env, NOW).status, 403);
-  assert.equal(handleSession("DELETE", evil, "", env, NOW).status, 403);
-  const out = handleSession("DELETE", H({ origin: "https://app.example" }), "", env, NOW);
+  assert.equal((await handleSession("POST", evil, JSON.stringify({ token: ADMIN }), env, NOW)).status, 403);
+  assert.equal((await handleSession("DELETE", evil, "", env, NOW)).status, 403);
+  const out = await handleSession("DELETE", H({ origin: "https://app.example" }), "", env, NOW);
   assert.equal(out.status, 200); assert.match(out.setCookie!, /Max-Age=0/);
 });
-test("session survives reload/browser restart (cookie only) and GET returns role+csrf", () => {
-  const ck = cookieOf(login(ADMIN).setCookie);
-  const r = handleSession("GET", H({ cookie: ck }), "", env, NOW + 10 * 24 * 3600_000);
+test("session survives reload/browser restart (cookie only) and GET returns role+csrf", async () => {
+  const ck = cookieOf((await login(ADMIN)).setCookie);
+  const r = await handleSession("GET", H({ cookie: ck }), "", env, NOW + 10 * 24 * 3600_000);
   assert.deepEqual({ a: (r.body as any).authenticated, role: (r.body as any).role }, { a: true, role: "admin" });
   assert.ok((r.body as any).csrfToken.length > 20);
-  assert.equal((handleSession("GET", H({}), "", env, NOW).body as any).authenticated, false);
+  assert.equal(((await handleSession("GET", H({}), "", env, NOW)).body as any).authenticated, false);
 });
 test("expiry: valid before 30d, rejected after; tampered/forged/foreign cookies rejected", () => {
   const { value, session } = issueSession("admin", env, NOW)!;
