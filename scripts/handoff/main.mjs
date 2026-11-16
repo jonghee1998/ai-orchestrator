@@ -7,6 +7,7 @@ import { readFileSync, appendFileSync } from "node:fs";
 import { isTrustedCodex } from "./core.mjs";
 import { createClient } from "./github.mjs";
 import { run } from "./execute.mjs";
+import { runLifecycle, configFromEnv } from "./lifecycle-run.mjs";
 
 export function prFromEvent(name, payload, inputs = {}) {
   if (name === "workflow_dispatch") {
@@ -25,21 +26,31 @@ export function prFromEvent(name, payload, inputs = {}) {
   return { skip: "unsupported_event" };
 }
 
+/** Entry logic, injectable for tests (gh client, env, output). main() only adds real process wiring. */
+export async function handle({ name, payload, gh, apply = false, repo, env = {}, out }) {
+  const target = prFromEvent(name, payload, payload.inputs ?? {});
+  if (target.skip) return out({ mode: apply ? "live" : "dry-run", event: name, result: "skip", reason: target.skip });
+  const result = await run(gh, target.pr, { apply, repo, writerLogin: env.HANDOFF_WRITER_LOGIN || undefined, log: out });
+  out({ mode: apply ? "live" : "dry-run", event: name, pr: target.pr, ...result });
+  // T5 lifecycle planner (Issue #138): dry-run only, read-only GitHub access, never runs in --apply mode.
+  if (!apply) {
+    const expectedHead = name === "pull_request_review" ? payload.pull_request?.head?.sha : undefined;
+    const lifecycle = await runLifecycle(gh, target.pr, { config: configFromEnv(env), expectedHead });
+    out({ mode: "dry-run", event: name, pr: target.pr, lifecycle });
+  }
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
-  const name = process.env.GITHUB_EVENT_NAME;
   const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
-  const target = prFromEvent(name, payload, payload.inputs ?? {});
   const out = (o) => {
     const line = JSON.stringify(o);
     console.log(line);
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, "```json\n" + line + "\n```\n");
   };
-  if (target.skip) return out({ mode: apply ? "live" : "dry-run", event: name, result: "skip", reason: target.skip });
   const repo = process.env.GITHUB_REPOSITORY;
   const gh = createClient({ token: process.env.GITHUB_TOKEN, repo });
-  const result = await run(gh, target.pr, { apply, repo, writerLogin: process.env.HANDOFF_WRITER_LOGIN || undefined, log: out });
-  out({ mode: apply ? "live" : "dry-run", event: name, pr: target.pr, ...result });
+  await handle({ name: process.env.GITHUB_EVENT_NAME, payload, gh, apply, repo, env: process.env, out });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

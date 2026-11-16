@@ -38,6 +38,8 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
+      checks: read
+      deployments: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,6 +51,9 @@ jobs:
       - run: node scripts/handoff/main.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # T5 lifecycle dry-run config (Issue #138): exact allowlist + expected integration base SHA.
+          HANDOFF_LIFECYCLE_ALLOWLIST: codex/issue-92-mobile-v2
+          HANDOFF_LIFECYCLE_EXPECTED_BASE: dc96b47703bee8a7a54889a6a50f4fdceb7b41aa
 
   apply:
     needs: plan

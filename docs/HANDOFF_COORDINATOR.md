@@ -148,3 +148,23 @@ Files:
   it is a **self-report**, never authenticated authority; completion stays `withheld` (T6 adds the real gate).
 - Completion also requires green integration CI and a successful `dev` deployment on the exact SHA.
 - Round cap `MAX_ROUNDS = 3`; completion/blocked events dedupe by key.
+
+### T5 revision (Issue #138) — wired dry-run, merged-evidence model
+
+- **Wired:** `main.mjs` `handle()` (the real coordinator entrypoint / workflow `plan` job) now runs
+  `lifecycle-run.mjs` after the existing dry-run, through a read-only facade (GET only; never in `--apply`).
+  Evidence is normalized by `lifecycle-evidence.mjs` from real payloads: the Codex bot `codex-review-state:v1`
+  summary comment, the existing PM `gpt-pm-accept:v1 issue<N>:pr<P>:<sha>:target=<branch>` / revise markers,
+  check runs, deployments, commit parents and compare results.
+- **Config (fail closed):** `HANDOFF_LIFECYCLE_ALLOWLIST` (exact branch names, no globs, no main/prod) and
+  `HANDOFF_LIFECYCLE_EXPECTED_BASE` (40-hex). Missing/malformed => `blocked`.
+- **Two phases:** `open_review` (exact PR head; review/revise/accept, never completes) vs `merged` (exact merge SHA:
+  on integration tip, head ancestry for merge commits, CI + `dev` deployment bound to the merge SHA). All evidence
+  present => `evidenceEligible: true` but `completion: "withheld"` (T6 authority; markers stay self-reported).
+  Squash/rebase merges cannot prove head ancestry and stay withheld.
+- **Durable records:** `claimed -> issue(ref) -> done(ref)` from writer records; claimed = `in_flight` (no second
+  planned dispatch), issue = adopt existing, conflicting/ref-less records = `record_conflict`. Complete events dedupe
+  per request across rounds and PRs; blocked per request+round across PRs.
+- **Replacement:** superseded PR may stay open/closed-unmerged (merged is a distinct block); compare must echo the exact
+  superseded-head and replacement-head SHAs. Not yet wired into the entrypoint (pure `validateTarget` only).
+- **Not observed:** no live workflow run of this path; no authenticated PM authority; entrypoint tested with fixture HTTP.
