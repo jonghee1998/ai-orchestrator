@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { demoReadResponse } from "@/lib/demo/respond-http";
 import { requireRead } from "../_auth";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
 import { runView } from "@/lib/runs/run-trust";
@@ -9,6 +10,8 @@ const H = { "Cache-Control": "no-store" };
 export async function GET(req: Request): Promise<NextResponse> {
   const denied = requireRead(req);
   if (denied) return denied;
+  const demo = demoReadResponse(req, "runs");
+  if (demo) return demo as NextResponse;
   try {
     const { records } = await getRunStore().read();
     // #57: `verified`/`origin`/`trust` come from run-trust.ts — a session self-report is never "verified".

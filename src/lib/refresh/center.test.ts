@@ -66,5 +66,5 @@ test("sharedGet: rejected fetch clears pending so next call retries", async () =
 import { formatRefreshTime } from "./format";
 test("formatRefreshTime shows 없음 without a successful refresh", () => {
   assert.equal(formatRefreshTime(null), "없음");
-  assert.equal(formatRefreshTime(Date.UTC(2026, 0, 2, 3, 4, 5)), "03:04:05Z");
+  assert.equal(formatRefreshTime(Date.UTC(2026, 0, 2, 3, 4, 5)), "12:04:05 KST");
 });

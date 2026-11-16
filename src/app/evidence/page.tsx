@@ -5,9 +5,10 @@ import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
 import { parseEvidenceResponse } from "@/lib/github/evidence-views";
 import type { CommentEvidence, EvidenceReport, IssueEvidence, PullEvidence } from "@/lib/github/evidence";
+import { formatKst } from "@/lib/time/kst";
 
 const accept = parseEvidenceResponse;
-const when = (iso?: string) => (iso ? iso.replace("T", " ").slice(0, 16) + "Z" : "unknown");
+const when = (iso?: string) => formatKst(iso, "unknown");
 const Ext = ({ href, children }: { href?: string; children: React.ReactNode }) =>
   href ? <a href={href} target="_blank" rel="noreferrer" className="text-accent break-all">{children}</a> : <>{children}</>;
 

@@ -10,12 +10,13 @@ import {
   GITHUB_STAGE_LABEL, EVENT_KIND_LABEL, absence, atLeast, evidenceCoverage, githubActivity, githubAgents, githubProgress, githubTaskSplit, parseEvidenceResponse, shortenShas, summarizeEvent,
   type EvidenceCoverage, type GitHubAgentRow, type GitHubStage,
 } from "@/lib/github/evidence-views";
+import { formatKst } from "@/lib/time/kst";
 
 export const GITHUB_POLL_MS = 60_000;
 export function useGitHubEvidence() {
   return useAuthedJson<EvidenceReport>("/api/evidence", parseEvidenceResponse, GITHUB_POLL_MS);
 }
-const when = (iso?: string | null) => (iso ? iso.replace("T", " ").slice(0, 16) + "Z" : "없음");
+const when = (iso?: string | null) => formatKst(iso);
 const Ext = ({ href, children }: { href?: string; children: React.ReactNode }) =>
   href ? <a href={href} target="_blank" rel="noreferrer" className="break-all text-accent">{children}</a> : <>{children}</>;
 

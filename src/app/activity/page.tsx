@@ -5,9 +5,10 @@ import RunsPanel from "@/components/RunsPanel";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { LiveStatus } from "@/components/live/LiveStatus";
 import { GitHubActivityPanel, useGitHubEvidence } from "@/components/github/GitHubEvidencePanels";
+import { formatKst } from "@/lib/time/kst";
 
 type Audit = { at: string; actor: string; action: string; detail: string };
-const t = (s: string) => s.replace("T", " ").slice(0, 19) + "Z";
+const t = (s: string) => formatKst(s);
 
 export default function ActivityPage() {
   const { state, reload, error } = useAuthedJson<Audit[]>("/api/dashboard", (st, b) => {

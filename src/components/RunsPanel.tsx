@@ -3,6 +3,7 @@ import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { Card } from "@/components/ui";
 import { StaleNotice } from "@/components/live/LiveStatus";
 import { parseTrust, trustLabel } from "@/lib/runs/run-trust";
+import { formatKst } from "@/lib/time/kst";
 
 type Run = { dispatchId: string; issueNumber: number; agent: string; status: string; verified: boolean; trust?: unknown; lastActivityAt: string; lastError: string | null; evidence: { kind: string; url: string }[];
   collaboration?: { baseBranch: string; baseSha: string; targetSha: string; step: string; cycle: number } | null;
@@ -26,7 +27,7 @@ export default function RunsPanel() {
       {s.kind === "ok" && s.runs.map((r) => { const t = parseTrust(r.trust), ev = trustLabel(t, r.status), self = t?.origin === "session"; return (
         <Card key={r.dispatchId}>
           <p className="text-sm">#{r.issueNumber} · {r.agent} · <b>{r.status}</b> <span className={ev.verified ? "text-ok" : "text-warn"}>({ev.text})</span></p>
-          <p className="text-xs text-text-faint">최근 활동 {r.lastActivityAt}{r.lastError ? ` · ${r.lastError}` : ""}</p>
+          <p className="text-xs text-text-faint">최근 활동 {formatKst(r.lastActivityAt)}{r.lastError ? ` · ${r.lastError}` : ""}</p>
           {r.collaboration && <p className="break-all text-xs text-text-faint">PM 기준 {r.collaboration.baseBranch}@{r.collaboration.baseSha.slice(0, 12)} · {r.collaboration.step} #{r.collaboration.cycle} · 대상 {r.collaboration.targetSha.slice(0, 12)}</p>}
           {r.execution && <div className="text-xs">{self && <p className="text-warn">세션 자기보고 — 아래 실행·테스트 결과는 독립 검증되지 않았고 프로세스 정리 증명이 없습니다.</p>}
             <p>{r.execution.summary}</p><p>{self ? "보고된 " : ""}실행 종료 코드 {r.execution.exitCode} · 커밋 {r.execution.headSha.slice(0, 12)}</p>
