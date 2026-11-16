@@ -131,3 +131,20 @@ Files:
    protects the transition.
 4. **Rollback.** Unset `HANDOFF_COORDINATOR_MODE`, which immediately returns the coordinator to
    dry-run, and turn the GPT writer back on.
+
+## T5 lifecycle planner (Issue #136) — dry-run only
+
+`scripts/handoff/lifecycle.mjs` is a pure planner (no GitHub client, no writes; every plan carries
+`mode: "dry-run"`, `live: false`). It does not dispatch, merge, label or enable live mode.
+
+- Idempotency key `orch:v1:req<N>:pr<P>:<step>:r<n>`; `replay()` shows 3 evaluations collapse to one plan digest.
+- Single mechanical writer: only records from `github-actions[bot]` count as claim/issue/done.
+- Ambiguous POST: `recoverAmbiguousPost` adopts exactly one match from a complete scan; incomplete, duplicate
+  or zero matches fail closed (no auto retry).
+- Live head/base must equal expected SHAs; base must be the integration target (`main` etc. rejected);
+  replacement PRs must target the integration branch directly (no stacks) with proven ancestry.
+- Independent review = trusted reviewer, not the PR author, exact SHA, completed, no unresolved findings.
+- PM acceptance marker `<!-- pm-accept:<key> sha=<sha> -->` bound to exact SHA. Posted from the owner account
+  it is a **self-report**, never authenticated authority; completion stays `withheld` (T6 adds the real gate).
+- Completion also requires green integration CI and a successful `dev` deployment on the exact SHA.
+- Round cap `MAX_ROUNDS = 3`; completion/blocked events dedupe by key.
