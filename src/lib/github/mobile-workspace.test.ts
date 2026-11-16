@@ -21,7 +21,12 @@ test("projects use one unambiguous label or milestone; no fabricated project/goa
 test("completion requires closed issue/merged result, not status label or completion self-report", () => {
   const tasks: WorkQueueTask[] = [{ id: "903", title: "review", status: "done", agent: "opus", url: "", dependsOn: [] }];
   assert.equal(workspace(tasks, demoEvidence("normal")).tasks[0].phase, "review");
-  assert.equal(workspace([{ ...tasks[0], issueState: "closed" }]).tasks[0].phase, "done");
+  // P1-a (#98): previously a closed issue alone mapped to "done". Closed without a declared completion type is now
+  // "종료됨 · 완료유형 미확인" (phase unknown); it is done only with type-specific evidence (see lifecycle.test.ts).
+  const closed = workspace([{ ...tasks[0], issueState: "closed" }]).tasks[0];
+  assert.equal(closed.phase, "unknown");
+  assert.equal(closed.lifecycle.phase, "closed_unverified");
+  assert.equal(workspace([{ ...tasks[0], issueState: "closed", description: "완료유형: nondeploy\n완료 조건: 보고서 제출" }], { ...demoEvidence("normal"), issues: [{ ...demoEvidence("normal").issues[0], number: 903, state: "closed", completions: demoEvidence("normal").issues[2].completions }] }).tasks[0].phase, "done");
   assert.equal(workspace([{ ...tasks[0], status: "unknown" }]).tasks[0].phase, "unknown");
 });
 test("sample goals, task identity and counts are shared across screens; dependencies fail closed", () => {
@@ -31,7 +36,9 @@ test("sample goals, task identity and counts are shared across screens; dependen
     assert.ok(p.goal); assert.equal(p.done + p.remaining, p.tasks.length);
     assert.equal(p.active, p.tasks.filter(t => ["active", "review"].includes(t.phase)).length);
   }
-  assert.equal(model.projects.find(p => p.id === "sample-report")?.stage, "업무 완료");
+  // P1-a (#98): sample-report tasks are closed but declare no completion type/criteria → not "업무 완료" (was expected before).
+  assert.notEqual(model.projects.find(p => p.id === "sample-report")?.stage, "업무 완료");
+  assert.equal(model.projects.find(p => p.id === "sample-report")?.done, 0);
   assert.equal(model.tasks.find(t => t.id === "904")?.phase, "blocked");
   assert.match(model.tasks.find(t => t.id === "906")!.waiting, /#999/);
   for (const t of model.tasks) {
