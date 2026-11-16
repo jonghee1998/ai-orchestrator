@@ -25,7 +25,12 @@ test("completion requires closed issue/merged result, not status label or comple
   assert.equal(workspace([{ ...tasks[0], issueState: "closed" }]).tasks[0].phase, "unknown");
   // Changed (Issue #102): closing alone is not acceptance; it must be closed as completed.
   assert.notEqual(workspace([{ ...tasks[0], issueState: "closed", description: "Completion type: nondeploy" }]).tasks[0].phase, "done");
-  assert.equal(workspace([{ ...tasks[0], issueState: "closed", stateReason: "completed", description: "Completion type: nondeploy" }]).tasks[0].phase, "done");
+  const closedDone: WorkQueueTask = { ...tasks[0], issueState: "closed", stateReason: "completed", description: "Completion type: nondeploy" };
+  // Issue #119: without evidence covering this issue the absence of an open PR is unknown → never done.
+  assert.notEqual(workspace([closedDone]).tasks[0].phase, "done");
+  assert.equal(workspace([closedDone]).tasks[0].lifecycle.completion, "unknown");
+  const ev = demoEvidence("normal"), covered = { ...ev, issues: [...ev.issues.filter(i => i.number !== 903), { ...ev.issues.find(i => i.number === 905)!, number: 903 }] };
+  assert.equal(workspace([closedDone], covered).tasks[0].phase, "done");
   assert.equal(workspace([{ ...tasks[0], status: "unknown" }]).tasks[0].phase, "unknown");
 });
 test("sample goals, task identity and counts are shared across screens; dependencies fail closed", () => {

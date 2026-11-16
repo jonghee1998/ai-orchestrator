@@ -1,4 +1,5 @@
 export const QUEUE_AGENTS = ["claude", "opus", "codex"] as const;
+const AGENT_ALIASES: Record<string, string> = { "claude-sonnet": "claude", "claude-opus": "opus" };
 export type QueueAgent = (typeof QUEUE_AGENTS)[number] | "unknown";
 
 export const QUEUE_STATUSES = [
@@ -88,7 +89,9 @@ export function normalizeIssues(issues: GitHubIssue[]): WorkQueueTask[] {
     .sort((left, right) => left.number - right.number)
     .map((issue) => {
       const labels = labelNames(issue);
-      const agent = oneNamespacedLabel(labels, "agent:", QUEUE_AGENTS);
+      // Issue #119: `agent:claude-sonnet` / `agent:claude-opus` are aliases of the canonical queue agents.
+      const rawAgent = oneNamespacedLabel(labels, "agent:", [...QUEUE_AGENTS, ...Object.keys(AGENT_ALIASES)]);
+      const agent = rawAgent ? AGENT_ALIASES[rawAgent] ?? rawAgent : undefined;
       // A closed issue is completed work regardless of a stale status label.
       const status =
         issue.state === "closed"
