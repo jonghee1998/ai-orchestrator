@@ -1,6 +1,7 @@
 "use client";
 // #81 — 모든 탭 공용 상단 새로고침. 읽기(GET) 재검증만 수행하며 dispatch/reconcile 등 변경 요청은 보내지 않는다.
 import { refreshCenter, useRefreshState } from "@/components/live/refresh";
+import { TestModeButton } from "@/components/TestModeButton";
 import { formatRefreshTime } from "@/lib/refresh/format";
 
 export function GlobalRefresh() {
@@ -24,6 +25,7 @@ export function GlobalRefresh() {
           <span aria-hidden className={s.inFlight ? "animate-spin" : ""}>↻</span>
           <span className="hidden min-[360px]:inline">{s.inFlight ? "갱신 중" : "새로고침"}</span>
         </button>
+        <TestModeButton />
       </div>
       {!s.inFlight && failed.length > 0 && (
         <p role="status" className="mx-auto max-w-app break-all px-4 pb-2 text-[11px] text-warn" data-testid="refresh-failed">

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { AuthGate } from "@/components/AuthGate";
 import { DemoProvider } from "@/components/workspace/DemoContext";
 import { BottomNav } from "@/components/BottomNav";
 import { DemoBanner } from "@/components/DemoBanner";
@@ -27,6 +28,7 @@ export default function RootLayout({
     <html lang="ko">
       <body>
         <div className="mx-auto flex min-h-dvh max-w-app flex-col">
+          <AuthGate>
           <DemoProvider>
           <SimulationProvider>
           <GlobalRefresh />
@@ -35,6 +37,7 @@ export default function RootLayout({
           <BottomNav />
           </SimulationProvider>
           </DemoProvider>
+          </AuthGate>
         </div>
       </body>
     </html>
