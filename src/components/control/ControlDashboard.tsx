@@ -62,7 +62,7 @@ export default function ControlDashboard() {
     try {
       const r = await fetch("/api/control", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      setMsg(r.ok ? "적용됨" : r.status === 401 ? "세션이 만료되었습니다. 다시 로그인하세요" : r.status === 403 ? "관리자 권한 또는 CSRF 검증 실패 (읽기 전용 세션이면 관리자 토큰으로 로그인)" : r.status === 503 ? "제어가 설정되지 않았습니다 (CONTROL_ADMIN_TOKEN)" : r.status === 409 ? `충돌/미지원: ${j.detail ?? j.error}` : `실패: ${j.error ?? r.status}`);
+      setMsg(r.ok ? "적용됨" : r.status === 401 ? "세션이 만료되었습니다. 다시 로그인하세요" : r.status === 403 ? "관리자 권한 또는 CSRF 검증 실패 (읽기 전용 세션이면 관리자 계정으로 로그인)" : r.status === 503 ? "서버 제어가 설정되지 않았습니다" : r.status === 409 ? `충돌/미지원: ${j.detail ?? j.error}` : `실패: ${j.error ?? r.status}`);
       await load();
     } catch { setMsg("요청 실패"); } finally { setBusy(false); }
   }

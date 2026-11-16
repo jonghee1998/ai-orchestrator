@@ -1,3 +1,4 @@
+import { demoRequestBlock } from "@/lib/demo/respond-http";
 import { NextResponse } from "next/server";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
 import { authorize } from "@/lib/session/guard";
@@ -6,7 +7,9 @@ import { mutateControl, requestCancel, type Mutation } from "@/lib/control/servi
 export const dynamic = "force-dynamic";
 const H = { "Cache-Control": "no-store" };
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: Request): Promise<Response> {
+  const blocked = demoRequestBlock(req);
+  if (blocked) return blocked;
   const auth = authorize(req.method, req.headers, "admin");
   if (!auth.ok) return NextResponse.json({ error: auth.status === 503 ? "control_unconfigured" : "unauthorized" }, { status: auth.status, headers: H });
   const raw = await req.text();

@@ -1,3 +1,4 @@
+import type { Collaboration } from "../runs/collaboration";
 // 결정적 합성 픽스처 (#85). 실제 데이터가 아니며 모든 값은 고정 상수다(현재 시각/난수 미사용).
 import { defaultControl, PRESETS } from "../control/model";
 import { buildSnapshot } from "../control/service";
@@ -74,3 +75,11 @@ export const demoReadiness = () => ({
   github: { state: "unconfigured", repo: null, tokenSource: "none", openIssues: null },
   githubEvidence: { ready: false, scope: "github_read_only", runtimeVerified: false, queueReadable: false, reads: null, detail: "데모 합성 데이터" },
 });
+
+export const demoCollaborations = (s: Scenario): Collaboration[] => s === "empty" ? [] : [{
+  id: "demo-workflow-902", cycle: 1, stage: "codex", dispatchId: "demo-2", updatedAt: T(2),
+  assignment: { repo: "demo/synthetic", issueNumber: 902, baseBranch: "demo-base", baseSha: "a".repeat(40), sourcePr: 1,
+    workBranch: "demo-work", claudeAgent: "claude-sonnet", instructions: "[DEMO] 합성 검수 작업", reviewCompletedPr: true },
+  feedback: "[DEMO] 실제 에이전트 실행 없음",
+  history: [{ at: T(9), action: "demo_assigned", dispatchId: "demo-2", detail: "[DEMO] 합성 이력" }],
+}];

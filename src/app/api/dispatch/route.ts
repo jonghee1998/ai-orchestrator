@@ -1,3 +1,4 @@
+import { demoRequestBlock } from "@/lib/demo/respond-http";
 import { NextResponse } from "next/server";
 import { authorize } from "@/lib/session/guard";
 import { getRunStore, RunStoreConfigurationError } from "@/lib/runs/store";
@@ -8,7 +9,9 @@ export const dynamic = "force-dynamic";
 const H = { "Cache-Control": "no-store" };
 
 /** Admin-only. Body: {issueNumber, agent} (new dispatch) or {dispatchId} (release a held record). Gate runs server-side immediately before submission. */
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: Request): Promise<Response> {
+  const blocked = demoRequestBlock(req);
+  if (blocked) return blocked;
   const auth = authorize(req.method, req.headers, "admin");
   if (!auth.ok) return NextResponse.json({ error: auth.status === 503 ? "control_unconfigured" : "unauthorized" }, { status: auth.status, headers: H });
   const raw = await req.text();
