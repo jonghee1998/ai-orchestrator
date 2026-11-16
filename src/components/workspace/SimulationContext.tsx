@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useDemo } from "./DemoContext";
-import { agentAvailable, initialSimulation, recalculateRestrictions, type AgentId, type SimProject, type SimulationState, type TaskState } from "@/lib/simulation/model";
+import { agentAvailable, applyDecision, enforceAlwaysOn, initialSimulation, toggleAgentState, recomputeProject, recalculateRestrictions, type AgentId, type SimProject, type SimulationState, type TaskState } from "@/lib/simulation/model";
 import { useRegisterRefresh } from "@/components/live/refresh";
 
 const STORAGE = "ai-orchestrator:issue92:v1";
@@ -22,7 +22,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
   const [state, setState] = useState<SimulationState | null>(null); const [ready, setReady] = useState(false); const [error, setError] = useState<string>();
   useEffect(() => {
     if (!enabled) { setState(null); setReady(true); return; }
-    try { const raw = localStorage.getItem(STORAGE); setState(raw ? JSON.parse(raw) : initialSimulation()); } catch { setState(initialSimulation()); setError("저장된 개발계 상태를 읽지 못해 초기 상태를 사용합니다."); }
+    try { const raw = localStorage.getItem(STORAGE); setState(enforceAlwaysOn(raw ? JSON.parse(raw) : initialSimulation())); } catch { setState(initialSimulation()); setError("저장된 개발계 상태를 읽지 못해 초기 상태를 사용합니다."); }
     setReady(true);
   }, [enabled]);
   useEffect(() => { if (enabled && state && ready) try { localStorage.setItem(STORAGE, JSON.stringify(state)); } catch { setError("개발계 상태를 저장하지 못했습니다."); } }, [enabled, ready, state]);
@@ -37,7 +37,7 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
     reset: () => { const fresh = initialSimulation(); setState(fresh); try { localStorage.setItem(STORAGE, JSON.stringify(fresh)); } catch {} },
     setScenario: (scenario) => update((s) => ({ ...s, scenario })),
     saveProject: (p) => update((s) => ({ ...s, projects: s.projects.some((x) => x.id === p.id) ? s.projects.map((x) => x.id === p.id ? p : x) : [p, ...s.projects] })),
-    toggleAgent: (id) => update((s) => ({ ...s, agents: s.agents.map((a) => a.id === id ? { ...a, manualEnabled: !a.manualEnabled } : a) })),
+    toggleAgent: (id) => update((s) => toggleAgentState(s, id)),
     assign: (projectId, taskId, agent) => {
       if (!state || !agentAvailable(state, agent)) return false;
       const conflict = state.projects.some((p) => p.tasks.some((t) => t.agent === agent && t.state === "running" && t.id !== taskId));
@@ -52,13 +52,12 @@ export function SimulationProvider({ children }: { children: React.ReactNode }) 
         let n = { ...s, projects: s.projects.map((p) => {
           if (p.id !== projectId) return p;
           const tasks = p.tasks.map((t) => t.id !== taskId ? t : { ...t, state: next, runStartedAt: next === "running" ? now() : t.runStartedAt, result: next === "done" ? detail || "개발계 가상 완료" : t.result, failure: next === "failed" ? detail || "개발계 가상 실행 실패" : next === "revision" ? undefined : t.failure });
-          const stages = p.stages.map((stage) => { const rows = tasks.filter((t) => t.stageId === stage.id); return rows.length && rows.every((t) => t.state === "done") ? { ...stage, status: "done" as const } : rows.some((t) => ["running", "review", "revision", "decision", "failed"].includes(t.state)) ? { ...stage, status: "active" as const } : stage; });
-          return { ...p, tasks, stages, state: stages.length > 0 && stages.every((stage) => stage.status === "done") ? "done" as const : p.state };
+          return recomputeProject({ ...p, tasks });
         }) };
         return briefing(n, next === "done" ? "complete" : "change", projectId, `${task.title} · ${next === "done" ? "완료 보고" : next === "failed" ? "실행 실패" : "상태 변경"}`, detail || `개발계에서 ${next} 상태로 변경되었습니다.`, task.agent);
       }); return true;
     },
-    decide: (id, decision) => update((s) => ({ ...s, briefings: s.briefings.map((b) => b.id === id ? { ...b, decision, summary: `${b.summary} · 사용자 ${decision === "approved" ? "승인" : "보류"}` } : b), projects: s.projects.map((p) => ({ ...p, tasks: p.tasks.map((t) => t.state === "decision" && s.briefings.find((b) => b.id === id)?.projectId === p.id ? { ...t, state: decision === "approved" ? "done" : "paused", result: decision === "approved" ? "개발계 사용자 승인" : t.result } : t) })) })),
+    decide: (id, decision) => update((s) => applyDecision(s, id, decision)),
     addUsage: (service, amount) => update((s) => {
       const next = recalculateRestrictions({ ...s, usage: s.usage.map((u) => u.id !== service ? u : { ...u, periods: u.periods.map((p) => ({ ...p, used: p.used === null ? null : Math.min(100, p.used + amount), checkedAt: now() })) }) });
       const limited = next.usage.find((u) => u.id === service)?.periods.some((p) => p.used !== null && p.used >= next.policy.threshold);

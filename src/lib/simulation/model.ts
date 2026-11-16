@@ -22,7 +22,7 @@ export interface UsagePeriod {
 }
 export interface UsageService { id: "codex" | "claude"; name: string; periods: UsagePeriod[] }
 export interface Briefing {
-  id: string; type: "decision" | "change" | "complete" | "usage"; projectId?: string;
+  id: string; type: "decision" | "change" | "complete" | "usage"; projectId?: string; taskId?: string;
   title: string; summary: string; at: string; next: string; owner: string; userAction?: string;
   decision?: "pending" | "approved" | "held"; evidence?: string;
 }
@@ -77,7 +77,7 @@ export function initialSimulation(now = Date.now()): SimulationState {
       },
     ],
     briefings: [
-      { id: "b1", type: "decision", projectId: "orchestrator", title: "모바일 화면 구조 승인 필요", summary: "3탭 화면의 정보 배치를 확인해 주세요.", at: checkedAt, next: "개발계 화면 확인", owner: "사용자", userAction: "승인 또는 보류", decision: "pending", evidence: "개발계 시뮬레이션" },
+      { id: "b1", type: "decision", projectId: "orchestrator", taskId: "t2", title: "모바일 화면 구조 승인 필요", summary: "3탭 화면의 정보 배치를 확인해 주세요.", at: checkedAt, next: "개발계 화면 확인", owner: "사용자", userAction: "승인 또는 보류", decision: "pending", evidence: "개발계 시뮬레이션" },
       { id: "b2", type: "change", projectId: "orchestrator", title: "모바일 UI 개발 진행 중", summary: "Codex가 3탭 화면을 구현하고 있습니다.", at: checkedAt, next: "구현과 자동 검증", owner: "Codex", evidence: "개발계 가상 실행" },
     ],
   };
@@ -99,4 +99,43 @@ export function remaining(reset: string | null, now = Date.now()): string {
 export function recalculateRestrictions(state: SimulationState): SimulationState {
   const limited = (service: "codex" | "claude") => state.policy.enabled && state.usage.find((u) => u.id === service)?.periods.some((p) => p.used !== null && p.used >= state.policy.threshold);
   return { ...state, agents: state.agents.map((a) => ({ ...a, usageRestricted: a.id === "codex" ? !!limited("codex") : a.id === "sonnet" || a.id === "opus" ? !!limited("claude") : false })) };
+}
+
+/** GPT PM is always enabled: it is not an individually managed agent. */
+export const ALWAYS_ON: AgentId[] = ["gpt"];
+export const isManageable = (id: AgentId) => !ALWAYS_ON.includes(id);
+
+/** Force always-on agents ON (also repairs persisted OFF values). */
+export function enforceAlwaysOn(state: SimulationState): SimulationState {
+  return { ...state, agents: state.agents.map((a) => ALWAYS_ON.includes(a.id) ? { ...a, manualEnabled: true } : a) };
+}
+export function toggleAgentState(state: SimulationState, id: AgentId): SimulationState {
+  if (!isManageable(id)) return state;
+  return { ...state, agents: state.agents.map((a) => a.id === id ? { ...a, manualEnabled: !a.manualEnabled } : a) };
+}
+
+/** Recompute stage status and project state from task states. */
+export function recomputeProject(p: SimProject): SimProject {
+  const stages = p.stages.map((stage) => {
+    const rows = p.tasks.filter((t) => t.stageId === stage.id);
+    return rows.length && rows.every((t) => t.state === "done") ? { ...stage, status: "done" as const }
+      : rows.some((t) => ["running", "review", "revision", "decision", "failed"].includes(t.state)) ? { ...stage, status: "active" as const } : stage;
+  });
+  return { ...p, stages, state: stages.length > 0 && stages.every((s) => s.status === "done") ? "done" : p.state };
+}
+
+/** Apply a user decision to exactly the task the briefing refers to. Duplicate/unknown decisions are no-ops. */
+export function applyDecision(state: SimulationState, briefingId: string, decision: "approved" | "held"): SimulationState {
+  const b = state.briefings.find((x) => x.id === briefingId);
+  if (!b || b.decision !== "pending" || !b.taskId || !b.projectId) return state;
+  const project = state.projects.find((p) => p.id === b.projectId);
+  const task = project?.tasks.find((t) => t.id === b.taskId);
+  if (!project || !task || task.state !== "decision") return state;
+  return {
+    ...state,
+    briefings: state.briefings.map((x) => x.id === briefingId ? { ...x, decision, summary: `${x.summary} · 사용자 ${decision === "approved" ? "승인" : "보류"}` } : x),
+    projects: state.projects.map((p) => p.id !== project.id ? p : recomputeProject({
+      ...p, tasks: p.tasks.map((t) => t.id !== task.id ? t : { ...t, state: decision === "approved" ? "done" : "paused", result: decision === "approved" ? "개발계 사용자 승인" : t.result }),
+    })),
+  };
 }
