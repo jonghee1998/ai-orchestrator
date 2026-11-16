@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { classify, parseCompletionType, parseIntegrationTarget, rollup, pickPull } from "./lifecycle";
-import { workspace, PHASE_LABEL } from "../github/mobile-workspace";
+import { classify, SIGNAL_LABEL, parseCompletionType, parseIntegrationTarget, rollup, pickPull } from "./lifecycle";
+import { workspace, PHASE_LABEL, phaseLabel } from "../github/mobile-workspace";
 import type { WorkQueueTask } from "../github/work-queue";
 import type { IssueEvidence, PullEvidence } from "../github/evidence";
 
@@ -75,7 +75,10 @@ test("visible phase: status:in-progress or ACK alone is never active/진행 중"
   assert.equal(run(task({ status: "ready" })).phase, "remaining");
   const w = workspace([task({ status: "status:in-progress", description: "Completion type: deploy" })]);
   assert.equal(w.tasks[0].phase, "reported"); assert.ok(!/진행 소식/.test(w.tasks[0].waiting + w.tasks[0].next));
-  assert.equal(w.projects[0].stage, "접수 보고됨 · 실행 미확인"); assert.equal(w.projects[0].reported, 1); assert.equal(w.projects[0].active, 0);
+  assert.equal(w.tasks[0].lifecycle.signal, "label"); assert.equal(w.tasks[0].lifecycle.receipt, "none");
+  assert.equal(w.projects[0].stage, SIGNAL_LABEL.label); assert.ok(!/^접수 보고됨/.test(w.projects[0].stage)); assert.ok(!/^접수 보고만/.test(w.tasks[0].waiting));
+  assert.equal(phaseLabel(w.tasks[0].lifecycle), SIGNAL_LABEL.label); assert.equal(phaseLabel(r), "접수 보고됨 · 실행 미확인");
+  assert.equal(r.signal, "ack"); assert.equal(w.projects[0].reported, 1); assert.equal(w.projects[0].active, 0);
 });
 test("PR proves work occurred, not that it is running", () => {
   const l = run(task({ status: "ready" }), proof([pull({ state: "open" })]));
@@ -119,8 +122,8 @@ test("project completes only when all tasks meet explicit criteria", () => {
   assert.notEqual(rollup([c, u]).stage, "업무 완료");
   assert.equal(rollup([c, u]).done, 1);
   assert.notEqual(rollup([]).stage, "업무 완료");
-  const r = { phase: "reported", completion: "incomplete" } as const;
-  assert.equal(rollup([r]).stage, "접수 보고됨 · 실행 미확인"); assert.equal(rollup([r]).active, 0); assert.equal(rollup([r]).reported, 1);
+  const r = { phase: "reported", completion: "incomplete", signal: "ack" } as const;
+  assert.equal(rollup([r]).stage, "접수 보고됨 · 실행 미확인"); assert.equal(rollup([{ ...r, signal: "label" }]).stage, SIGNAL_LABEL.label); assert.equal(rollup([r]).active, 0); assert.equal(rollup([r]).reported, 1);
 });
 test("workspace integration: R1 project is not complete; integration task is", () => {
   const ev = (pulls: PullEvidence[]) => ({ source: "github", repo: "", generatedAt: "", runtimeProof: "not_included", identityNote: "", limits: {} as never, issues: [proof(pulls)] }) as never;
@@ -131,4 +134,47 @@ test("workspace integration: R1 project is not complete; integration task is", (
   assert.notEqual(stale.stage, "업무 완료"); assert.equal(stale.done, 0);
   const closedOpenPr = workspace([task({ description: "Completion type: nondeploy", issueState: "closed", stateReason: "completed" })], ev([pull({ state: "open" })])).projects[0];
   assert.notEqual(closedOpenPr.stage, "업무 완료");
+});
+
+// Actual topology: PR100 (head 6hfvj7 → base codex/issue-92-mobile-v2); PR103 (head wkv37c → base PR100 head).
+const T = "claude/determined-carson-wkv37c", INNER = "claude/determined-carson-6hfvj7";
+const stack = (inner: Partial<PullEvidence>, outer: Partial<PullEvidence>, extra: PullEvidence[] = []) => [
+  pull({ number: 100, head: INNER, base: "codex/issue-92-mobile-v2", ...inner }),
+  pull({ number: 103, head: T, base: INNER, ...outer }), ...extra];
+const tgt = task({ description: `Completion type: integration\nIntegration target: ${T}` });
+const hist = pull({ number: 90, head: "old/branch", base: "main", linkedBy: ["body"] });
+test("stacked PR100/103: boundary PR is the one delivering the target branch", () => {
+  const l = run(tgt, proof(stack({ state: "merged" }, { state: "merged", decision: approve("exact") })));
+  assert.equal(l.pr?.number, 103); assert.equal(l.completion, "complete"); assert.equal(l.phase, "done");
+});
+test("stacked PR100/103: both open, or inner merged/outer open → not complete", () => {
+  for (const [i, o] of [["open", "open"], ["merged", "open"]] as const) {
+    const l = run(tgt, proof(stack({ state: i }, { state: o, decision: approve("exact") })));
+    assert.notEqual(l.phase, "done"); assert.equal(l.completion, "incomplete"); assert.ok(l.missingEvidence.includes("merged_pr"));
+  }
+});
+test("stacked PR100/103: outer merged but inner still open → not complete (open_pr)", () => {
+  const l = run(tgt, proof(stack({ state: "open" }, { state: "merged", decision: approve("exact") })));
+  assert.notEqual(l.phase, "done"); assert.ok(l.missingEvidence.includes("open_pr"));
+});
+test("stacked PR100/103: stale or missing outer review after both merged → not complete", () => {
+  const st = run(tgt, proof(stack({ state: "merged" }, { state: "merged", decision: approve("stale") })));
+  assert.notEqual(st.phase, "done"); assert.equal(st.review, "stale"); assert.ok(st.missingEvidence.includes("review_current"));
+  // approval on the inner PR does not substitute for the outer/target PR review
+  const inn = run(tgt, proof(stack({ state: "merged", decision: approve("exact") }, { state: "merged" })));
+  assert.notEqual(inn.phase, "done"); assert.ok(inn.missingEvidence.includes("review_current"));
+});
+test("stacked PR100/103: unrelated historical PR neither completes nor blocks; ambiguous boundary fails closed", () => {
+  assert.equal(run(tgt, proof(stack({ state: "merged" }, { state: "merged", decision: approve("exact") }, [hist]))).completion, "complete");
+  const openUnrelated = pull({ number: 91, head: "x/y", base: "main", state: "open" });
+  assert.equal(run(tgt, proof(stack({ state: "merged" }, { state: "merged", decision: approve("exact") }, [openUnrelated]))).completion, "complete");
+  assert.notEqual(run(tgt, proof([hist])).completion, "complete");
+  const dup = [pull({ number: 103, head: T, base: INNER, linkedBy: ["issue-comment"], decision: approve("exact") }), pull({ number: 105, head: T, base: "other", linkedBy: ["issue-comment"], decision: approve("exact") })];
+  const a = run(tgt, proof(dup)); assert.equal(a.completion, "unknown"); assert.ok(a.missingEvidence.includes("pr_association"));
+});
+test("new PR based on the target branch is the boundary once it exists", () => {
+  const next = pull({ number: 110, head: "claude/final", base: T, state: "open" });
+  const l = run(tgt, proof(stack({ state: "merged" }, { state: "merged", decision: approve("exact") }, [next])));
+  assert.equal(l.pr?.number, 110); assert.notEqual(l.phase, "done");
+  assert.equal(run(tgt, proof(stack({ state: "merged" }, { state: "merged" }, [{ ...next, state: "merged", decision: approve("exact") }]))).completion, "complete");
 });

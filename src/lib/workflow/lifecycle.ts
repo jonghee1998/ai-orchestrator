@@ -18,6 +18,8 @@ export interface Lifecycle {
   missingEvidence: MissingEvidence[];
   /** ACK = receipt reported only; execution is never verified from existing evidence. */
   receipt: "reported" | "none";
+  /** What the visible "reported" state rests on: an actual ACK comment, only a status label (self-set), or nothing. */
+  signal: "ack" | "label" | "none";
   execution: "unverified";
   /** Commits/PR prove work occurred, not that anything is currently running. */
   workOccurred: boolean;
@@ -66,6 +68,24 @@ export function pickPull(pulls: PullEvidence[]): PrPick {
   return merged.length ? pickAmong(merged) : { kind: "none" };
 }
 
+/** Integration boundary PR for target T: PRs delivering INTO T (base === T), else the PR that delivers T itself
+ *  (head === T, e.g. the outer PR of a stack). Unrelated historical PRs are not candidates. */
+export function pickIntegrationPull(pulls: PullEvidence[], target: string): PrPick | undefined {
+  const into = pulls.filter(p => p.base === target && p.head !== target);
+  const cand = into.length ? into : pulls.filter(p => p.head === target);
+  return cand.length ? pickPull(cand) : undefined;
+}
+/** Stack members below the boundary PR (inner work): PRs whose head is the base of a member, transitively. */
+export function innerStack(pulls: PullEvidence[], boundary: PullEvidence): PullEvidence[] {
+  const out: PullEvidence[] = [], seen = new Set<PullEvidence>([boundary]);
+  let frontier = [boundary];
+  while (frontier.length) {
+    const next = pulls.filter(y => !seen.has(y) && y.state !== "closed" && frontier.some(x => x.base === y.head && y.head !== x.head));
+    next.forEach(y => seen.add(y)); out.push(...next); frontier = next;
+  }
+  return out;
+}
+
 const reviewOf = (p?: PullEvidence): ReviewState => {
   const d = p?.decision;
   if (!d || d.kind !== "approve") return "none";
@@ -78,9 +98,12 @@ export function classify(task: WorkQueueTask, proof: IssueEvidence | undefined, 
   const status = task.status.replace(/^status:/, "");
   const closed = task.issueState === "closed" || proof?.state === "closed";
   const pulls = proof?.pulls ?? [];
-  const pick = pickPull(pulls);
+  const bounded = completionType === "integration" && target ? pickIntegrationPull(pulls, target) : undefined;
+  const pick = bounded ?? pickPull(pulls);
   const pull = pick.kind === "pr" ? pick.pull : undefined;
-  const openPr = pulls.some(p => p.state === "open");
+  // For target-bound integration only the boundary PR's stack is "current work"; unrelated PRs do not block.
+  const inner = bounded && pull ? innerStack(pulls, pull) : [];
+  const openPr = bounded ? (pull?.state === "open" || inner.some(p => p.state === "open")) : pulls.some(p => p.state === "open");
   const review = reviewOf(pull);
   const missing: MissingEvidence[] = [];
   if (completionType === "unknown") missing.push("completion_type");
@@ -97,7 +120,8 @@ export function classify(task: WorkQueueTask, proof: IssueEvidence | undefined, 
   } else if (completionType === "integration") {
     // Integration FACT (merged into the intended target) is not acceptance: it also needs a current-head approval.
     if (!target) { missing.push("integration_target"); completion = "unknown"; }
-    else if (pull?.state !== "merged" || pull.base !== target) missing.push("merged_pr");
+    else if (bounded && pull?.state === "merged" && inner.some(p => p.state === "open")) missing.push("open_pr");
+    else if (pull?.state !== "merged" || (!bounded && pull.base !== target) || (bounded && pull.base !== target && pull.head !== target)) missing.push("merged_pr");
     else if (review !== "verified") missing.push("review_current");
     else completion = "complete";
   } else {
@@ -107,6 +131,7 @@ export function classify(task: WorkQueueTask, proof: IssueEvidence | undefined, 
   }
 
   const receipt = proof?.acks.length ? "reported" as const : "none" as const;
+  const signal = receipt === "reported" ? "ack" as const : status === "in-progress" ? "label" as const : "none" as const;
   let phase: LifecyclePhase;
   if (completion === "complete") phase = "done";
   else if (completion === "deployment_pending") phase = "review";
@@ -121,7 +146,7 @@ export function classify(task: WorkQueueTask, proof: IssueEvidence | undefined, 
 
   return {
     phase, completionType, completion, missingEvidence: missing,
-    receipt, execution: "unverified",
+    receipt, signal, execution: "unverified",
     workOccurred: pulls.length > 0,
     review,
     ...(pull ? { pr: { number: pull.number, state: pull.state, base: pull.base, head: pull.headSha } } : {}),
@@ -130,9 +155,12 @@ export function classify(task: WorkQueueTask, proof: IssueEvidence | undefined, 
 
 export const COMPLETION_LABEL: Record<Completion, string> = { complete: "완료 기준 충족", deployment_pending: "배포 확인 대기", incomplete: "완료 기준 미충족", unknown: "완료 기준 확인되지 않음" };
 
+/** Visible wording: a status label alone is NOT a reported receipt. */
+export const SIGNAL_LABEL: Record<"ack" | "label", string> = { ack: "접수 보고됨 · 실행 미확인", label: "상태 라벨만 확인됨 · 접수 보고 없음 · 실행 미확인" };
+
 export interface ProjectRollup { done: number; active: number; reported: number; remaining: number; stage: string }
 /** Project complete only when every task meets its explicit completion criteria. */
-export function rollup(phases: { phase: LifecyclePhase; completion: Completion }[]): ProjectRollup {
+export function rollup(phases: { phase: LifecyclePhase; completion: Completion; signal?: Lifecycle["signal"] }[]): ProjectRollup {
   const done = phases.filter(t => t.completion === "complete").length;
   const active = phases.filter(t => t.phase === "active" || t.phase === "review").length;
   const reported = phases.filter(t => t.phase === "reported").length;
@@ -140,7 +168,7 @@ export function rollup(phases: { phase: LifecyclePhase; completion: Completion }
     : phases.some(t => t.phase === "blocked") ? "확인·도움 필요"
     : phases.some(t => t.completion === "deployment_pending") ? "배포 확인 대기"
     : phases.some(t => t.phase === "review") ? "검수 중" : phases.some(t => t.phase === "active") ? "진행 중"
-    : reported ? "접수 보고됨 · 실행 미확인"
+    : reported ? SIGNAL_LABEL[phases.some(t => t.phase === "reported" && t.signal === "ack") ? "ack" : "label"]
     : phases.some(t => t.completion === "unknown" && t.phase === "unknown") ? "확인 필요" : "시작 준비";
   return { done, active, reported, remaining: phases.length - done, stage };
 }
