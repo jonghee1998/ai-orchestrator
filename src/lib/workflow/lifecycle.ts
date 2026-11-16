@@ -151,7 +151,8 @@ function integration(u: StackRef[], target: string, acc: Acceptance[]): { missin
 
 const CANCELLED = new Set(["not_planned", "duplicate"]);
 
-export function classify(task: Pick<WorkQueueTask, "status" | "dependsOn" | "issueState" | "stateReason" | "description">, proof: IssueEvidence | undefined, isDepDone: (id: string) => boolean): Lifecycle {
+/** `evidenceGap`: the evidence collection is missing/errored/truncated, so absence of a PR proves nothing (Issue #119). */
+export function classify(task: Pick<WorkQueueTask, "status" | "dependsOn" | "issueState" | "stateReason" | "description">, proof: IssueEvidence | undefined, isDepDone: (id: string) => boolean, evidenceGap = false): Lifecycle {
   const completionType = parseCompletionType(task.description);
   const target = parseIntegrationTarget(task.description);
   const status = task.status.replace(/^status:/, "");
@@ -160,7 +161,8 @@ export function classify(task: Pick<WorkQueueTask, "status" | "dependsOn" | "iss
   const pulls = proof?.pulls ?? [];
   const u = universe(proof);
   const acc = proof?.acceptances ?? [];
-  const partial = proof?.partial?.length ? true : false;
+  // Fail closed: for nondeploy, "no open PR" can only be concluded from evidence that actually covers this issue.
+  const partial = !!proof?.partial?.length || evidenceGap || (completionType === "nondeploy" && !proof);
   const missing: MissingEvidence[] = [];
   if (completionType === "unknown") missing.push("completion_type");
 

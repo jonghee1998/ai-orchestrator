@@ -5,6 +5,7 @@ import { Card, PageTitle } from "@/components/ui";
 import { formatKst } from "@/lib/time/kst";
 import { useWorkspaceModel } from "./useWorkspace";
 import { Account } from "./Account";
+import { matchRouteId } from "@/lib/workspace/route";
 import { PART_LABEL, type BriefingItem, type ModelProject, type ModelTask, type PartState, type WorkspaceModelV1 } from "@/lib/workspace/model";
 
 const PART_STATE: Record<PartState, string> = { ok: "연결됨", loading: "불러오는 중", unconfigured: "미설정", unauthenticated: "로그인 필요", error: "오류" };
@@ -59,8 +60,8 @@ function TaskDetail({ p, t }: { p: ModelProject; t?: ModelTask }) {
 }
 export function LiveProjectsScreen({ projectId, taskId }: { projectId?: string; taskId?: string }) {
   const m = useWorkspaceModel();
-  const p = projectId ? m.projects.find(x => x.id === projectId) : undefined;
-  if (projectId && p) return <div className="space-y-4"><SourceBanner m={m} />{taskId ? <TaskDetail p={p} t={p.tasks.find(t => t.id === taskId)} /> : <ProjectDetail p={p} />}<Account /></div>;
+  const p = projectId ? matchRouteId(m.projects, projectId) : undefined;
+  if (projectId && p) return <div className="space-y-4"><SourceBanner m={m} />{taskId ? <TaskDetail p={p} t={matchRouteId(p.tasks, taskId)} /> : <ProjectDetail p={p} />}<Account /></div>;
   return <div className="space-y-4"><PageTitle title="AI Orchestrator" subtitle="실제 GitHub 기록 기준 · 읽기 전용" /><SourceBanner m={m} />
     {m.source === "unconnected" || m.source === "loading" ? <Unconnected m={m} what="프로젝트" /> : projectId ? <Card><p>프로젝트를 찾지 못했습니다.</p></Card> : <>
       <div className="grid grid-cols-2 gap-3"><Card><p className="text-xs text-text-muted">전체 프로젝트</p><p className="mt-1 text-2xl font-semibold">{m.projects.length}</p></Card><Card><p className="text-xs text-text-muted">완료 기준 충족 업무</p><p className="mt-1 text-2xl font-semibold">{m.projects.reduce((n, x) => n + x.counts.completed, 0)}</p></Card></div>

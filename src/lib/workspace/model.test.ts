@@ -53,7 +53,29 @@ test("no false completion: open/closed-without-type/status-label done never comp
     const m = run(t); assert.equal(m.projects[0].counts.completed, 0); assert.equal(m.projects[0].tasks[0].complete, false);
   }
   const m = run(base); assert.equal(m.projects[0].goal, undefined); assert.equal(m.projects[0].id, "unclassified");
-  assert.equal(run({ ...base, issueState: "closed", stateReason: "completed", description: "Completion type: nondeploy" }).projects[0].counts.completed, 1);
+  const closedDone: WorkQueueTask = { ...base, issueState: "closed", stateReason: "completed", description: "Completion type: nondeploy" };
+  // Issue #119: no matching issue evidence → unknown, never "no open PR".
+  assert.equal(run(closedDone).projects[0].counts.completed, 0);
+  assert.equal(run(closedDone).projects[0].tasks[0].completion, "unknown");
+});
+test("fail-closed (#119): closed nondeploy with an open linked PR, then evidence lost/errored/truncated/absent → never complete", () => {
+  const t: WorkQueueTask = { id: "1", title: "t", status: "done", agent: "claude", url: "", dependsOn: [], issueState: "closed", stateReason: "completed", description: "Completion type: nondeploy" };
+  const ev = demoEvidence("empty"); const mk = (over: Partial<EvidenceReport["limits"]> = {}, issues: EvidenceReport["issues"] = []) => ({ ...ev, limits: { ...ev.limits, ...over }, issues });
+  const run = (evidence: Live<EvidenceReport>) => buildWorkspaceModel({ queue: ok([t]), evidence, runtime: ok(demoDashboard("empty") as unknown as Runtime) }).projects[0].tasks[0];
+  const base = { number: 1, title: "t", url: "", state: "closed" as const, agent: "claude", status: "done", acks: [], completions: [], comments: 0, pulls: [], nextAction: { code: "x", label: "x", actor: "pm" } } as unknown as EvidenceReport["issues"][number];
+  const pullOf = (o: object) => ({ number: 9, url: "", title: "", state: "open", draft: false, base: "main", head: "x", headSha: "a".repeat(40), linkedBy: ["body"], commits: { count: 1, truncated: false }, reviews: [], comments: [], revisions: 0, detail: "loaded", ...o });
+  assert.equal(run(ok(mk({}, [base]))).complete, true, "control: covered issue, no open PR → complete");
+  const open = { ...base, pulls: [pullOf({})] } as unknown as typeof base;
+  assert.equal(run(ok(mk({}, [open]))).complete, false, "open linked PR");
+  for (const e of [{ kind: "error", detail: "x" }, { kind: "unconfigured" }, { kind: "loading" }] as Live<EvidenceReport>[]) assert.equal(run(e).complete, false);
+  for (const k of ["issuesTruncated", "pullsTruncated", "commentsTruncated"] as const) { const r = run(ok(mk({ [k]: true }, [base]))); assert.equal(r.complete, false, k); assert.equal(r.completion, "unknown", k); }
+  assert.equal(run(ok(mk({}, []))).complete, false, "absent matching issue");
+});
+test("agent aliases (#119): claude-sonnet/claude-opus resolve to Sonnet/Opus", async () => {
+  const { normalizeAgent } = await import("./model");
+  assert.equal(normalizeAgent("claude-sonnet"), "sonnet"); assert.equal(normalizeAgent("claude-opus"), "opus");
+  const { AI_NAMES } = await import("../github/mobile-workspace");
+  assert.equal(AI_NAMES["claude-opus"], "Claude Opus");
 });
 test("agents: GPT always on; other controls read-only; usage never fabricated", () => {
   const m = buildWorkspaceModel(full());

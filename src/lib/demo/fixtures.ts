@@ -67,6 +67,9 @@ export function demoEvidence(s: Scenario): EvidenceReport {
     issue(904, "검수 의견을 답변에 반영", "open", "in-progress", "agent_revision", "수정 반영 중", { acks: [c(4, "ack", 120)], comments: 3 }),
     issue(905, "모바일 화면 구성안 확정", "closed", "done", "done", "완료", { acks: [c(5, "ack", 300)], completions: [c(6, "completion", 240)], comments: 2 }),
     issue(906, "상담 정책 확인 후 안내문 작성", "open", "blocked", "blocked", "막힘 (합성 오류)"),
+    // Closed demo tasks need matching (empty-PR) evidence: completion fails closed without it (Issue #119).
+    issue(909, "주간 보고서 항목 정리", "closed", "done", "done", "완료"),
+    issue(910, "보고서 결과 검수 및 업무 종료", "closed", "done", "done", "완료"),
   ];
   return {
     source: "github", repo: "demo/synthetic", generatedAt: DEMO_NOW, runtimeProof: "not_included",

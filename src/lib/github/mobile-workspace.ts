@@ -13,15 +13,17 @@ export interface Project { id: string; name: string; goal?: string; tasks: Work[
 export interface Runtime { generatedAt: string; agents: { key: string; enabled: boolean; effective: boolean; running: number; queued: number; held: number; lastHeartbeat: string | null; lastAck: string | null }[]; runs: { dispatchId: string; issueNumber: number; agent: string; status: string; requestedAt?: string; ackAt?: string | null; startedAt?: string | null; finishedAt?: string | null; execution?: { tests: { command: string; exitCode: number }[] } | null; lastActivityAt?: string; lastError?: string | null; evidence?: { kind: string; url: string }[] }[]; audit: { at: string; actor: string; action: string; detail: string }[] }
 export function workspace(tasks: WorkQueueTask[], evidence?: EvidenceReport): { projects: Project[]; tasks: Work[] } {
   const proofOf = (id: string) => evidence?.issues.find(i => String(i.number) === id);
+  // Evidence missing, errored or truncated → absence of an open PR is unknown, never "no open PR" (Issue #119).
+  const gap = !evidence || !!evidence.limits?.issuesTruncated || !!evidence.limits?.pullsTruncated || !!evidence.limits?.commentsTruncated;
   const life = new Map<string, Lifecycle>();
   const done = (id: string): boolean => {
     const t = tasks.find(x => x.id === id);
     if (!t) return false;
-    if (!life.has(id)) life.set(id, classify(t, proofOf(id), () => false));
+    if (!life.has(id)) life.set(id, classify(t, proofOf(id), () => false, gap));
     return life.get(id)!.completion === "complete";
   };
   const rows: Work[] = tasks.map(t => {
-    const lc = classify(t, proofOf(t.id), done);
+    const lc = classify(t, proofOf(t.id), done, gap);
     const phase: WorkPhase = lc.phase;
     const unmet = t.dependsOn.filter(id => !done(id));
     return { ...t, phase, lifecycle: lc, proof: proofOf(t.id),
