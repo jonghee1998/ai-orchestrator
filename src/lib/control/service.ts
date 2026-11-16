@@ -123,6 +123,8 @@ export function buildSnapshot(d: StoreData, nowIso: string) {
   });
   const runs = recs.map((r) => ({ r, trust: runTrust(r) })).map(({ r, trust }) => ({
     dispatchId: r.dispatchId, issueNumber: r.issueNumber, agent: r.agent, attempt: r.attempt, status: displayStatus(r),
+    requestedAt: r.requestedAt, ackAt: r.ackAt ?? null, startedAt: r.startedAt ?? null, finishedAt: r.finishedAt ?? null,
+    execution: r.execution ?? null,
     verified: trust.verified, origin: trust.origin, trust, held: r.held ?? null, capability: r.capability ?? null,
     lastActivityAt: r.lastActivityAt ?? r.lastHeartbeatAt ?? r.dispatchedAt ?? r.requestedAt,
     lastError: r.lastError ?? null, evidence: r.evidence,

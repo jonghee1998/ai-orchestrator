@@ -18,7 +18,7 @@ const config: Config = {
         text: {
           DEFAULT: "#e6e8ec",
           muted: "#9aa0ab",
-          faint: "#646b78",
+          faint: "#949ba8",
         },
         accent: {
           DEFAULT: "#5b8def",

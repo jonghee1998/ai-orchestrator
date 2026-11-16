@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { DemoProvider } from "@/components/workspace/DemoContext";
 import { BottomNav } from "@/components/BottomNav";
 import { DemoBanner } from "@/components/DemoBanner";
 import { GlobalRefresh } from "@/components/GlobalRefresh";
@@ -25,10 +26,12 @@ export default function RootLayout({
     <html lang="ko">
       <body>
         <div className="mx-auto flex min-h-dvh max-w-app flex-col">
-          <DemoBanner />
+          <DemoProvider>
           <GlobalRefresh />
-          <main className="flex-1 px-4 pb-24 pt-4">{children}</main>
+          <DemoBanner />
+          <main className="flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4">{children}</main>
           <BottomNav />
+          </DemoProvider>
         </div>
       </body>
     </html>

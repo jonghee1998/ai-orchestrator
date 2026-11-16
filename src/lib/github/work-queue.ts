@@ -19,9 +19,13 @@ export interface GitHubIssue {
   state?: string;
   labels: Array<string | { name?: string | null }>;
   pull_request?: unknown;
+  milestone?: { number: number; title: string; description?: string | null } | null;
 }
 
 export interface WorkQueueTask {
+  project?: { id: string; name: string; goal?: string };
+  issueState?: "open" | "closed";
+  description?: string;
   id: string;
   title: string;
   agent: QueueAgent;
@@ -87,7 +91,13 @@ export function normalizeIssues(issues: GitHubIssue[]): WorkQueueTask[] {
         issue.state === "closed"
           ? "done"
           : oneNamespacedLabel(labels, "status:", QUEUE_STATUSES);
+      const projects = labels.filter((x) => x.startsWith("project:") && x.slice(8).trim());
+      const project = projects.length === 1 ? { id: `label:${projects[0].slice(8)}`, name: projects[0].slice(8) }
+        : projects.length === 0 && issue.milestone ? { id: `milestone:${issue.milestone.number}`, name: issue.milestone.title, goal: issue.milestone.description ?? undefined } : undefined;
       return {
+        ...(project ? { project } : {}),
+        ...(issue.state === "open" || issue.state === "closed" ? { issueState: issue.state } : {}),
+        ...(issue.body ? { description: issue.body } : {}),
         id: String(issue.number),
         title: issue.title,
         agent: (agent ?? "unknown") as QueueAgent,
