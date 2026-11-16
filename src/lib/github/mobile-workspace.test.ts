@@ -21,7 +21,11 @@ test("projects use one unambiguous label or milestone; no fabricated project/goa
 test("completion requires closed issue/merged result, not status label or completion self-report", () => {
   const tasks: WorkQueueTask[] = [{ id: "903", title: "review", status: "done", agent: "opus", url: "", dependsOn: [] }];
   assert.equal(workspace(tasks, demoEvidence("normal")).tasks[0].phase, "review");
-  assert.equal(workspace([{ ...tasks[0], issueState: "closed" }]).tasks[0].phase, "done");
+  // Changed (Issue #99): a closed issue with no explicit completion type is no longer "done"; unknown never final-completes.
+  assert.equal(workspace([{ ...tasks[0], issueState: "closed" }]).tasks[0].phase, "unknown");
+  // Changed (Issue #102): closing alone is not acceptance; it must be closed as completed.
+  assert.notEqual(workspace([{ ...tasks[0], issueState: "closed", description: "Completion type: nondeploy" }]).tasks[0].phase, "done");
+  assert.equal(workspace([{ ...tasks[0], issueState: "closed", stateReason: "completed", description: "Completion type: nondeploy" }]).tasks[0].phase, "done");
   assert.equal(workspace([{ ...tasks[0], status: "unknown" }]).tasks[0].phase, "unknown");
 });
 test("sample goals, task identity and counts are shared across screens; dependencies fail closed", () => {

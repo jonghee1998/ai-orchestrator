@@ -40,7 +40,7 @@ const PROJECTS = [
 ];
 const t = (id: string, title: string, agent: WorkQueueTask["agent"], status: string, project: number, dependsOn: string[] = []): WorkQueueTask => ({
   id, title: `[DEMO] ${title}`, agent, status, dependsOn, url: "", project: PROJECTS[project],
-  issueState: status === "status:done" ? "closed" : "open", description: `${title} — ${PROJECTS[project].goal} 샘플 요구사항이며 실제 실행하지 않습니다.`,
+  issueState: status === "status:done" ? "closed" : "open", ...(status === "status:done" ? { stateReason: "completed" as const } : {}), description: `${title} — ${PROJECTS[project].goal} 샘플 요구사항이며 실제 실행하지 않습니다.\nCompletion type: nondeploy`,
 });
 export const demoQueue = (s: Scenario): WorkQueueTask[] => s === "empty" ? [] : [
   t("901", "알림 화면에 필요한 내용 정리", "unknown", "status:backlog", 0),
