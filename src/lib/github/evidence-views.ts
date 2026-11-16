@@ -6,16 +6,16 @@
 // - counts are only shown when the report was actually read (the caller renders non-ok states explicitly).
 import type { CommentEvidence, EvidenceReport, IssueEvidence, NextActionCode, PullEvidence } from "./evidence";
 
-export type GitHubStage = "await_ack" | "implementing" | "review" | "revision" | "owner_decision" | "blocked" | "triage" | "done";
+export type GitHubStage = "await_ack" | "implementing" | "review" | "revision" | "owner_decision" | "blocked" | "triage" | "closed_unverified" | "done";
 export const GITHUB_STAGE_LABEL: Record<GitHubStage, string> = {
   await_ack: "ACK 대기", implementing: "구현 중", review: "검수/리뷰", revision: "수정 대기",
-  owner_decision: "소유자 결정", blocked: "차단", triage: "라벨 정리", done: "완료(닫힘/병합)",
+  owner_decision: "소유자 결정", blocked: "차단", triage: "라벨 정리", closed_unverified: "닫힘·완료 미확인", done: "완료(닫힘/병합)",
 };
 const STAGE_OF: Record<NextActionCode, GitHubStage> = {
   await_ack: "await_ack", agent_implementing: "implementing",
   await_pr: "review", pm_review: "review", pm_rereview: "review", codex_review: "review", pm_decision: "review",
   agent_revision: "revision", owner_merge_decision: "owner_decision", pr_merged: "done",
-  blocked: "blocked", triage: "triage", done: "done",
+  blocked: "blocked", triage: "triage", closed_unverified: "closed_unverified", done: "done",
 };
 export const stageOf = (i: Pick<IssueEvidence, "nextAction">): GitHubStage => STAGE_OF[i.nextAction.code] ?? "triage";
 
