@@ -1,0 +1,36 @@
+# Issue #130 — one-shot Claude Routine trigger probe. INERT unless the dedicated probe branch is pushed.
+# - `push` workflows run from the pushed ref's own workflow file, so this works without default-branch
+#   registration, and nothing on main/integration/PR branches can fire it (branch filter + in-script guard).
+# - Creates exactly one issue (labels agent:claude, status:ready) via repo GITHUB_TOKEN issues:write.
+# - Dedupe by body marker + concurrency. No secrets, no paid API, no checkout of untrusted code.
+# See docs/ROUTINE_PROBE.md for activation and cleanup.
+name: claude-routine-probe
+on:
+  push:
+    branches: [probe/claude-routine-t4]
+    paths: [.github/probe/claude-routine-t4.activate]
+permissions: {}
+concurrency:
+  group: claude-routine-probe-t4
+  cancel-in-progress: false
+jobs:
+  probe:
+    if: github.repository == 'jonghee1998/ai-orchestrator' && github.ref == 'refs/heads/probe/claude-routine-t4' && github.actor == 'jonghee1998'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/probe
+            .github/probe
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/probe/routine-probe.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
