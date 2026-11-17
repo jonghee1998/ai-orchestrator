@@ -6,6 +6,7 @@ import { formatKst } from "@/lib/time/kst";
 import { useWorkspaceModel } from "./useWorkspace";
 import { Account } from "./Account";
 import { matchRouteId } from "@/lib/workspace/route";
+import { liveStatus } from "@/lib/workspace/live-status";
 import { PART_LABEL, type BriefingItem, type ModelProject, type ModelTask, type PartState, type WorkspaceModelV1 } from "@/lib/workspace/model";
 
 const PART_STATE: Record<PartState, string> = { ok: "연결됨", loading: "불러오는 중", unconfigured: "미설정", unauthenticated: "로그인 필요", error: "오류" };
@@ -36,12 +37,21 @@ function ProjectCard({ p }: { p: ModelProject }) {
     <p className="mt-1 text-xs text-text-muted">완료 {p.counts.completed} / 전체 {p.counts.total} · 남은 {p.counts.remaining}{p.counts.unknown ? ` · 확인 불가 ${p.counts.unknown}` : ""}</p>
   </Card></Link>;
 }
+function LiveStatusCard({ p }: { p: ModelProject }) {
+  const s = liveStatus(p);
+  return <Card><h2 className="text-sm font-semibold text-text-muted">현재 상태</h2>
+    <p className="mt-1 text-sm">목표 · {s.goal}</p><p className="mt-1 text-sm">{s.summary}</p>
+    <p data-testid="live-verdict" className="mt-1 text-sm">최근 결과 · {s.verdictLabel}</p>
+    {s.current.map(c => <p key={c.id} className="mt-1 break-words text-xs">진행 #{c.id} {c.title} · {c.agentName} · {c.stage}</p>)}
+    <details className="mt-2 text-xs text-text-faint"><summary>기술 정보</summary>완료 {s.doneCount} · 현재 {s.currentCount} · 남은 {s.remainingCount} · 확인 불가 {s.unknownCount}</details></Card>;
+}
 function ProjectDetail({ p }: { p: ModelProject }) {
   return <div className="space-y-4">
     <Link href="/projects" className="inline-flex min-h-11 items-center text-accent">← 프로젝트</Link>
     <PageTitle title={p.name} subtitle={p.goal ?? "목표 미확인"} />
     <Card><p>{p.stage}</p><p className="mt-1 text-xs text-text-muted">완료 {p.counts.completed} · 남은 {p.counts.remaining} · 진행 {p.counts.active} · 접수 보고 {p.counts.reported}</p>
       {p.counts.completedWithoutOfficialReview > 0 && <p className="mt-1 text-xs text-yellow-100">완료 중 {p.counts.completedWithoutOfficialReview}건은 공식 GitHub 승인 없이 기준만 충족했습니다.</p>}</Card>
+    <LiveStatusCard p={p} />
     <section aria-label="남은 업무" className="space-y-2"><h2 className="text-sm font-semibold text-text-muted">남은 업무 · {p.remaining.length}</h2>{p.remaining.map(t => <TaskLine key={t.id} t={t} projectId={p.id} />)}{!p.remaining.length && <p className="text-sm text-text-faint">남은 업무 없음</p>}</section>
     <section aria-label="완료 업무" className="space-y-2"><h2 className="text-sm font-semibold text-text-muted">완료 업무 · {p.completed.length}</h2>{p.completed.map(t => <TaskLine key={t.id} t={t} projectId={p.id} />)}{!p.completed.length && <p className="text-sm text-text-faint">완료 기준을 충족한 업무 없음</p>}</section>
     <section aria-label="이력" className="space-y-1"><h2 className="text-sm font-semibold text-text-muted">이력 · {p.history.length}</h2>
