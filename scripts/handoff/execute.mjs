@@ -40,6 +40,10 @@ export async function run(gh, prNumber, opts) {
     const fresh = decide(liveState);
     if (fresh.action !== plan.action || fresh.key !== plan.key || fresh.agent !== plan.agent || fresh.linkedIssue !== plan.linkedIssue)
       throw new EvidenceChangedError(fresh);
+    // Evidence pagination can outlive the first PR read. This must be the last
+    // network read before a write, after every evidence/routing request above.
+    const final = await gh.getPull(prNumber);
+    if (final.state !== "open" || final.head.sha !== plan.sha) throw new StaleError(plan.sha, final.head.sha);
   };
 
   try {

@@ -443,3 +443,58 @@ test("T6 PM handles revision after planning: no competing issue created", async 
   assert.deepEqual(gh.db.writes, []);
 });
 
+test("T6 review finding: HEAD movement or closure DURING evidence loading blocks both write paths", async () => {
+  for (const unresolved of [false, true]) for (const change of ["head", "close"]) {
+    const gh = fakeGitHub({ comments: [comment(BOT, stateBody(SHA, { unresolved }))] });
+    const read = gh.listIssueComments;
+    let reads = 0;
+    gh.listIssueComments = async () => {
+      const comments = await read();
+      if (++reads === 2) {
+        if (change === "head") gh.db.pr.head.sha = OLD;
+        else gh.db.pr.state = "closed";
+      }
+      return comments;
+    };
+    const result = await run(gh, 72, { apply: true, repo: REPO });
+    assert.equal(result.reason, "head_moved_before_write", `${unresolved}/${change}`);
+    assert.deepEqual(gh.db.writes, []);
+  }
+});
+
+test("T6 review finding: movement after revision claim blocks issue creation", async () => {
+  const gh = fakeGitHub({ comments: [comment(BOT, stateBody(SHA, { unresolved: true }))] });
+  const read = gh.listIssueComments;
+  let reads = 0;
+  gh.listIssueComments = async () => {
+    const comments = await read();
+    if (++reads === 3) gh.db.pr.head.sha = OLD;
+    return comments;
+  };
+  assert.equal((await run(gh, 72, { apply: true, repo: REPO })).reason, "head_moved_before_write");
+  assert.equal(gh.db.writes.length, 1, "only the earlier claim exists");
+  assert.equal(gh.db.writes[0][0], "comment");
+  assert.equal(gh.db.issues.length, 0);
+});
+
+test("T6 review-evidence pagination cannot hide a concurrent head update or PR close", async () => {
+  for (const unresolved of [false, true]) {
+    for (const change of ["head", "closed"]) {
+      const gh = fakeGitHub({ comments: [comment(BOT, stateBody(SHA, { unresolved }))] });
+      const read = gh.listIssueComments;
+      let reads = 0;
+      gh.listIssueComments = async () => {
+        const comments = await read();
+        if (++reads === 2) {
+          if (change === "head") gh.db.pr.head.sha = OLD;
+          else gh.db.pr.state = "closed";
+        }
+        return comments;
+      };
+      const result = await run(gh, 72, { apply: true, repo: REPO });
+      assert.equal(result.reason, "head_moved_before_write", `${unresolved}/${change}`);
+      assert.deepEqual(gh.db.writes, []);
+    }
+  }
+});
+
