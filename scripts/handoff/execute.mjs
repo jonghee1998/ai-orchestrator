@@ -5,7 +5,7 @@
 // by looking for the coordinator-authored issue carrying the same marker before creating a new one.
 // Concurrency: the workflow serializes per PR (concurrency group, no cancel), so check-then-write
 // has a single writer per PR. Head SHA is re-read immediately before every write (stale guard).
-import { decide, findClaim, claimBody, revisionIssue, markerFor, linkedIssueNumbers, DEFAULT_WRITER_LOGIN } from "./core.mjs";
+import { decide, findClaim, claimBody, revisionIssue, markerFor, linkedIssueNumbers, DEFAULT_WRITER_LOGIN, codexReportObservation } from "./core.mjs";
 
 export async function loadState(gh, prNumber) {
   const pr = await gh.getPull(prNumber);
@@ -25,6 +25,7 @@ export async function run(gh, prNumber, opts) {
   const writer = opts.writerLogin ?? DEFAULT_WRITER_LOGIN;
   const state = await loadState(gh, prNumber);
   const plan = decide(state);
+  log({ step: "codex_evidence_observation", pr: prNumber, ...codexReportObservation(state.pr, state.comments) });
   log({ step: "plan", pr: prNumber, plan: summarize(plan) });
   if (plan.action === "noop") return { result: "noop", reason: plan.reason };
 
