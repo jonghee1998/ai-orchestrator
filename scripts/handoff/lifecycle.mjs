@@ -153,6 +153,32 @@ export function validateTarget({ pr, config, integrationTarget, expectedHead, ex
   return null;
 }
 
+/** Security capability state of the exact-head reviews: absent (not run / no entitlement) | blocked | invalid | pending. Never PASS. */
+function securityStatusOf(exact) {
+  const st = new Set(exact.map((r) => r.security_status ?? "not_run"));
+  if (st.has("blocked")) return "blocked";
+  if (st.has("invalid")) return "invalid";
+  if (st.size === 0 || (st.size === 1 && st.has("not_run"))) return "absent";
+  return "pending";
+}
+
+/**
+ * Issue #161: separate UNMET gates (capability / security / CI / PM) from the pending USER decision. The decision is
+ * pending only when every gate is met on the same exact SHA. PM evidence is a self-reported marker, never authority.
+ */
+export function approvalGates({ ev, headCi, sha }) {
+  const unmet = [];
+  if (ev.conflict || ev.pmConflict) unmet.push({ gate: "evidence", reason: "conflicting_evidence" });
+  if (ev.codeVerdict === "missing") unmet.push({ gate: "code_review", reason: "no_independent_code_review_on_exact_sha" });
+  else if (ev.codeVerdict === "findings") unmet.push({ gate: "code_review", reason: "unresolved_findings" });
+  if (ev.security === "findings") unmet.push({ gate: "security", reason: "unresolved_findings" });
+  else if (ev.security !== "pass" && ev.security !== "conflict") unmet.push({ gate: "security_capability", reason: `security_review_${ev.securityCapability}` });
+  const ci = headCi?.sha === sha ? headCi.status : "missing";
+  if (ci !== "success") unmet.push({ gate: "ci", reason: `ci_${ci}_on_exact_sha` });
+  if (!ev.pmAcceptance) unmet.push({ gate: "pm_evidence", reason: ev.staleAccept ? "pm_acceptance_stale_sha_only" : "pm_acceptance_missing_on_exact_sha" });
+  return { unmet, pendingDecision: unmet.length === 0 ? "user_approval" : null };
+}
+
 /**
  * Review evidence on the exact head. `reviews` are NORMALIZED records (lifecycle-evidence.mjs builds them from
  * the real `codex-review-state:v1` bot payload): {user, commit_sha, status, has_unresolved_findings}.
@@ -176,6 +202,7 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   const securityUnresolved = !secConflict && secVerdicts.has(true);
   const security = secConflict ? "conflict" : securityPass ? "pass" : securityUnresolved ? "findings" : "missing";
   const conflict = codeConflict || secConflict;
+  const securityCapability = secConflict ? "conflict" : securityPass ? "completed" : securityUnresolved ? "completed" : securityStatusOf(exact);
   const independent = !conflict && exact.length > 0 && verdicts.has(false) && securityPass;
   const unresolved = !conflict && (verdicts.has(true) || securityUnresolved);
   const issues = acceptIssues ?? [req]; // root request, plus the revision issue the PR actually closes
@@ -183,7 +210,7 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   const staleAccept = pmAccepts.some((a) => a.sha !== sha);
   const pmConflict = accepts.length > 0 && pmRevises.some((m) => m.sha === sha && m.pr === pr.number);
   const pm = accepts.length > 0 ? { sha, count: accepts.length } : null;
-  return { independent, unresolved, security, stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
+  return { independent, unresolved, security, securityCapability, codeVerdict: codeConflict ? "conflict" : verdicts.size === 0 ? "missing" : verdicts.has(true) ? "findings" : "pass", stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
 }
 
 /**
@@ -272,7 +299,10 @@ function planOpenReview(i) {
   if (ev.unresolved) { step = "revise"; why = "unresolved_findings_on_exact_head"; }
   else if (!ev.independent) { step = "review"; why = ev.stale ? "stale_review_only" : "no_independent_review_on_exact_head"; }
   else if (!ev.pmAcceptance) { step = "accept"; why = ev.staleAccept ? "stale_pm_acceptance_only" : "awaiting_pm_acceptance_on_exact_sha"; }
-  else { step = "accept"; why = "review_accepted_awaiting_merge_and_integration_evidence"; }
+  const gates = approvalGates({ ev, headCi: i.headCi, sha });
+  // Issue #161: awaiting_user_approval needs same-SHA CI + code + security + PM self-report. It does NOT need merge or
+  // deployment, and never approves/merges anything automatically.
+  if (ev.independent && ev.pmAcceptance) { step = "accept"; why = gates.pendingDecision ? "awaiting_user_approval" : "pre_merge_gates_unmet"; }
 
   if (step === "revise" && round >= MAX_ROUNDS) return blocked("round_cap_reached_before_revision", { round, max: MAX_ROUNDS });
   const key = orchKey({ req, pr: pr.number, step, round });
@@ -281,6 +311,7 @@ function planOpenReview(i) {
   // Open-phase never completes: completion needs merged integration evidence (separate phase).
   return {
     mode: "dry-run", live: false, action: "plan", phase: "open_review", step, key, sha, why, authority: ev.authority,
+    lifecycleState: gates.pendingDecision ? "awaiting_user_approval" : "gates_unmet", unmet: gates.unmet, pendingDecision: gates.pendingDecision,
     completion: "not_applicable_until_merged", writes: [{ type: "claim_planned", key }, { type: `${step}_planned`, key }],
   };
 }

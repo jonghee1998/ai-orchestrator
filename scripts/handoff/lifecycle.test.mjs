@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { orchKey, parseOrchKey, planLifecycle, replay, recoverAmbiguousPost, eventPlan, recordMarker, validateTarget, reviewEvidence, parseConfig, applySimulated, keyState, MAX_ROUNDS } from "./lifecycle.mjs";
+import { resolveRootCorrections, correctionRound, correctionMarker } from "./root-corrections.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers } from "./lifecycle-evidence.mjs";
 import { CODEX_BOT } from "./core.mjs";
 import { createClient } from "./github.mjs";
@@ -67,7 +68,8 @@ test("open review never completes; PM accept on exact SHA+issue+pr+target is onl
   const p = planLifecycle(base({ pmAccepts: [acc()] }));
   assert.equal(p.completion, "not_applicable_until_merged");
   assert.equal(p.authority, "self_reported_marker");
-  assert.equal(p.why, "review_accepted_awaiting_merge_and_integration_evidence");
+  assert.equal(p.why, "pre_merge_gates_unmet", "no same-SHA CI evidence => gates unmet, not awaiting user");
+  assert.deepEqual(p.unmet.map((u) => u.gate), ["ci"]);
   for (const bad of [acc({ sha: OLD }), acc({ issue: 1 }), acc({ pr: 8 }), acc({ target: "main" })]) {
     assert.equal(planLifecycle(base({ pmAccepts: [bad] })).authority, "none");
   }
@@ -365,7 +367,7 @@ test("F3 entrypoint: replacement PR (closes revision #138) uses root #136 record
   assert.equal((await entry(w([revDone(1, 7), revDone(2, 8), revDone(3, 9)]))).lifecycle.reason, "round_cap_exceeded");
   // PM accept by root issue number is honoured on the replacement PR
   const acceptRoot = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, comments: [{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` }] });
-  assert.equal((await entry(acceptRoot)).lifecycle.why, "review_accepted_awaiting_merge_and_integration_evidence");
+  assert.equal((await entry(acceptRoot)).lifecycle.why, "pre_merge_gates_unmet");
   // cycle / ambiguity fail closed
   assert.equal((await entry(baseWorld({ pr: pr({ body: "Closes #138" }), issues: { 138: rootIssue(138, 139), 139: rootIssue(139, 138) } }))).lifecycle.reason, "root_not_self_marked", "cycle never terminates in a self-marked root");
 });
@@ -575,4 +577,55 @@ test("#156: security review is tracked separately; missing/blocked/not-run never
   assert.deepEqual([bad.independent, bad.unresolved, bad.security], [false, true, "findings"]);
   const c = ev([review(), review({ security_unresolved: true })]);
   assert.deepEqual([c.independent, c.conflict, c.security], [false, true, "conflict"]);
+});
+
+// ---- Issue #161 ------------------------------------------------------------------------------------------
+const cm = (n, p, sha = H(String(n)), root = 146, user = OWNER) => ({ user, body: correctionMarker({ root, n, pr: p, sha }) });
+test("#161: awaiting_user_approval needs same-SHA CI + code + security + PM, NOT merge/deploy; gates reported separately", () => {
+  const ok = planLifecycle(base({ pmAccepts: [acc()], headCi: { sha: SHA, status: "success" } }));
+  assert.equal(ok.lifecycleState, "awaiting_user_approval");
+  assert.equal(ok.pendingDecision, "user_approval");
+  assert.deepEqual(ok.unmet, []);
+  assert.equal(ok.authority, "self_reported_marker");
+  assert.equal(ok.completion, "not_applicable_until_merged");
+  assert.equal(ok.writes.some((w) => /merge|approve|deploy/.test(w.type)), false);
+  const stale = planLifecycle(base({ pmAccepts: [acc()], headCi: { sha: OLD, status: "success" } }));
+  assert.equal(stale.lifecycleState, "gates_unmet"); assert.equal(stale.pendingDecision, null);
+  const failing = planLifecycle(base({ pmAccepts: [acc()], headCi: { sha: SHA, status: "failure" } }));
+  assert.deepEqual(failing.unmet, [{ gate: "ci", reason: "ci_failure_on_exact_sha" }]);
+});
+test("#161: security capability absent/blocked is a distinct unmet reason, never PASS or awaiting approval", () => {
+  for (const [sec, reason] of [["not_run", "security_review_absent"], ["blocked", "security_review_blocked"], ["invalid", "security_review_invalid"]]) {
+    const p = planLifecycle(base({ reviews: [review({ security_status: sec, security_unresolved: undefined })], pmAccepts: [acc()], headCi: { sha: SHA, status: "success" } }));
+    assert.notEqual(p.lifecycleState, "awaiting_user_approval", sec);
+    assert.ok(p.unmet.some((u) => u.gate === "security_capability" && u.reason === reason), sec + JSON.stringify(p.unmet));
+  }
+  const noPm = planLifecycle(base({ headCi: { sha: SHA, status: "success" } }));
+  assert.deepEqual(noPm.unmet.map((u) => u.gate), ["pm_evidence"]);
+});
+test("#161: root correction counter is durable across chains, from trusted PM markers only", () => {
+  const r = resolveRootCorrections([cm(1, 153), cm(2, 160)], 146);
+  assert.equal(r.count, 2);
+  assert.equal(correctionRound({ resolved: r, prNumber: 160, chainDepth: 1, floor: 1 }).round, 2, "PR160 is correction 2, not r1");
+  assert.equal(correctionRound({ resolved: r, prNumber: 170, chainDepth: 1, floor: 1 }).round, 3, "next unmarked replacement is 3");
+  assert.equal(correctionRound({ resolved: r, prNumber: 170, chainDepth: 0, floor: 1 }).round, 2, "new feature PR neither resets nor consumes");
+  assert.equal(correctionRound({ resolved: r, prNumber: 180, chainDepth: 1, floor: 3 }).round, 3, "floor from chain/bot can not be lowered");
+  assert.equal(correctionRound({ resolved: resolveRootCorrections([cm(1, 153), cm(2, 160), cm(3, 170)], 146), prNumber: 180, chainDepth: 1, floor: 1 }).round, 4, "cap exceeded");
+  assert.equal(resolveRootCorrections([cm(1, 153, undefined, 146, MAL), cm(2, 160, undefined, 146, WRITER)], 146).count, 0, "untrusted authors ignored");
+});
+test("#161: contradictory / unknown correction records fail closed", () => {
+  assert.equal(resolveRootCorrections([cm(1, 153), cm(1, 154)], 146).error, "root_correction_conflict");
+  assert.equal(resolveRootCorrections([cm(1, 153), cm(2, 153)], 146).error, "root_correction_conflict");
+  assert.equal(resolveRootCorrections([cm(2, 160)], 146).error, "root_correction_gap");
+  assert.equal(resolveRootCorrections([cm(1, 153, undefined, 99)], 146).error, "root_correction_marker_other_root");
+  assert.equal(resolveRootCorrections([cm(4, 153)], 146).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections([{ user: OWNER, body: "<!-- orch-root-correction:v1 root146 n=x -->" }], 146).error, "root_correction_marker_malformed");
+});
+test("#161: entrypoint uses the root counter (PR160-like case logs r2, not r1)", async () => {
+  const issues = { 138: rootIssue(138, 136), 136: rootIssue(136) };
+  const mk = (n) => ({ user: OWNER, body: correctionMarker({ root: 136, n, pr: n === 2 ? 9 : 7, sha: H(String(n)) }), id: 900 + n });
+  const w = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, commentsBy: { 136: [mk(1), mk(2)] } });
+  assert.equal((await entry(w)).lifecycle.key, "orch:v1:req136:pr9:accept:r2");
+  const bad = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, commentsBy: { 136: [mk(2)] } });
+  assert.equal((await entry(bad)).lifecycle.reason, "root_correction_gap");
 });

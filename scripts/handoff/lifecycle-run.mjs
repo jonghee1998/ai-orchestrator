@@ -2,6 +2,7 @@
 // plans, and returns the plan. Never writes, never enables live mode.
 import { linkedIssueNumbers } from "./core.mjs";
 import { planLifecycle, parseConfig, allRecords, MAX_ROUNDS } from "./lifecycle.mjs";
+import { resolveRootCorrections, correctionRound } from "./root-corrections.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers, pmRevises, ciFromCheckRuns, deploymentFromCommitStatus, ancestryFrom, tipFrom, reqFromPr, rootMarker, supersedesMarker } from "./lifecycle-evidence.mjs";
 
 const READ_ONLY = ["getPull", "getIssue", "listIssueComments", "getCommit", "getBranch", "compare", "listCheckRuns", "getCombinedStatus"];
@@ -104,8 +105,12 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     const reviews = normalizeCodexReviews(comments);
     // Expected head: explicit (event/dispatch) else the exact SHA of the trusted Codex verdict being acted on.
     const head = expectedHead ?? reviews.at(-1)?.commit_sha;
+    // Issue #161: durable ROOT-level correction counter (spans separate chains of the same root; never lowered).
+    const rootIssue = await gh.getIssue(req);
+    const rc = correctionRound({ resolved: resolveRootCorrections([rootIssue, ...comments], req), prNumber, chainDepth: depth, floor: roundFor(comments, req, depth) });
+    if (rc.error) return fail(rc.error, rc.detail);
     const input = {
-      req, round: roundFor(comments, req, depth), config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,
+      req, round: rc.round, config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,
       acceptIssues: [...new Set([req, linked])],
       pmAccepts: pmAcceptMarkers(comments), pmRevises: pmRevises(comments), records: comments,
     };
@@ -114,6 +119,10 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
       const branch = await gh.getBranch(pr.base.ref);
       const tipSha = branch?.commit?.sha;
       input.tip = /^[a-f0-9]{40}$/.test(tipSha ?? "") ? tipFrom(pr.base.sha, branch, await gh.compare(pr.base.sha, tipSha)) : null;
+    }
+    if (pr.merged !== true) {
+      // Issue #161: same-SHA CI for the OPEN head, needed before awaiting_user_approval (separate from merge-SHA CI).
+      input.headCi = ciFromCheckRuns(pr.head.sha, await gh.listCheckRuns(pr.head.sha));
     }
     if (pr.merged === true && /^[a-f0-9]{40}$/.test(pr.merge_commit_sha ?? "")) {
       const mergeSha = pr.merge_commit_sha;
