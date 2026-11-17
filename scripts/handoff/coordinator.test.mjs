@@ -1,11 +1,10 @@
 // Issue #73 — coordinator tests: trusted identity, exact SHA, stale/forged/duplicate events, crash resume, bounded retry.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decide, parseCodexState, isTrustedCodex, isTrustedPm, gptWriterHandled, findClaim, handoffKey, CODEX_BOT, codexReportObservation } from "./core.mjs";
+import { decide, parseCodexState, isTrustedCodex, isTrustedPm, gptWriterHandled, findClaim, handoffKey, CODEX_BOT, codexReportObservation, currentCodexState } from "./core.mjs";
 import { run } from "./execute.mjs";
 import { createClient } from "./github.mjs";
 import { prFromEvent } from "./main.mjs";
-import { observeReview } from "./wait-for-review.mjs";
 
 const SHA = "c8498c227d6d84e786abc7b648715035552c5140";
 const OLD = "49d22ed7872506d45b76fd42566d5c49a3ef9148";
@@ -388,28 +387,14 @@ test("T6 post-review edited comment on stale SHA never gets PASS", async () => {
   assert.deepEqual(gh.db.writes, []);
 });
 
-test("T6 bounded observer notices Codex completed marker AFTER PR-open and emits dry-run PASS", async () => {
-  const gh = fakeGitHub();
-  const logs = [];
-  let sleeps = 0;
-  const observed = await observeReview(gh, 72, { attempts: 3, intervalMs: 0, sleep: async () => { sleeps++; gh.db.comments.push(comment(BOT, stateBody(SHA))); }, out: (line) => logs.push(JSON.parse(line)) });
-  assert.equal(sleeps, 1);
-  assert.equal(observed.result, "observed_structured");
-  assert.equal(observed.verdict.result, "dry_run");
-  assert.equal(observed.verdict.wouldDo, "release_ready");
-  assert.deepEqual(gh.db.writes, []);
-  assert.ok(logs.some((v) => v.step === "review_wait" && v.state === "structured"));
-});
-test("T6 bounded observer with prose-only Codex report never grants PASS", async () => {
-  const gh = fakeGitHub({ comments: [comment(BOT, "## Review Result\\n" + SHA)] });
-  const observed = await observeReview(gh, 72, { attempts: 2, intervalMs: 0, sleep: async () => {}, out: () => {} });
-  assert.equal(observed.result, "unverified");
-  assert.deepEqual(gh.db.writes, []);
-});
-test("T6 bounded observer stops if head changes while awaiting review", async () => {
-  const gh = fakeGitHub();
-  const observed = await observeReview(gh, 72, { attempts: 3, intervalMs: 0, sleep: async () => { gh.db.pr.head.sha = OLD; }, out: () => {} });
-  assert.equal(observed.reason, "head_moved_or_pr_closed");
+test("T6 no polling: review-wait observer is removed from active execution", async () => {
+  const { existsSync, readFileSync } = await import("node:fs");
+  assert.equal(existsSync(new URL("./wait-for-review.mjs", import.meta.url)), false);
+  const wf = readFileSync(new URL("../../.github/workflows/handoff-coordinator.yml", import.meta.url), "utf8");
+  assert.ok(!/wait-for-review|Observe post-open/.test(wf));
+  // Event handler is a single read of live state; it never loops.
+  const gh = fakeGitHub({ comments: [comment(BOT, stateBody(SHA))] });
+  assert.equal((await run(gh, 72, { apply: false, repo: REPO })).wouldDo, "release_ready");
   assert.deepEqual(gh.db.writes, []);
 });
 
@@ -429,7 +414,6 @@ test("T6 contradictory completed receipts never select a convenient PASS", async
     const gh = fakeGitHub({ comments });
     assert.equal((await run(gh, 72, { apply: true, repo: REPO })).reason, "conflicting_codex_state");
     assert.equal(codexReportObservation(pull(), comments).reason, "conflicting_codex_state");
-    assert.equal((await observeReview(gh, 72, { out: () => {} })).reason, "conflicting_codex_state");
     assert.deepEqual(gh.db.writes, []);
   }
 });
@@ -517,3 +501,19 @@ test("T6 review-evidence pagination cannot hide a concurrent head update or PR c
   }
 });
 
+
+test("#164 opposing completed SECURITY flags on the exact SHA fail closed in decide and currentCodexState (both orders)", async () => {
+  const mk = (unresolved, at) => comment(BOT, stateBody(SHA, { sec: { status: "completed", commit_sha: SHA, has_unresolved_findings: unresolved } }), at);
+  const a = mk(false, "2026-11-15T06:00:00Z"), b = mk(true, "2026-11-15T07:00:00Z");
+  for (const comments of [[a, b], [b, a]]) {
+    assert.equal(decide({ pr: pull(), comments }).reason, "conflicting_codex_state");
+    assert.equal(currentCodexState(comments, SHA).conflict, true);
+    const gh = fakeGitHub({ comments });
+    assert.equal((await run(gh, 72, { apply: true, repo: REPO })).reason, "conflicting_codex_state");
+    assert.deepEqual(gh.db.writes, []);
+  }
+  const bad = comment(BOT, stateBody(SHA, { sec: { status: "completed", commit_sha: OLD, has_unresolved_findings: false } }), "2026-11-15T08:00:00Z");
+  assert.equal(currentCodexState([a, bad], SHA).conflict, true, "invalid security next to completed fails closed");
+  const dbl = comment(BOT, stateBody(SHA) + stateBody(SHA, { unresolved: true }), "2026-11-15T09:00:00Z");
+  assert.equal(currentCodexState([comment(BOT, stateBody(SHA)), dbl], SHA).conflict, true, "multiple markers on exact SHA fail closed");
+});

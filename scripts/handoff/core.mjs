@@ -77,6 +77,14 @@ export function currentCodexState(comments, head) {
   const completed = exact.filter(({ state }) => state.status === "completed");
   if (new Set(completed.map(({ state }) => state.hasUnresolvedFindings)).size > 1)
     return { conflict: true };
+  // Security flags are a separate gate: opposing, invalid or mixed security verdicts across exact-SHA completed
+  // receipts fail closed BEFORE timestamp selection.
+  const secs = completed.map(({ state }) => state.security ?? { status: "not_run" });
+  const done = secs.filter((x) => x.status === "completed").map((x) => x.hasUnresolvedFindings);
+  if (new Set(done).size > 1 || done.some((v) => typeof v !== "boolean") || (done.length > 0 && secs.some((x) => x.status === "invalid"))) return { conflict: true };
+  // A trusted receipt that names this exact SHA but is malformed / carries multiple state markers is ambiguous.
+  const ambiguous = comments.some((c) => isTrustedCodex(c.user) && /codex-review-state:v1/.test(c.body ?? "") && (c.body ?? "").includes(head) && !parseCodexState(c.body));
+  if (ambiguous) return { conflict: true };
   return { codex: latestCodexState(exact.map(({ c }) => c)) ?? latestCodexState(comments) };
 }
 

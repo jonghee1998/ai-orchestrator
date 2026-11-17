@@ -197,7 +197,7 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   // Issue #156: security is a separate gate. Contradictory security verdicts on the same SHA fail closed.
   const secDone = exact.filter((r) => r.security_status === "completed");
   const secVerdicts = new Set(secDone.map((r) => r.security_unresolved));
-  const secConflict = secVerdicts.size > 1 || [...secVerdicts].some((v) => typeof v !== "boolean");
+  const secConflict = secVerdicts.size > 1 || [...secVerdicts].some((v) => typeof v !== "boolean") || (secDone.length > 0 && exact.some((r) => r.security_status === "invalid"));
   const securityPass = !secConflict && secVerdicts.size === 1 && secVerdicts.has(false);
   const securityUnresolved = !secConflict && secVerdicts.has(true);
   const security = secConflict ? "conflict" : securityPass ? "pass" : securityUnresolved ? "findings" : "missing";

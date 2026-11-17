@@ -610,6 +610,8 @@ test("#161: root correction counter is durable across chains, from trusted PM ma
   assert.equal(correctionRound({ resolved: r, prNumber: 170, chainDepth: 1, floor: 1 }).round, 3, "next unmarked replacement is 3");
   assert.equal(correctionRound({ resolved: r, prNumber: 170, chainDepth: 0, floor: 1 }).round, 2, "new feature PR neither resets nor consumes");
   assert.equal(correctionRound({ resolved: r, prNumber: 180, chainDepth: 1, floor: 3 }).round, 3, "floor from chain/bot can not be lowered");
+  assert.equal(correctionRound({ resolved: resolveRootCorrections([cm(1, 153), cm(2, 160), cm(3, 170)], 146), prNumber: 153, chainDepth: 1, floor: 1 }).round, 3, "#164: own historical n1 marker honors root count 3");
+  assert.equal(correctionRound({ resolved: resolveRootCorrections([cm(1, 153), cm(2, 160), cm(3, 170)], 146), prNumber: 160, chainDepth: 0, floor: 1 }).round, 3, "#164: own n2 marker honors root count 3");
   assert.equal(correctionRound({ resolved: resolveRootCorrections([cm(1, 153), cm(2, 160), cm(3, 170)], 146), prNumber: 180, chainDepth: 1, floor: 1 }).round, 4, "cap exceeded");
   assert.equal(resolveRootCorrections([cm(1, 153, undefined, 146, MAL), cm(2, 160, undefined, 146, WRITER)], 146).count, 0, "untrusted authors ignored");
 });
@@ -628,4 +630,11 @@ test("#161: entrypoint uses the root counter (PR160-like case logs r2, not r1)",
   assert.equal((await entry(w)).lifecycle.key, "orch:v1:req136:pr9:accept:r2");
   const bad = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, commentsBy: { 136: [mk(2)] } });
   assert.equal((await entry(bad)).lifecycle.reason, "root_correction_gap");
+});
+
+test("#164: old open PR with own n1 marker cannot revise after root cap 3 (actual plan stop)", async () => {
+  const issues = { 138: rootIssue(138, 136), 136: rootIssue(136) };
+  const mk = (n, p) => ({ user: OWNER, body: correctionMarker({ root: 136, n, pr: p, sha: H(String(n)) }), id: 900 + n });
+  const w = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, comments: [{ id: 1, user: BOT, body: codexBody(SHA, true) }], commentsBy: { 136: [mk(1, 9), mk(2, 20), mk(3, 21)] } });
+  assert.equal((await entry(w)).lifecycle.reason, "round_cap_reached_before_revision");
 });

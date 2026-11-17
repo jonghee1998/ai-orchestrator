@@ -51,13 +51,15 @@ export function resolveRootCorrections(items = [], root) {
 
 /**
  * Round (= correction ordinal) for the PR under evaluation. Never below the chain-derived depth or the durable bot
- * count (`floor`), never below the root counter. If the PR already has its own marker it IS that ordinal; an unmarked
+ * count (`floor`), never below the root counter. If the PR already has its own marker the ordinal is at least that marker's n AND at least the root count; an unmarked
  * replacement (chain depth > 0) is the NEXT correction; an unmarked original PR (new feature work) adds nothing.
  */
 export function correctionRound({ resolved, prNumber, chainDepth, floor }) {
   if (resolved.error) return { error: resolved.error, detail: resolved.detail };
   const own = resolved.records.find((r) => r.pr === prNumber);
   const prior = resolved.records.filter((r) => r.pr !== prNumber).reduce((m, r) => Math.max(m, r.n), resolved.count);
-  const ordinal = own ? own.n : chainDepth > 0 ? prior + 1 : prior;
+  // Root-wide count is a LOWER BOUND on every path, including a PR's own (historical) marker: an old chain can never
+  // re-enter at a lower round after the cap was consumed elsewhere.
+  const ordinal = own ? Math.max(own.n, resolved.count) : chainDepth > 0 ? prior + 1 : prior;
   return { round: Math.min(Math.max(floor, ordinal, 1), MAX_CORRECTIONS + 1), count: resolved.count };
 }

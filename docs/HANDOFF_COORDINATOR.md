@@ -217,3 +217,21 @@ Files:
 - **Required marker edits** (markers only, no code provenance change): #136 self; #138, #141, #144 → #136; PR137 `none`; PR139 `pr137`; PR142 `pr139`;
   the #144 PR `pr142`.
 - Post-merge CI/deploy re-evaluation remains a **manual** T5 route (`main.mjs --pr <N>`); it is not automatic completion. Dry-run only, no live mode.
+
+## Issue #164 (T6 correction 3) — events only, no polling; honest default-branch blocker
+
+- **No review-wait polling.** `scripts/handoff/wait-for-review.mjs` and the workflow step "Observe post-open Codex
+  verdict" were removed. Active execution is event-driven handlers only (`issue_comment`, `pull_request_review`,
+  `pull_request`, `workflow_dispatch`); each run reads live GitHub state ONCE and acts on the exact head SHA. Nothing
+  claims an event wake that polling would have produced. (The remaining sleeps are unrelated: HTTP retry backoff on
+  errors in `github.mjs`, and the local subscription worker's process-group quiescence check.)
+- **Default-branch blocker (unchanged, honest).** `main` ALREADY has a legacy `issue_comment` workflow. `issue_comment`
+  and `workflow_dispatch` always run the default branch's copy, so the NEW integration-branch logic cannot execute
+  on those events until the workflow file reaches `main`, which needs an owner-approved change. Not done here
+  (no main mutation, no live activation).
+- **Root correction count is a lower bound on every path.** A PR's own historical `n` marker can no longer lower the
+  round: `round = max(own.n, root count)`. An old PR with `n=1` under root count 3 stops at
+  `round_cap_reached_before_revision`.
+- **Security receipts fail closed.** Opposing completed security flags (or an invalid security block next to a
+  completed one, or a malformed/multi-marker receipt naming the exact SHA) yield `conflicting_codex_state` before
+  timestamp selection, in `decide`, `currentCodexState` and `reviewEvidence`.
