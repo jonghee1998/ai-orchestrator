@@ -10,7 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-import { childEnvironment, verifyResponse, leaseController, superviseChild, groupAlive, createSupervisor, stopGroup, probeGroup, processTableIdentity, sameIdentity, replayCleanup } from "./subscription-worker.mjs";
+import { childEnvironment, verifyResponse, leaseController, superviseChild, groupAlive, createSupervisor, stopGroup, probeGroup, processTableIdentity, sameIdentity, replayCleanup, cliFailureReason } from "./subscription-worker.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 const exec = promisify(execFile);
@@ -157,7 +157,7 @@ test("#49 P1: revocation DURING tests stops the active test group (incl. its bac
 
 // End-to-end runner harness: real runner process, real CLI/npm stand-in processes, signed fake orchestrator.
 const WORKER = process.env.WORKER_UNDER_TEST ?? path.resolve("scripts/subscription-worker.mjs");
-async function harness({ lease = () => "held", npmEnv = {}, runnerEnv = {} } = {}) {
+async function harness({ lease = () => "held", npmEnv = {}, runnerEnv = {}, cliError } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-")), cwd = path.join(root, "repo"), bin = path.join(root, "bin");
   await fs.mkdir(cwd); await fs.mkdir(bin);
   await exec("git", ["init", "-b", "codex/review"], { cwd });
@@ -166,6 +166,7 @@ async function harness({ lease = () => "held", npmEnv = {}, runnerEnv = {} } = {
   const sha = (await exec("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
   const writes = path.join(root, "test-writes"), size = () => fs.stat(writes).then(s => s.size, () => 0);
   await fs.writeFile(path.join(bin, "codex"), `#!${process.execPath}\nconst a=process.argv;require('fs').writeFileSync(a[a.indexOf('--output-last-message')+1],JSON.stringify({summary:'Review completed',prNumber:35}));`, { mode: 0o755 });
+  if (cliError) await fs.writeFile(path.join(bin, "codex"), `#!${process.execPath}\nrequire('fs').appendFileSync(process.env.CALL_LOG,'cli\\n');console.error(${JSON.stringify(cliError)});process.exit(2);`, { mode: 0o755 });
   await fs.writeFile(path.join(bin, "npm"), `#!${process.execPath}\nrequire(${JSON.stringify(path.resolve("scripts/fixtures/npm-leaving-writer.cjs"))});`, { mode: 0o755 });
   const secret = "test-secret", reports = [];
   const server = createServer(async (req, res) => {
@@ -193,8 +194,34 @@ async function harness({ lease = () => "held", npmEnv = {}, runnerEnv = {} } = {
   const writerPids = () => fs.readFile(writes + ".pids", "utf8").then(t => t.trim().split("\n").filter(Boolean).map(Number), () => []);
   const close = async () => { for (const p of await writerPids()) killGroup(p); for (const p of await writerPids()) { try { process.kill(p, "SIGKILL"); } catch { /* gone */ } }
     server.closeAllConnections(); await new Promise(r => server.close(r)); await fs.rm(root, { recursive: true, force: true }); };
-  return { run, runVia, reports, writes, size, savedFile, writerPids, close };
+  return { run, runVia, reports, writes, size, savedFile, writerPids, close, callLog: path.join(root, "calls") };
 }
+test("T6 runtime failure codes distinguish environment from reauthentication without echoing secrets", () => {
+  const secret = "Bearer sensitive-value";
+  assert.equal(cliFailureReason(`failed to initialize in-process app-server client: Read-only file system (os error 30) ${secret}`), "codex_runtime_read_only");
+  assert.equal(cliFailureReason(`refresh_token revoked ${secret}`), "subscription_reauthentication_required");
+  assert.equal(cliFailureReason("HTTP 401"), "subscription_cli_failed", "401 alone does not prove refresh failed");
+  assert.equal(cliFailureReason("usage limit reached"), "subscription_capacity_unavailable");
+  assert.equal(cliFailureReason("", "ENOENT"), "cli_not_installed");
+});
+test("T6 real worker records startup block, skips tests, and replays without re-executing CLI", async () => {
+  const secret = "Bearer do-not-persist";
+  const h = await harness({ cliError: `Error: failed to initialize in-process app-server client: Read-only file system (os error 30) ${secret}` });
+  try {
+    assert.equal(await h.run(), 0);
+    assert.equal(h.reports.length, 1);
+    const result = h.reports[0].result;
+    assert.equal(result.exitCode, 2);
+    assert.match(result.summary, /BLOCKED codex_runtime_read_only/);
+    assert.deepEqual(result.tests, []);
+    assert.deepEqual(result.cleanup, { processGroupsEmpty: true, groups: 1 });
+    const saved = await h.savedFile();
+    assert.ok(!(await fs.readFile(saved, "utf8")).includes(secret));
+    assert.equal(await h.run(saved), 0);
+    assert.deepEqual(h.reports[1].result, result);
+    assert.equal(await fs.readFile(h.callLog, "utf8"), "cli\n");
+  } finally { await h.close(); }
+});
 test("#49 P1 e2e: normal successful exit leaving npm/test background writers -> reaped and proven BEFORE finish; finish carries cleanup proof", async () => {
   const h = await harness();
   try {
@@ -382,3 +409,4 @@ test("#51 P1 e2e: replay inside a REAL different pid namespace (writer invisible
     assert.ok(alive(writer) && await grows(h.writes), "the original writer is still alive");
   } finally { await h.close(); }
 });
+
