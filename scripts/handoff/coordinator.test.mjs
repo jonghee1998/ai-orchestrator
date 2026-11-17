@@ -1,7 +1,7 @@
 // Issue #73 — coordinator tests: trusted identity, exact SHA, stale/forged/duplicate events, crash resume, bounded retry.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decide, parseCodexState, isTrustedCodex, isTrustedPm, gptWriterHandled, findClaim, handoffKey, CODEX_BOT } from "./core.mjs";
+import { decide, parseCodexState, isTrustedCodex, isTrustedPm, gptWriterHandled, findClaim, handoffKey, CODEX_BOT, codexReportObservation } from "./core.mjs";
 import { run } from "./execute.mjs";
 import { createClient } from "./github.mjs";
 import { prFromEvent } from "./main.mjs";
@@ -328,4 +328,19 @@ test("P2-2: client issue-side evidence = repo issue comments + issue bodies sinc
   assert.ok(seen.every((p) => p.includes("since=2026-11-15T05%3A00%3A00.000Z")));
   const flood = restFake([[/\/issues\/comments$/, (u) => pageOf(u, 1e6, (i) => ({ id: i }))]]);
   await assert.rejects(createClient({ token: "x", repo: REPO, fetchImpl: flood.f }).listIssueSideEvidence("2026-11-15T05:00:00Z"), /pagination bound/);
+});
+
+test("T6 observes trusted unstructured review but leaves PASS blocked", () => {
+  const report = comment(BOT, "## Review Result\n\nNo actionable findings. https://github.com/example/blob/" + SHA + "/file.mjs");
+  assert.equal(codexReportObservation(pull(), [report]).state, "observed");
+  assert.equal(decide({ pr: pull(), comments: [report], linkedIssue: issue71 }).reason, "no_trusted_codex_state");
+});
+test("T6 ignores forged and stale unstructured reviews", () => {
+  assert.equal(codexReportObservation(pull(), [comment(MALLORY, "## Review Result\n" + SHA)]).reason, "no_trusted_review_report");
+  assert.equal(codexReportObservation(pull(), [comment(BOT, "## Review Result\n" + OLD)]).reason, "report_not_bound_to_current_head");
+});
+test("T6 structured review stays authoritative and exact-head", () => {
+  assert.equal(codexReportObservation(pull(), [comment(BOT, stateBody(SHA))]).state, "structured");
+  assert.equal(codexReportObservation(pull(), [comment(BOT, stateBody(OLD))]).reason, "structured_state_stale");
+  assert.equal(decide({ pr: pull(), comments: [comment(BOT, stateBody(SHA))], linkedIssue: issue71 }).action, "release_ready");
 });
