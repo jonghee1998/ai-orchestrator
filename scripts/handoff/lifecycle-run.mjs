@@ -90,7 +90,12 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     if (ch.error) return fail(ch.error, ch.detail);
     const depth = ch.chain.length - 1; // revision PRs in the chain
     const superseded = ch.chain[1];
-    const ancestry = superseded ? ancestryFrom(superseded.head?.sha, pr.head?.sha, await gh.compare(superseded.head?.sha, pr.head?.sha)) : undefined;
+    // Issue #156: bind exact-SHA ancestry for EVERY adjacent link (chain[i+1].head -> chain[i].head).
+    const chainLinks = await Promise.all(ch.chain.slice(0, -1).map(async (newer, i) => {
+      const older = ch.chain[i + 1];
+      return { newer, older, ancestry: ancestryFrom(older.head?.sha, newer.head?.sha, await gh.compare(older.head?.sha, newer.head?.sha)) };
+    }));
+    const ancestry = chainLinks[0]?.ancestry;
     // Durable records: root issue + EVERY PR of the verified chain (bounded), merged by comment id.
     const prComments = await gh.listIssueComments(prNumber);
     const rootComments = req === prNumber ? [] : await gh.listIssueComments(req);
@@ -100,7 +105,7 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     // Expected head: explicit (event/dispatch) else the exact SHA of the trusted Codex verdict being acted on.
     const head = expectedHead ?? reviews.at(-1)?.commit_sha;
     const input = {
-      req, round: roundFor(comments, req, depth), config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry,
+      req, round: roundFor(comments, req, depth), config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,
       acceptIssues: [...new Set([req, linked])],
       pmAccepts: pmAcceptMarkers(comments), pmRevises: pmRevises(comments), records: comments,
     };

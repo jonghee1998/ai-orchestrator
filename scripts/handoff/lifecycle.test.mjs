@@ -1,7 +1,7 @@
 // Issue #136 / #138 — dry-run lifecycle tests (pure planner + real entrypoint with fixture HTTP).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { orchKey, parseOrchKey, planLifecycle, replay, recoverAmbiguousPost, eventPlan, recordMarker, validateTarget, parseConfig, applySimulated, keyState, MAX_ROUNDS } from "./lifecycle.mjs";
+import { orchKey, parseOrchKey, planLifecycle, replay, recoverAmbiguousPost, eventPlan, recordMarker, validateTarget, reviewEvidence, parseConfig, applySimulated, keyState, MAX_ROUNDS } from "./lifecycle.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers } from "./lifecycle-evidence.mjs";
 import { CODEX_BOT } from "./core.mjs";
 import { createClient } from "./github.mjs";
@@ -20,7 +20,7 @@ const WRITER = { login: "github-actions[bot]", id: 1, type: "Bot" };
 const MAL = { login: "mallory", id: 6, type: "User" };
 const pr = (x = {}) => ({ number: 9, state: "open", merged: false, user: OWNER, head: { ref: "claude/x", sha: SHA }, base: { ref: T, sha: BASE }, ...x });
 const mergedPr = (x = {}) => pr({ state: "closed", merged: true, merge_commit_sha: MERGE, ...x });
-const review = (x = {}) => ({ trusted: true, user: BOT, commit_sha: SHA, status: "completed", has_unresolved_findings: false, ...x });
+const review = (x = {}) => ({ trusted: true, user: BOT, commit_sha: SHA, status: "completed", has_unresolved_findings: false, security_status: "completed", security_unresolved: false, ...x });
 const acc = (x = {}) => ({ issue: 136, pr: 9, sha: SHA, target: T, ...x });
 const base = (x = {}) => ({ req: 136, round: 1, config: CFG, integrationTarget: T, pr: pr(), expectedHead: SHA, reviews: [review()], pmAccepts: [], pmRevises: [], records: [], tip: tipOk(), ...x });
 const mergedBase = (x = {}) => base({ pr: mergedPr(), reviews: [review()], pmAccepts: [acc()],
@@ -124,12 +124,18 @@ test("integration target only: head/base/main checks", () => {
   assert.equal(planLifecycle(base({ pr: pr({ base: { ref: T, sha: "bad" } }) })).reason, "base_mismatch");
 });
 
-test("replacement PR: open or closed superseded OK; merged distinct; exact ancestry bound to both SHAs", () => {
-  const sup = (x = {}) => ({ number: 7, state: "open", merged: false, base: { ref: T }, head: { ref: "claude/old", sha: OLD }, ...x });
+test("replacement PR: superseded must be closed-unmerged; open/merged distinct; exact ancestry bound to both SHAs", () => {
+  const sup = (x = {}) => ({ number: 7, state: "closed", merged: false, base: { ref: T }, head: { ref: "claude/old", sha: OLD }, ...x });
   const anc = (x = {}) => ({ baseSha: OLD, headSha: SHA, status: "ahead", ...x });
   const ok = base({ superseded: sup(), ancestry: anc() });
-  assert.equal(validateTarget(ok), null, "replacement valid while old PR is still open");
-  assert.equal(validateTarget({ ...ok, superseded: sup({ state: "closed" }) }), null);
+  assert.equal(validateTarget(ok), null);
+  assert.equal(validateTarget({ ...ok, superseded: sup({ state: "open" }) }), "superseded_open", "#156: open source is not safely superseded");
+  // #156: EVERY adjacent link is validated, not only the first
+  const good = [{ newer: ok.pr, older: sup(), ancestry: anc() }, { newer: sup(), older: sup({ number: 5, head: { ref: "claude/older", sha: H("5") } }), ancestry: { baseSha: H("5"), headSha: OLD, status: "ahead" } }];
+  assert.equal(validateTarget({ ...ok, chainLinks: good }), null);
+  assert.equal(validateTarget({ ...ok, chainLinks: [good[0], { ...good[1], ancestry: { ...good[1].ancestry, status: "diverged" } }] }), "replacement_ancestry_unproven");
+  assert.equal(validateTarget({ ...ok, chainLinks: [good[0], { ...good[1], older: { ...good[1].older, state: "open" } }] }), "superseded_open");
+  assert.equal(validateTarget({ ...ok, chainLinks: [good[0], { ...good[1], ancestry: undefined }] }), "replacement_ancestry_unbound");
   assert.equal(validateTarget({ ...ok, superseded: sup({ state: "closed", merged: true }) }), "superseded_merged");
   assert.equal(validateTarget({ ...ok, ancestry: anc({ status: "identical" }) }), null);
   assert.equal(validateTarget({ ...ok, ancestry: anc({ status: "diverged" }) }), "replacement_ancestry_unproven");
@@ -207,7 +213,7 @@ test("round cap", () => {
 });
 
 // ---- adapter: real Codex bot payload + existing PM marker format ------------------------------
-const codexBody = (sha, unresolved) => `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, has_any_findings: unresolved, has_unresolved_findings: unresolved, status: "completed" }, security_review: { commit_sha: null } })} -->\n<details>x</details>`;
+const codexBody = (sha, unresolved) => `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, has_any_findings: unresolved, has_unresolved_findings: unresolved, status: "completed" }, security_review: { commit_sha: sha, status: "completed", has_unresolved_findings: false } })} -->\n<details>x</details>`;
 test("adapter: real bot payload shape, forged/untrusted/malformed ignored", () => {
   const r = normalizeCodexReviews([{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: codexBody(SHA, false) }, { id: 3, user: { ...BOT, id: 5 }, body: codexBody(SHA, false) },
     { id: 4, user: BOT, body: "<!-- codex-review-state:v1 {nope} -->" }, { id: 5, user: BOT, body: codexBody("abc", false) }]);
@@ -465,9 +471,9 @@ const H139 = H("3"), H142 = H("4"), H137 = H("7");
 // Corrected chain as it must look on GitHub: PR(new, #144) -> PR142 (#141) -> PR139 (#138) -> PR137 (#136), all root #136.
 const chainWorld = (x = {}) => {
   const pulls = {
-    142: PRX(142, "Closes #141\n<!-- orch-supersedes:v1 pr139 -->", H142, "claude/r142"),
-    139: PRX(139, "Closes #138\n<!-- orch-supersedes:v1 pr137 -->", H139, "claude/r139"),
-    137: PRX(137, "Closes #136\n<!-- orch-supersedes:v1 none -->", H137, "claude/r137"),
+    142: PRX(142, "Closes #141\n<!-- orch-supersedes:v1 pr139 -->", H142, "claude/r142", { state: "closed" }),
+    139: PRX(139, "Closes #138\n<!-- orch-supersedes:v1 pr137 -->", H139, "claude/r139", { state: "closed" }),
+    137: PRX(137, "Closes #136\n<!-- orch-supersedes:v1 none -->", H137, "claude/r137", { state: "closed" }),
   };
   const issues = { 136: ROOT(136), 138: ROOT(138), 141: ROOT(141), 144: ROOT(144) };
   return baseWorld({ pr: pr({ body: "Closes #144\n<!-- orch-supersedes:v1 pr142 -->" }), issues, pulls, ...x });
@@ -558,4 +564,15 @@ test("#144: workflow stays dry-run, no live/main/prod; note: post-merge CI/deplo
   const doc = readFileSync(new URL("../../docs/HANDOFF_COORDINATOR.md", import.meta.url), "utf8");
   assert.match(doc, /orch-supersedes:v1 none/);
   assert.match(doc, /manual/i);
+});
+
+test("#156: security review is tracked separately; missing/blocked/not-run never total PASS", () => {
+  const ev = (rs) => reviewEvidence({ pr: pr(), sha: SHA, reviews: rs, req: 136, integrationTarget: T });
+  assert.equal(ev([review()]).independent, true);
+  assert.equal(ev([review({ security_status: "not_run", security_unresolved: undefined })]).independent, false);
+  assert.equal(ev([review({ security_status: "running", security_unresolved: undefined })]).security, "missing");
+  const bad = ev([review({ security_unresolved: true })]);
+  assert.deepEqual([bad.independent, bad.unresolved, bad.security], [false, true, "findings"]);
+  const c = ev([review(), review({ security_unresolved: true })]);
+  assert.deepEqual([c.independent, c.conflict, c.security], [false, true, "conflict"]);
 });

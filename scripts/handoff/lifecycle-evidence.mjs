@@ -16,7 +16,8 @@ export function normalizeCodexReviews(comments = []) {
     const s = parseCodexState(c.body);
     if (!s) continue;
     out.push({ trusted: true, user: { login: c.user.login, id: c.user.id, type: c.user.type }, commit_sha: s.commitSha, status: s.status,
-      has_unresolved_findings: s.hasUnresolvedFindings, commentId: c.id });
+      has_unresolved_findings: s.hasUnresolvedFindings,
+      security_status: s.security?.status ?? "not_run", security_unresolved: s.security?.hasUnresolvedFindings, commentId: c.id });
   }
   return out;
 }

@@ -31,7 +31,25 @@ export function parseCodexState(body) {
   if (typeof cr.status !== "string") return null;
   const unresolved = cr.has_unresolved_findings;
   if (cr.status === "completed" && typeof unresolved !== "boolean") return null;
-  return { commitSha: sha, status: cr.status, hasUnresolvedFindings: unresolved };
+  return { commitSha: sha, status: cr.status, hasUnresolvedFindings: unresolved, security: parseSecurity(j.security_review, sha) };
+}
+
+/**
+ * Issue #156: security review is tracked SEPARATELY from code review. Absent/null => `not_run` (never PASS).
+ * Present but malformed, or bound to a different SHA => `invalid`. `completed` needs a boolean findings flag.
+ * @returns {{status:string, hasUnresolvedFindings?:boolean}}
+ */
+export function parseSecurity(sr, sha) {
+  if (sr === undefined || sr === null) return { status: "not_run" };
+  if (typeof sr !== "object") return { status: "invalid" };
+  // Real connector shape when no security review ran: `{ "commit_sha": null }` (no status).
+  if (sr.status === undefined && sr.commit_sha === null) return { status: "not_run" };
+  if (typeof sr.status !== "string") return { status: "invalid" };
+  if (sr.commit_sha !== undefined && sr.commit_sha !== sha) return { status: "invalid" };
+  if (sr.status === "completed") {
+    return typeof sr.has_unresolved_findings === "boolean" ? { status: "completed", hasUnresolvedFindings: sr.has_unresolved_findings } : { status: "invalid" };
+  }
+  return { status: sr.status };
 }
 
 /** Latest trusted Codex state among PR conversation comments (by updated_at; the summary comment is edited in place). */
@@ -128,6 +146,10 @@ export function decide({ pr, comments, linkedIssue, pmEvidence = [] }) {
   if (codex.status !== "completed") return { action: "noop", reason: "codex_not_completed", detail: { status: codex.status } };
   if (codex.commitSha !== head) return { action: "noop", reason: "stale_codex_state", detail: { reviewed: codex.commitSha, head } };
   if (codex.hasUnresolvedFindings === false) {
+    // Issue #156: code PASS alone is never total PASS; security must have completed clean on the same exact SHA.
+    const sec = codex.security ?? { status: "not_run" };
+    if (sec.status !== "completed") return { action: "noop", reason: "security_review_incomplete", detail: { security: sec.status } };
+    if (sec.hasUnresolvedFindings !== false) return { action: "noop", reason: "security_findings_unresolved" };
     return { action: "release_ready", key: handoffKey(pr.number, head, "release-ready"), sha: head, codex };
   }
   if (gptWriterHandled([...comments, ...pmEvidence], pr.number, head)) return { action: "noop", reason: "gpt_writer_already_handled" };

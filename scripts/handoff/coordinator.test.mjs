@@ -14,15 +14,17 @@ const WRITER = { login: "github-actions[bot]", id: 41898282, type: "Bot" };
 const OWNER = { login: "jonghee1998", id: 129052128, type: "User" }; // also the GPT PM writer identity
 const MALLORY = { login: "mallory", id: 666, type: "User" };
 
-const stateBody = (sha, { status = "completed", unresolved = false } = {}) =>
-  `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, has_any_findings: unresolved, has_unresolved_findings: unresolved, status }, security_review: { commit_sha: null } })} -->\n<details>…</details>`;
+const stateBody = (sha, { status = "completed", unresolved = false, sec } = {}) =>
+  `<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, has_any_findings: unresolved, has_unresolved_findings: unresolved, status }, security_review: sec === undefined ? { commit_sha: sha, status: "completed", has_unresolved_findings: false } : sec })} -->\n<details>…</details>`;
 let nextId = 1000;
 const comment = (user, body, at = "2026-11-15T06:04:40Z") => ({ id: nextId++, user, body, created_at: at, updated_at: at, html_url: `https://github.com/${REPO}/pull/72#issuecomment-${nextId}` });
 const pull = (sha = SHA, extra = {}) => ({ number: 72, state: "open", created_at: "2026-11-15T05:00:00Z", body: "Refs #71\n\nFixes the P2.", head: { ref: "claude/determined-carson-ryfa2g", sha }, ...extra });
 const issue71 = { number: 71, labels: [{ name: "agent:claude" }, { name: "status:review" }] };
 
 test("parses the real connector marker shape (PR72 comment 6890098358)", () => {
-  assert.deepEqual(parseCodexState(stateBody(SHA)), { commitSha: SHA, status: "completed", hasUnresolvedFindings: false });
+  assert.deepEqual(parseCodexState(stateBody(SHA)), { commitSha: SHA, status: "completed", hasUnresolvedFindings: false, security: { status: "completed", hasUnresolvedFindings: false } });
+  assert.equal(parseCodexState(stateBody(SHA, { sec: { commit_sha: null } })).security.status, "not_run", "real shape without a security run");
+  assert.equal(parseCodexState(stateBody(SHA, { sec: { commit_sha: "a".repeat(40), status: "completed", has_unresolved_findings: false } })).security.status, "invalid", "security bound to another SHA");
   assert.equal(parseCodexState("<!-- codex-review-state:v1 {bad json} -->"), null);
   assert.equal(parseCodexState(stateBody("c8498c2")), null, "short SHA is not an exact SHA");
   assert.equal(parseCodexState(`<!-- codex-review-state:v1 {"code_review":{"commit_sha":"${SHA}","status":"completed"}} -->`), null, "completed without boolean fails closed");
@@ -328,4 +330,12 @@ test("P2-2: client issue-side evidence = repo issue comments + issue bodies sinc
   assert.ok(seen.every((p) => p.includes("since=2026-11-15T05%3A00%3A00.000Z")));
   const flood = restFake([[/\/issues\/comments$/, (u) => pageOf(u, 1e6, (i) => ({ id: i }))]]);
   await assert.rejects(createClient({ token: "x", repo: REPO, fetchImpl: flood.f }).listIssueSideEvidence("2026-11-15T05:00:00Z"), /pagination bound/);
+});
+
+test("#156: code PASS without completed clean security is NOT release_ready", () => {
+  const mk = (sec) => decide({ pr: { number: 5, state: "open", head: { sha: SHA } }, comments: [{ id: 1, user: BOT, body: stateBody(SHA, { sec }), updated_at: "2026-01-01T00:00:00Z" }] });
+  assert.equal(mk(undefined).action, "release_ready");
+  assert.equal(mk({ commit_sha: null }).reason, "security_review_incomplete");
+  assert.equal(mk({ commit_sha: SHA, status: "blocked" }).reason, "security_review_incomplete");
+  assert.equal(mk({ commit_sha: SHA, status: "completed", has_unresolved_findings: true }).reason, "security_findings_unresolved");
 });

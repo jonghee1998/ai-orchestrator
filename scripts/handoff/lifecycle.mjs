@@ -114,10 +114,10 @@ export function applySimulated(items, plan, { ref, writerLogin = WRITER_LOGIN } 
  * Target / head / base validation against LIVE state. Allowlisted integration branch only; main is rejected.
  * `pr.state` may be open (open_review phase) or closed+merged (merged phase); closed-unmerged is rejected.
  * Replacement PRs: must target the allowlisted branch directly (no stacks) and CONTAIN the superseded head
- * (`ancestry` = compare of superseded head -> replacement head, echoing both exact SHAs). The superseded PR
- * is NOT required to be closed: open / closed-unmerged are accepted, merged is a distinct failure.
+ * (`ancestry` = compare of superseded head -> replacement head, echoing both exact SHAs). Every superseded PR
+ * in the chain must be closed-unmerged (open => superseded_open, merged => superseded_merged).
  */
-export function validateTarget({ pr, config, integrationTarget, expectedHead, expectedBase, superseded, ancestry, tip }) {
+export function validateTarget({ pr, config, integrationTarget, expectedHead, expectedBase, superseded, ancestry, chainLinks, tip }) {
   const cfg = config ?? parseConfig({ allowlist: [integrationTarget].filter(Boolean), expectedBase });
   if (!cfg.ok) return `config_${cfg.reason}`;
   if (typeof integrationTarget !== "string" || !cfg.allowlist.includes(integrationTarget)) return "integration_target_not_allowlisted";
@@ -136,14 +136,18 @@ export function validateTarget({ pr, config, integrationTarget, expectedHead, ex
     if (!c || c.baseSha !== pr.base.sha || c.headSha !== tip.sha) return "base_tip_unverified";
     if (c.status !== "ahead" && c.status !== "identical") return c.status === "unknown" ? "base_tip_unverified" : "base_not_ancestor_of_tip";
   }
-  if (superseded) {
-    if (!SHA_RE.test(superseded.head?.sha ?? "")) return "superseded_malformed";
-    if (superseded.merged === true) return "superseded_merged";
-    if (superseded.state !== "open" && superseded.state !== "closed") return "superseded_malformed";
-    if (superseded.base?.ref !== integrationTarget) return "superseded_wrong_base";
-    if (pr.head?.ref === superseded.head?.ref || superseded.number === pr.number) return "replacement_stack";
-    const a = ancestry;
-    if (!a || a.baseSha !== superseded.head.sha || a.headSha !== pr.head.sha) return "replacement_ancestry_unbound";
+  // Issue #156: EVERY adjacent replacement link (newer -> older) is validated, not just the first. `chainLinks` =
+  // [{newer, older, ancestry}] ordered from `pr` down to the original. Legacy single `superseded`+`ancestry` is link 0.
+  const links = Array.isArray(chainLinks) ? chainLinks : superseded ? [{ newer: pr, older: superseded, ancestry }] : [];
+  for (const { newer, older, ancestry: a } of links) {
+    if (!older || !newer || !SHA_RE.test(older.head?.sha ?? "") || !SHA_RE.test(newer.head?.sha ?? "")) return "superseded_malformed";
+    if (older.merged === true) return "superseded_merged";
+    if (older.state !== "open" && older.state !== "closed") return "superseded_malformed";
+    // Every old PR must be closed-unmerged before a replacement can be accepted; an open source is not safely superseded.
+    if (older.state !== "closed") return "superseded_open";
+    if (older.base?.ref !== integrationTarget) return "superseded_wrong_base";
+    if (newer.head?.ref === older.head?.ref || older.number === newer.number) return "replacement_stack";
+    if (!a || a.baseSha !== older.head.sha || a.headSha !== newer.head.sha) return "replacement_ancestry_unbound";
     if (a.status !== "ahead" && a.status !== "identical") return "replacement_ancestry_unproven";
   }
   return null;
@@ -162,16 +166,24 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   const mine = reviews.filter((r) => r?.trusted === true); // adapter-set after login+id+type check
   const exact = mine.filter((r) => r.commit_sha === sha && r.status === "completed" && r.user?.login !== pr.user?.login);
   const verdicts = new Set(exact.map((r) => r.has_unresolved_findings));
-  const conflict = verdicts.size > 1 || [...verdicts].some((v) => typeof v !== "boolean");
+  const codeConflict = verdicts.size > 1 || [...verdicts].some((v) => typeof v !== "boolean");
   const stale = mine.some((r) => r.commit_sha !== sha);
-  const independent = !conflict && exact.length > 0 && verdicts.has(false);
-  const unresolved = !conflict && verdicts.has(true);
+  // Issue #156: security is a separate gate. Contradictory security verdicts on the same SHA fail closed.
+  const secDone = exact.filter((r) => r.security_status === "completed");
+  const secVerdicts = new Set(secDone.map((r) => r.security_unresolved));
+  const secConflict = secVerdicts.size > 1 || [...secVerdicts].some((v) => typeof v !== "boolean");
+  const securityPass = !secConflict && secVerdicts.size === 1 && secVerdicts.has(false);
+  const securityUnresolved = !secConflict && secVerdicts.has(true);
+  const security = secConflict ? "conflict" : securityPass ? "pass" : securityUnresolved ? "findings" : "missing";
+  const conflict = codeConflict || secConflict;
+  const independent = !conflict && exact.length > 0 && verdicts.has(false) && securityPass;
+  const unresolved = !conflict && (verdicts.has(true) || securityUnresolved);
   const issues = acceptIssues ?? [req]; // root request, plus the revision issue the PR actually closes
   const accepts = pmAccepts.filter((a) => issues.includes(a.issue) && a.pr === pr.number && a.target === integrationTarget && a.sha === sha);
   const staleAccept = pmAccepts.some((a) => a.sha !== sha);
   const pmConflict = accepts.length > 0 && pmRevises.some((m) => m.sha === sha && m.pr === pr.number);
   const pm = accepts.length > 0 ? { sha, count: accepts.length } : null;
-  return { independent, unresolved, stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
+  return { independent, unresolved, security, stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
 }
 
 /**
