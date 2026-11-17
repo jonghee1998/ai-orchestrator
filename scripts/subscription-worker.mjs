@@ -22,6 +22,18 @@ export function childEnvironment(env) {
   }
   return copy;
 }
+
+// Return fixed codes only: provider stderr can contain credentials and must not be persisted.
+export function cliFailureReason(text = "", spawnCode) {
+  if (spawnCode === "ENOENT") return "cli_not_installed";
+  if (/failed to initialize.*app-server[\s\S]*read-only file system/i.test(text)) return "codex_runtime_read_only";
+  if (/refresh[_ -]?token[\s\S]{0,100}(revoked|expired|invalid)|refresh_token_reused/i.test(text)) return "subscription_reauthentication_required";
+  if (/usage limit|rate limit|quota exceeded/i.test(text)) return "subscription_capacity_unavailable";
+  return "subscription_cli_failed";
+}
+class RunnerFailure extends Error {
+  constructor(reason) { super(reason); this.reason = reason; }
+}
 export function execute(command, args, cwd, env = childEnvironment(process.env), capture = false) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, env, shell: false, stdio: capture ? ["ignore", "pipe", "inherit"] : "inherit" });
@@ -171,17 +183,19 @@ export function createSupervisor(lease, { graceMs = 10_000, confirmMs = 30_000, 
     /** Never throws for cleanup failure; returns refused:true once fenced or after any unproven cleanup. */
     async run(command, args, cwd, env, capture = false) {
       if (lease.fenced || this.failed) return { refused: true, exitCode: 1, stdout: "" };
-      const child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: capture ? ["ignore", "pipe", "inherit"] : ["ignore", "inherit", "inherit"] });
-      let out = "";
+      const child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: capture ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"] });
+      let out = "", err = "", spawnCode;
       child.stdout?.on("data", b => { out = (out + b).slice(-1_048_576); });
-      const exited = new Promise(resolve => { child.once("error", () => resolve(null)); child.once("exit", code => resolve(code ?? 1)); });
+      child.stderr?.on("data", b => { err = (err + b).slice(-16_384); });
+      const exited = new Promise(resolve => { child.once("error", e => { spawnCode = e.code; resolve(null); }); child.once("exit", code => resolve(code ?? 1)); });
       const g = { state: "running", signal: null };
       if (child.pid) groups.set(child.pid, g);
       if (child.pid && lease.fenced) stop(child.pid); // fence raced the spawn
       // A leader whose fence-stop was denied may never exit: stop waiting once its cleanup is known to be unproven.
       const code = await new Promise(resolve => { exited.then(resolve); g.onUnproven = () => resolve(null); });
       if (child.pid) await stop(child.pid);
-      return { refused: false, exitCode: code ?? 127, stdout: out.trim() };
+      return { refused: false, exitCode: code ?? 127, stdout: out.trim(),
+        ...(code === 0 ? {} : { failureReason: cliFailureReason(err, spawnCode) }) };
     },
     get failed() { return [...groups.values()].some(g => g.state === "unproven"); },
     async settle() { await Promise.all([...groups.keys()].map(stop)); },
@@ -281,6 +295,9 @@ async function main() {
     const cli = c.step === "codex" ? await sup.run("codex", ["exec", "--sandbox", "read-only", "--output-last-message", agentPath, prompt], cwd, env, true)
       : await sup.run("claude", ["--print", "--model", agent === "claude-opus" ? "opus" : "sonnet", prompt], cwd, env, true);
     cliExitCode = cli.exitCode;
+    // Startup/auth failures cannot be cured by npm tests. Keep the precise safe reason,
+    // stop this attempt and let the saved completion replay without launching the CLI again.
+    if (cli.exitCode !== 0) throw new RunnerFailure(cli.failureReason ?? "subscription_cli_failed");
     // Tests run in their own supervised groups: background descendants of `npm test` are covered by the fence/reap.
     for (const [command, args] of [["npm", ["run", "typecheck"]], ["npm", ["test"]]]) {
       if (lease.fenced || sup.failed) break;
@@ -293,7 +310,8 @@ async function main() {
     result = { exitCode: cli.exitCode, headSha: await git("rev-parse", "HEAD"), summary: String(report.summary).slice(0, 4000), tests,
       prNumber: Number.isSafeInteger(report.prNumber) ? report.prNumber : c.prNumber };
     if (c.step === "codex" && (result.headSha !== c.targetSha || await git("status", "--porcelain"))) result.exitCode = 1;
-  } catch { result = { exitCode: cliExitCode || 1, headSha: await git("rev-parse", "HEAD").catch(() => c.targetSha), summary: "Runner validation or execution failed; inspect the checkout and CLI configuration", tests }; }
+  } catch (e) { result = { exitCode: cliExitCode || 1, headSha: await git("rev-parse", "HEAD").catch(() => c.targetSha),
+    summary: e instanceof RunnerFailure ? `BLOCKED ${e.reason}; automatic CLI retry withheld` : "Runner validation or execution failed; inspect the checkout and CLI configuration", tests }; }
   // Keep the lease (and its fence) live until every group is settled, so a revocation during a reap is still honoured.
   await sup.settle();
   lease.stop();
@@ -329,3 +347,4 @@ async function main() {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(e => { console.error(e.message); process.exitCode = 1; });
 }
+

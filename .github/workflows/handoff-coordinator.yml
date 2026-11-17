@@ -63,6 +63,14 @@ jobs:
           # T5 lifecycle dry-run config: exact allowlist only. No hardcoded base SHA (Issue #141 F1): the PR base is
           # verified against the LIVE integration branch tip.
           HANDOFF_LIFECYCLE_ALLOWLIST: codex/issue-92-mobile-v2
+      # T6: PR-open planner can run before Codex finishes; watch for its trusted
+      # structured result on this exact SHA without any writes or manual mentions.
+      # Diagnostic only; live handoff remains disabled.
+      - name: Observe post-open Codex verdict (read-only, bounded)
+        if: github.event_name == 'pull_request' && github.event.action != 'closed'
+        run: node scripts/handoff/wait-for-review.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   apply:
     needs: plan
