@@ -1,7 +1,7 @@
 // Issue #73 — coordinator tests: trusted identity, exact SHA, stale/forged/duplicate events, crash resume, bounded retry.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decide, parseCodexState, isTrustedCodex, isTrustedPm, gptWriterHandled, findClaim, handoffKey, CODEX_BOT } from "./core.mjs";
+import { decide, parseCodexState, parseMarker, linkedIssueNumbers, agentOf, revisionIssue, claimBody, markerFor, isTrustedCodex, isTrustedPm, gptWriterHandled, findClaim, handoffKey, CODEX_BOT } from "./core.mjs";
 import { run } from "./execute.mjs";
 import { createClient } from "./github.mjs";
 import { prFromEvent } from "./main.mjs";
@@ -328,4 +328,32 @@ test("P2-2: client issue-side evidence = repo issue comments + issue bodies sinc
   assert.ok(seen.every((p) => p.includes("since=2026-11-15T05%3A00%3A00.000Z")));
   const flood = restFake([[/\/issues\/comments$/, (u) => pageOf(u, 1e6, (i) => ({ id: i }))]]);
   await assert.rejects(createClient({ token: "x", repo: REPO, fetchImpl: flood.f }).listIssueSideEvidence("2026-11-15T05:00:00Z"), /pagination bound/);
+});
+
+test("T6: linked-issue refs ignore hidden markers, dedupe, and need an explicit keyword", () => {
+  assert.deepEqual(linkedIssueNumbers({ body: "Refs #154\n<!-- orch-supersedes:v1 none -->\nrefs #154, Closes #9" }), [154, 9]);
+  assert.deepEqual(linkedIssueNumbers({ body: "<!-- Refs #5 -->\nsee #7 and issue 8" }), [], "hidden or keyword-less numbers never link");
+  assert.deepEqual(linkedIssueNumbers({ body: null }), []);
+});
+
+test("T6: agentOf needs exactly one known agent label", () => {
+  assert.equal(agentOf({ labels: ["agent:claude", "status:ready"] }), "claude");
+  assert.equal(agentOf({ labels: [{ name: "agent:claude" }, { name: "agent:codex" }] }), null, "two agents is ambiguous");
+  assert.equal(agentOf({ labels: [{ name: "agent:gpt" }] }), null, "unknown agent is rejected");
+  assert.equal(agentOf({}), null);
+});
+
+test("T6: written records round-trip through the parsers that dedupe them", () => {
+  const plan = decide({ pr: pull(), comments: [comment(BOT, stateBody(SHA, { unresolved: true }))], linkedIssue: issue71 });
+  assert.equal(plan.action, "revise");
+  const issue = revisionIssue(plan, pull(), REPO);
+  assert.deepEqual(issue.labels, ["agent:claude", "status:ready"]);
+  assert.equal(parseMarker(issue.body)?.key, plan.key, "issue body carries the dedupe marker");
+  assert.ok(issue.body.includes(`${pull().head.ref}@${SHA}`), "pins the exact base SHA");
+  const claimed = parseMarker(claimBody(plan, "claimed"));
+  assert.deepEqual(claimed, { key: plan.key, state: "claimed", issue: undefined });
+  assert.deepEqual(parseMarker(claimBody(plan, "done", 99)), { key: plan.key, state: "done", issue: 99 });
+  assert.equal(markerFor(plan.key), `<!-- handoff-coordinator:v1 ${plan.key} -->`);
+  const rr = decide({ pr: pull(), comments: [comment(BOT, stateBody(SHA))], linkedIssue: issue71 });
+  assert.match(claimBody(rr, "done"), /NOT approval, merge or deploy/);
 });
