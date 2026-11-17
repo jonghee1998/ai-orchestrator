@@ -69,6 +69,15 @@ export function latestCodexState(comments) {
   return best;
 }
 
+/**
+ * A trusted-bot comment that carries a `codex-review-state:v1` marker but does not parse to exactly one valid state
+ * (multiple markers, malformed JSON, bad SHA...). Such a receipt is AMBIGUOUS evidence for every SHA it mentions and
+ * must never silently disappear (Issue #166).
+ */
+export const isAmbiguousCodexReceipt = (c) => isTrustedCodex(c?.user) && /codex-review-state:v1/.test(c?.body ?? "") && !parseCodexState(c.body);
+/** All full SHAs a receipt body mentions (used to bind an ambiguous receipt to a head). */
+export const mentionedShas = (body) => [...new Set((body ?? "").match(/\b[a-f0-9]{40}\b/g) ?? [])];
+
 /** Select within the current HEAD before timestamps; conflicting receipts fail closed. */
 export function currentCodexState(comments, head) {
   const exact = comments.filter((c) => isTrustedCodex(c.user))
@@ -83,7 +92,7 @@ export function currentCodexState(comments, head) {
   const done = secs.filter((x) => x.status === "completed").map((x) => x.hasUnresolvedFindings);
   if (new Set(done).size > 1 || done.some((v) => typeof v !== "boolean") || (done.length > 0 && secs.some((x) => x.status === "invalid"))) return { conflict: true };
   // A trusted receipt that names this exact SHA but is malformed / carries multiple state markers is ambiguous.
-  const ambiguous = comments.some((c) => isTrustedCodex(c.user) && /codex-review-state:v1/.test(c.body ?? "") && (c.body ?? "").includes(head) && !parseCodexState(c.body));
+  const ambiguous = comments.some((c) => isAmbiguousCodexReceipt(c) && (c.body ?? "").includes(head));
   if (ambiguous) return { conflict: true };
   return { codex: latestCodexState(exact.map(({ c }) => c)) ?? latestCodexState(comments) };
 }

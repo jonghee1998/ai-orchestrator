@@ -2,7 +2,7 @@
 // Read-only and pure. Nothing here is "authenticated authority": identities are checked by login+id+type,
 // markers are structured, anything malformed/unknown is dropped (fail closed).
 import { DEPLOY_SOURCE } from "./lifecycle.mjs";
-import { isTrustedCodex, isTrustedPm, parseCodexState, pmReviseMarkers, linkedIssueNumbers } from "./core.mjs";
+import { isTrustedCodex, isTrustedPm, parseCodexState, pmReviseMarkers, linkedIssueNumbers, isAmbiguousCodexReceipt, mentionedShas } from "./core.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 /** Existing PM acceptance marker (src/lib/github/evidence.ts): gpt-pm-accept:v1 issue<N>:pr<P>:<sha>:target=<branch> */
@@ -14,7 +14,11 @@ export function normalizeCodexReviews(comments = []) {
   for (const c of comments) {
     if (!isTrustedCodex(c?.user)) continue;
     const s = parseCodexState(c.body);
-    if (!s) continue;
+    if (!s) {
+      // Issue #166: an ambiguous trusted receipt (multiple/malformed markers) is preserved, bound to every SHA it names.
+      if (isAmbiguousCodexReceipt(c)) out.push({ trusted: true, ambiguous: true, user: { login: c.user.login, id: c.user.id, type: c.user.type }, commit_sha: null, mentioned_shas: mentionedShas(c.body), commentId: c.id });
+      continue;
+    }
     out.push({ trusted: true, user: { login: c.user.login, id: c.user.id, type: c.user.type }, commit_sha: s.commitSha, status: s.status,
       has_unresolved_findings: s.hasUnresolvedFindings,
       security_status: s.security?.status ?? "not_run", security_unresolved: s.security?.hasUnresolvedFindings, commentId: c.id });

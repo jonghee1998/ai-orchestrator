@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 export const KEY_VERSION = "v1";
 export const STEPS = Object.freeze(["dispatch", "review", "revise", "accept", "complete", "blocked"]);
 export const MAX_ROUNDS = 3;
+/** Hard ceiling for an authorized root-specific override (root-corrections.resolveCorrectionLimit). */
+export const MAX_ROUNDS_CEILING = 5;
 export const DEPLOY_SOURCE = "vercel_commit_status";
 export const FORBIDDEN_TARGETS = new Set(["main", "master", "production", "prod", "release"]);
 const SHA_RE = /^[a-f0-9]{40}$/;
@@ -189,7 +191,10 @@ export function approvalGates({ ev, headCi, sha }) {
  * SELF-REPORT: T5 never treats any marker as authenticated authority.
  */
 export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevises = [], req, acceptIssues, integrationTarget }) {
-  const mine = reviews.filter((r) => r?.trusted === true); // adapter-set after login+id+type check
+  const trusted = reviews.filter((r) => r?.trusted === true); // adapter-set after login+id+type check
+  // Issue #166: an ambiguous trusted receipt naming this exact SHA is a raw conflict (never dropped, never clean).
+  const ambiguousExact = trusted.some((r) => r.ambiguous === true && Array.isArray(r.mentioned_shas) && r.mentioned_shas.includes(sha));
+  const mine = trusted.filter((r) => r.ambiguous !== true);
   const exact = mine.filter((r) => r.commit_sha === sha && r.status === "completed" && r.user?.login !== pr.user?.login);
   const verdicts = new Set(exact.map((r) => r.has_unresolved_findings));
   const codeConflict = verdicts.size > 1 || [...verdicts].some((v) => typeof v !== "boolean");
@@ -201,8 +206,8 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   const securityPass = !secConflict && secVerdicts.size === 1 && secVerdicts.has(false);
   const securityUnresolved = !secConflict && secVerdicts.has(true);
   const security = secConflict ? "conflict" : securityPass ? "pass" : securityUnresolved ? "findings" : "missing";
-  const conflict = codeConflict || secConflict;
-  const securityCapability = secConflict ? "conflict" : securityPass ? "completed" : securityUnresolved ? "completed" : securityStatusOf(exact);
+  const conflict = codeConflict || secConflict || ambiguousExact;
+  const securityCapability = secConflict || ambiguousExact ? "conflict" : securityPass ? "completed" : securityUnresolved ? "completed" : securityStatusOf(exact);
   const independent = !conflict && exact.length > 0 && verdicts.has(false) && securityPass;
   const unresolved = !conflict && (verdicts.has(true) || securityUnresolved);
   const issues = acceptIssues ?? [req]; // root request, plus the revision issue the PR actually closes
@@ -210,7 +215,7 @@ export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevise
   const staleAccept = pmAccepts.some((a) => a.sha !== sha);
   const pmConflict = accepts.length > 0 && pmRevises.some((m) => m.sha === sha && m.pr === pr.number);
   const pm = accepts.length > 0 ? { sha, count: accepts.length } : null;
-  return { independent, unresolved, security, securityCapability, codeVerdict: codeConflict ? "conflict" : verdicts.size === 0 ? "missing" : verdicts.has(true) ? "findings" : "pass", stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
+  return { independent, unresolved, security, securityCapability, codeVerdict: codeConflict || ambiguousExact ? "conflict" : verdicts.size === 0 ? "missing" : verdicts.has(true) ? "findings" : "pass", stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
 }
 
 /**
@@ -279,7 +284,9 @@ function planCore(i) {
   const { req, round, pr } = i;
   if (!Number.isInteger(req) || req < 1) return blocked("invalid_req");
   if (!Number.isInteger(round) || round < 1) return blocked("invalid_round");
-  if (round > MAX_ROUNDS) return blocked("round_cap_exceeded", { round, max: MAX_ROUNDS });
+  const maxRounds = i.maxRounds ?? MAX_ROUNDS;
+  if (!Number.isInteger(maxRounds) || maxRounds < MAX_ROUNDS || maxRounds > MAX_ROUNDS_CEILING) return blocked("invalid_round_limit", { max: maxRounds });
+  if (round > maxRounds) return blocked("round_cap_exceeded", { round, max: maxRounds });
   if (!pr) return noop("pr_unavailable");
   const bad = validateTarget(i);
   if (bad === "pr_closed_unmerged") return noop("pr_closed_unmerged");
@@ -304,7 +311,7 @@ function planOpenReview(i) {
   // deployment, and never approves/merges anything automatically.
   if (ev.independent && ev.pmAcceptance) { step = "accept"; why = gates.pendingDecision ? "awaiting_user_approval" : "pre_merge_gates_unmet"; }
 
-  if (step === "revise" && round >= MAX_ROUNDS) return blocked("round_cap_reached_before_revision", { round, max: MAX_ROUNDS });
+  if (step === "revise" && round >= (i.maxRounds ?? MAX_ROUNDS)) return blocked("round_cap_reached_before_revision", { round, max: i.maxRounds ?? MAX_ROUNDS });
   const key = orchKey({ req, pr: pr.number, step, round });
   const gate = claimGate({ key, records: i.records ?? [], lookup: i.lookup, writerLogin: i.writerLogin });
   if (gate) return gate;

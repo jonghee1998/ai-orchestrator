@@ -26,3 +26,12 @@ test("live status verdicts: blocked > approval-needed > newest history; pass is 
   assert.match(pass.verdictLabel, /자기보고/);
   assert.equal(latestVerdict(project([task("1", "active")])), "none");
 });
+test("live status: later non-verdict events do not erase the latest real review verdict", () => {
+  const h = [ev("2026-01-01", "검수 통과 보고"), ev("2026-01-02", "수정 요청"), ev("2026-01-03", "작업 시작 ACK"), ev("2026-01-04", "개발 완료 보고")];
+  assert.equal(latestVerdict(project([task("1", "active")], h)), "fail");
+  const h2 = [...h, ev("2026-01-05", "검수 통과 보고"), ev("2026-01-06", "런타임 시작")];
+  assert.equal(latestVerdict(project([task("1", "active")], h2)), "pass");
+  assert.equal(latestVerdict(project([task("1", "active")], [ev("2026-01-03", "작업 시작 ACK")])), "none");
+  assert.equal(latestVerdict(project([task("1", "blocked")], h)), "blocked");
+  assert.equal(latestVerdict(project([task("1", "review")], h)), "approval_needed");
+});

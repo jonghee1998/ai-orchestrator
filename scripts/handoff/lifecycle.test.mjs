@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { orchKey, parseOrchKey, planLifecycle, replay, recoverAmbiguousPost, eventPlan, recordMarker, validateTarget, reviewEvidence, parseConfig, applySimulated, keyState, MAX_ROUNDS } from "./lifecycle.mjs";
-import { resolveRootCorrections, correctionRound, correctionMarker } from "./root-corrections.mjs";
+import { resolveRootCorrections, correctionRound, correctionMarker, resolveCorrectionLimit } from "./root-corrections.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers } from "./lifecycle-evidence.mjs";
 import { CODEX_BOT } from "./core.mjs";
 import { createClient } from "./github.mjs";
@@ -219,8 +219,10 @@ const codexBody = (sha, unresolved) => `<!-- codex-pull-request-review-summary -
 test("adapter: real bot payload shape, forged/untrusted/malformed ignored", () => {
   const r = normalizeCodexReviews([{ id: 1, user: BOT, body: codexBody(SHA, false) }, { id: 2, user: OWNER, body: codexBody(SHA, false) }, { id: 3, user: { ...BOT, id: 5 }, body: codexBody(SHA, false) },
     { id: 4, user: BOT, body: "<!-- codex-review-state:v1 {nope} -->" }, { id: 5, user: BOT, body: codexBody("abc", false) }]);
-  assert.equal(r.length, 1);
+  // #166: trusted malformed receipts are preserved as ambiguous records (not dropped); forged/untrusted are ignored.
+  assert.equal(r.length, 3);
   assert.deepEqual([r[0].trusted, r[0].commit_sha, r[0].has_unresolved_findings], [true, SHA, false]);
+  assert.deepEqual(r.slice(1).map((x) => [x.ambiguous, x.commit_sha]), [[true, null], [true, null]]);
   const a = pmAcceptMarkers([{ id: 9, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` }, { id: 10, user: MAL, body: `<!-- gpt-pm-accept:v1 issue136:pr9:${SHA}:target=${T} -->` },
     { id: 11, user: OWNER, body: `<!-- gpt-pm-accept:v1 issue136:pr9:abc:target=${T} -->` }]);
   assert.deepEqual(a, [{ issue: 136, pr: 9, sha: SHA, target: T, commentId: 9 }]);
@@ -637,4 +639,59 @@ test("#164: old open PR with own n1 marker cannot revise after root cap 3 (actua
   const mk = (n, p) => ({ user: OWNER, body: correctionMarker({ root: 136, n, pr: p, sha: H(String(n)) }), id: 900 + n });
   const w = baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, comments: [{ id: 1, user: BOT, body: codexBody(SHA, true) }], commentsBy: { 136: [mk(1, 9), mk(2, 20), mk(3, 21)] } });
   assert.equal((await entry(w)).lifecycle.reason, "round_cap_reached_before_revision");
+});
+
+// ---- Issue #166 ------------------------------------------------------------------------------------------
+const stateJson = (sha, unresolved) => `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, has_unresolved_findings: unresolved, status: "completed" }, security_review: { commit_sha: sha, status: "completed", has_unresolved_findings: false } })} -->`;
+test("#166: ambiguous trusted exact-SHA receipts are preserved and conflict (never silently dropped)", () => {
+  const ev = (cs) => reviewEvidence({ pr: pr(), sha: SHA, reviews: normalizeCodexReviews(cs), req: 136, integrationTarget: T });
+  const clean = { id: 1, user: BOT, body: codexBody(SHA, false) };
+  const multi = { id: 2, user: BOT, body: `${stateJson(SHA, true)}\n${stateJson(SHA, false)}` };
+  const malformed = { id: 3, user: BOT, body: `<!-- codex-review-state:v1 {"code_review":{"commit_sha":"${SHA}", -->` };
+  assert.equal(ev([clean]).independent, true);
+  for (const cs of [[clean, multi], [multi, clean], [clean, malformed], [{ ...clean, updated_at: "2030" }, { ...multi, updated_at: "2020" }]]) {
+    const e = ev(cs);
+    assert.equal(e.conflict, true); assert.equal(e.independent, false);
+  }
+  assert.equal(normalizeCodexReviews([multi]).length, 1);
+  // untrusted / stale-SHA ambiguity does not poison the clean current receipt
+  assert.equal(ev([clean, { ...multi, user: OWNER }]).independent, true);
+  assert.equal(ev([clean, { id: 4, user: BOT, body: `${stateJson(OLD, true)}\n${stateJson(OLD, false)}` }]).independent, true);
+  assert.equal(planLifecycle(base({ reviews: normalizeCodexReviews([clean, multi]) })).reason, "conflicting_review_evidence");
+});
+
+test("#166: root-specific correction limit override is trusted, bounded, fail closed", () => {
+  const lim = (n, root = 146, user = OWNER) => ({ user, body: `<!-- orch-root-correction-limit:v1 root${root} max=${n} -->` });
+  assert.equal(resolveCorrectionLimit([], 146).max, 3);
+  assert.equal(resolveCorrectionLimit([lim(5)], 146).max, 5);
+  assert.equal(resolveCorrectionLimit([lim(5)], 99).error, "correction_limit_other_root");
+  assert.equal(resolveCorrectionLimit([lim(5, 146, MAL)], 146).max, 3, "untrusted ignored => default");
+  assert.equal(resolveCorrectionLimit([lim(6)], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([lim(2)], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([lim(4), lim(5)], 146).error, "correction_limit_conflict");
+  assert.equal(resolveCorrectionLimit([{ user: OWNER, body: "<!-- orch-root-correction-limit:v1 root146 max=x -->" }], 146).error, "correction_limit_marker_malformed");
+  // counts: 4 allowed only with override; 3 preserved; fifth ok, sixth never
+  const four = [cm(1, 153), cm(2, 160), cm(3, 165), cm(4, 170)];
+  assert.equal(resolveRootCorrections(four, 146).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections(four, 146, 5).count, 4);
+  const r5 = resolveRootCorrections([...four, cm(5, 175)], 146, 5);
+  assert.equal(correctionRound({ resolved: r5, prNumber: 180, chainDepth: 1, floor: 1, limit: 5 }).round, 6, "sixth never");
+  assert.equal(correctionRound({ resolved: resolveRootCorrections(four.slice(0, 3), 146, 5), prNumber: 180, chainDepth: 1, floor: 1, limit: 5 }).round, 4);
+  // planner: default 3 retained; max 5 permits round 4/5, blocks 6 and revise at 5
+  assert.equal(planLifecycle(base({ round: 4 })).reason, "round_cap_exceeded");
+  assert.equal(planLifecycle(base({ round: 4, maxRounds: 5 })).reason, undefined);
+  assert.equal(planLifecycle(base({ round: 6, maxRounds: 5 })).reason, "round_cap_exceeded");
+  assert.equal(planLifecycle(base({ round: 5, maxRounds: 5, reviews: [review({ has_unresolved_findings: true })] })).reason, "round_cap_reached_before_revision");
+  assert.equal(planLifecycle(base({ maxRounds: 9 })).reason, "invalid_round_limit");
+});
+
+test("#166: entrypoint honors PM limit marker on the root only (round 4 allowed with max=5, blocked without)", async () => {
+  const issues = { 138: rootIssue(138, 136), 136: rootIssue(136) };
+  const mk = (n, p) => ({ user: OWNER, body: correctionMarker({ root: 136, n, pr: p, sha: H(String(n)) }), id: 900 + n });
+  const limit = { user: OWNER, id: 990, body: "<!-- orch-root-correction-limit:v1 root136 max=5 -->" };
+  const mkw = (extra) => baseWorld({ pr: pr({ body: "Closes #138", created_at: "x" }), issues, comments: [{ id: 1, user: BOT, body: codexBody(SHA, true) }], commentsBy: { 136: [mk(1, 7), mk(2, 8), mk(3, 9), ...extra] } });
+  assert.equal((await entry(mkw([]))).lifecycle.reason, "round_cap_reached_before_revision");
+  const ok = (await entry(mkw([limit]))).lifecycle;
+  assert.equal(ok.step, "revise"); assert.equal(ok.key, "orch:v1:req136:pr9:revise:r3");
+  assert.equal((await entry(mkw([{ ...limit, body: limit.body.replace("max=5", "max=7") }]))).lifecycle.reason, "correction_limit_out_of_range");
 });

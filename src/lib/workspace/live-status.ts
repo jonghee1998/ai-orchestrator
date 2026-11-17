@@ -20,11 +20,11 @@ const isCurrent = (t: ModelTask) => t.phase === "active" || t.phase === "review"
 export function latestVerdict(p: Pick<ModelProject, "tasks" | "history">): Verdict {
   if (p.tasks.some(t => t.phase === "blocked")) return "blocked";
   if (p.tasks.some(t => t.phase === "review")) return "approval_needed";
-  const newest = [...p.history].sort((a, b) => b.at.localeCompare(a.at))[0];
-  if (!newest) return "none";
-  if (newest.change.includes("수정 요청")) return "fail";
-  if (newest.change.includes("검수 통과")) return "pass";
-  return "none";
+  // Filter to verdict-bearing events BEFORE picking the latest: a newer ACK / dev-complete / runtime start-finish
+  // event must not erase an earlier confirmed FAIL/PASS.
+  const kind = (c: string): Verdict | null => c.includes("수정 요청") ? "fail" : c.includes("검수 통과") ? "pass" : null;
+  const newest = [...p.history].filter(h => kind(h.change)).sort((a, b) => b.at.localeCompare(a.at))[0];
+  return newest ? kind(newest.change)! : "none";
 }
 
 export function liveStatus(p: ModelProject): LiveStatus {

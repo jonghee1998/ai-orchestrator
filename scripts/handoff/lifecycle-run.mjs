@@ -2,7 +2,7 @@
 // plans, and returns the plan. Never writes, never enables live mode.
 import { linkedIssueNumbers } from "./core.mjs";
 import { planLifecycle, parseConfig, allRecords, MAX_ROUNDS } from "./lifecycle.mjs";
-import { resolveRootCorrections, correctionRound } from "./root-corrections.mjs";
+import { resolveRootCorrections, correctionRound, resolveCorrectionLimit } from "./root-corrections.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers, pmRevises, ciFromCheckRuns, deploymentFromCommitStatus, ancestryFrom, tipFrom, reqFromPr, rootMarker, supersedesMarker } from "./lifecycle-evidence.mjs";
 
 const READ_ONLY = ["getPull", "getIssue", "listIssueComments", "getCommit", "getBranch", "compare", "listCheckRuns", "getCombinedStatus"];
@@ -36,7 +36,7 @@ export async function resolveRoot(gh, linked) {
  * must resolve to the SAME root. Bounded to MAX_ROUNDS + 2 PRs (original + MAX_ROUNDS revisions + one over-cap probe).
  * @returns {{chain:object[], error?:string, detail?:object}} chain[0] = pr, last = original PR.
  */
-export async function resolveChain(gh, pr, root) {
+export async function resolveChain(gh, pr, root, maxRounds = MAX_ROUNDS) {
   const chain = [pr];
   const seen = new Set([pr.number]);
   for (let cur = pr; ; ) {
@@ -45,7 +45,7 @@ export async function resolveChain(gh, pr, root) {
     if (m === "ambiguous") return { chain, error: "supersedes_ambiguous", detail: { pr: cur.number } };
     if (m === "none") break;
     if (seen.has(m)) return { chain, error: "supersedes_cycle", detail: { pr: m } };
-    if (chain.length >= MAX_ROUNDS + 2) return { chain, error: "round_cap_exceeded", detail: { max: MAX_ROUNDS } };
+    if (chain.length >= maxRounds + 2) return { chain, error: "round_cap_exceeded", detail: { max: maxRounds } };
     const next = await gh.getPull(m);
     if (!next || next.number !== m) return { chain, error: "superseded_unavailable", detail: { pr: m } };
     seen.add(m); chain.push(next); cur = next;
@@ -67,9 +67,9 @@ const mergeById = (...lists) => { const seen = new Set(); return lists.flat().fi
  * (depth 4) is `round_cap_exceeded`. The round is the MAX of the chain-derived depth and the durable bot records
  * (closed-out `revise` rounds + 1), so neither source alone can lower it, and a remediation never resets the count.
  */
-export const roundFor = (comments, req, chainDepth = 0) => {
+export const roundFor = (comments, req, chainDepth = 0, maxRounds = MAX_ROUNDS) => {
   const done = new Set(allRecords(comments).filter((r) => r.parsed.req === req && r.parsed.step === "revise" && r.state === "done").map((r) => r.parsed.round));
-  return Math.min(Math.max(chainDepth, done.size + 1, 1), MAX_ROUNDS + 1);
+  return Math.min(Math.max(chainDepth, done.size + 1, 1), maxRounds + 1);
 };
 
 /** @returns the dry-run plan (always mode:"dry-run", live:false). Any load/shape failure fails closed as `blocked`. */
@@ -87,7 +87,13 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     if (rootRes.error) return fail(rootRes.error, { linked, ...rootRes.detail });
     const req = rootRes.root;
     // Issue #144: explicit verified chain (supersedes marker or explicit `none`, same root all the way down).
-    const ch = await resolveChain(gh, pr, req);
+    // Issue #166: root-specific correction limit (default 3, trusted PM marker may raise to <=5) from root issue + root comments.
+    const rootIssue = await gh.getIssue(req);
+    const rootComments = await gh.listIssueComments(req);
+    const lim = resolveCorrectionLimit([rootIssue, ...rootComments], req);
+    if (lim.error) return fail(lim.error, lim.detail);
+    const maxRounds = lim.max;
+    const ch = await resolveChain(gh, pr, req, maxRounds);
     if (ch.error) return fail(ch.error, ch.detail);
     const depth = ch.chain.length - 1; // revision PRs in the chain
     const superseded = ch.chain[1];
@@ -99,18 +105,16 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     const ancestry = chainLinks[0]?.ancestry;
     // Durable records: root issue + EVERY PR of the verified chain (bounded), merged by comment id.
     const prComments = await gh.listIssueComments(prNumber);
-    const rootComments = req === prNumber ? [] : await gh.listIssueComments(req);
     const oldComments = (await Promise.all(ch.chain.slice(1).map((p) => gh.listIssueComments(p.number)))).flat();
     const comments = mergeById(rootComments, oldComments, prComments);
     const reviews = normalizeCodexReviews(comments);
     // Expected head: explicit (event/dispatch) else the exact SHA of the trusted Codex verdict being acted on.
-    const head = expectedHead ?? reviews.at(-1)?.commit_sha;
+    const head = expectedHead ?? reviews.filter((r) => !r.ambiguous).at(-1)?.commit_sha;
     // Issue #161: durable ROOT-level correction counter (spans separate chains of the same root; never lowered).
-    const rootIssue = await gh.getIssue(req);
-    const rc = correctionRound({ resolved: resolveRootCorrections([rootIssue, ...comments], req), prNumber, chainDepth: depth, floor: roundFor(comments, req, depth) });
+    const rc = correctionRound({ resolved: resolveRootCorrections([rootIssue, ...comments], req, maxRounds), prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
     if (rc.error) return fail(rc.error, rc.detail);
     const input = {
-      req, round: rc.round, config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,
+      req, round: rc.round, maxRounds, config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,
       acceptIssues: [...new Set([req, linked])],
       pmAccepts: pmAcceptMarkers(comments), pmRevises: pmRevises(comments), records: comments,
     };
