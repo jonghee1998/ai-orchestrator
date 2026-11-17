@@ -5,6 +5,7 @@ import { decide, parseCodexState, isTrustedCodex, isTrustedPm, gptWriterHandled,
 import { run } from "./execute.mjs";
 import { createClient } from "./github.mjs";
 import { prFromEvent } from "./main.mjs";
+import { observeReview } from "./wait-for-review.mjs";
 
 const SHA = "c8498c227d6d84e786abc7b648715035552c5140";
 const OLD = "49d22ed7872506d45b76fd42566d5c49a3ef9148";
@@ -365,5 +366,30 @@ test("T6 post-review edited comment on stale SHA never gets PASS", async () => {
   const gh = fakeGitHub({ comments: [comment(BOT, stateBody(OLD))] });
   const r = await run(gh, 72, { apply: false, repo: REPO });
   assert.equal(r.reason, "stale_codex_state");
+  assert.deepEqual(gh.db.writes, []);
+});
+
+test("T6 bounded observer notices Codex completed marker AFTER PR-open and emits dry-run PASS", async () => {
+  const gh = fakeGitHub();
+  const logs = [];
+  let sleeps = 0;
+  const observed = await observeReview(gh, 72, { attempts: 3, intervalMs: 0, sleep: async () => { sleeps++; gh.db.comments.push(comment(BOT, stateBody(SHA))); }, out: (line) => logs.push(JSON.parse(line)) });
+  assert.equal(sleeps, 1);
+  assert.equal(observed.result, "observed_structured");
+  assert.equal(observed.verdict.result, "dry_run");
+  assert.equal(observed.verdict.wouldDo, "release_ready");
+  assert.deepEqual(gh.db.writes, []);
+  assert.ok(logs.some((v) => v.step === "review_wait" && v.state === "structured"));
+});
+test("T6 bounded observer with prose-only Codex report never grants PASS", async () => {
+  const gh = fakeGitHub({ comments: [comment(BOT, "## Review Result\\n" + SHA)] });
+  const observed = await observeReview(gh, 72, { attempts: 2, intervalMs: 0, sleep: async () => {}, out: () => {} });
+  assert.equal(observed.result, "unverified");
+  assert.deepEqual(gh.db.writes, []);
+});
+test("T6 bounded observer stops if head changes while awaiting review", async () => {
+  const gh = fakeGitHub();
+  const observed = await observeReview(gh, 72, { attempts: 3, intervalMs: 0, sleep: async () => { gh.db.pr.head.sha = OLD; }, out: () => {} });
+  assert.equal(observed.reason, "head_moved_or_pr_closed");
   assert.deepEqual(gh.db.writes, []);
 });
