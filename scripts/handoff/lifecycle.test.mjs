@@ -622,7 +622,7 @@ test("#161: contradictory / unknown correction records fail closed", () => {
   assert.equal(resolveRootCorrections([cm(1, 153), cm(2, 153)], 146).error, "root_correction_conflict");
   assert.equal(resolveRootCorrections([cm(2, 160)], 146).error, "root_correction_gap");
   assert.equal(resolveRootCorrections([cm(1, 153, undefined, 99)], 146).error, "root_correction_marker_other_root");
-  assert.equal(resolveRootCorrections([cm(4, 153)], 146).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections([cm(6, 153)], 146).error, "root_correction_n_out_of_range");
   assert.equal(resolveRootCorrections([{ user: OWNER, body: "<!-- orch-root-correction:v1 root146 n=x -->" }], 146).error, "root_correction_marker_malformed");
 });
 test("#161: entrypoint uses the root counter (PR160-like case logs r2, not r1)", async () => {
@@ -672,7 +672,9 @@ test("#166: root-specific correction limit override is trusted, bounded, fail cl
   assert.equal(resolveCorrectionLimit([{ user: OWNER, body: "<!-- orch-root-correction-limit:v1 root146 max=x -->" }], 146).error, "correction_limit_marker_malformed");
   // counts: 4 allowed only with override; 3 preserved; fifth ok, sixth never
   const four = [cm(1, 153), cm(2, 160), cm(3, 165), cm(4, 170)];
-  assert.equal(resolveRootCorrections(four, 146).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections(four, 146).count, 4, "over-limit history retained as lower bound (#168)");
+  assert.equal(correctionRound({ resolved: resolveRootCorrections(four, 146), prNumber: 180, chainDepth: 1, floor: 1, limit: 3 }).round, 4, "default 3 + 4 consumed => over cap (blocked)");
+  assert.equal(resolveRootCorrections([cm(6, 1)], 146, 5).error, "root_correction_n_out_of_range");
   assert.equal(resolveRootCorrections(four, 146, 5).count, 4);
   const r5 = resolveRootCorrections([...four, cm(5, 175)], 146, 5);
   assert.equal(correctionRound({ resolved: r5, prNumber: 180, chainDepth: 1, floor: 1, limit: 5 }).round, 6, "sixth never");
@@ -694,4 +696,26 @@ test("#166: entrypoint honors PM limit marker on the root only (round 4 allowed 
   const ok = (await entry(mkw([limit]))).lifecycle;
   assert.equal(ok.step, "revise"); assert.equal(ok.key, "orch:v1:req136:pr9:revise:r3");
   assert.equal((await entry(mkw([{ ...limit, body: limit.body.replace("max=5", "max=7") }]))).lifecycle.reason, "correction_limit_out_of_range");
+});
+
+test("#168: over-limit legacy/structured correction history is never erased", () => {
+  const legacy = (round) => ({ user: OWNER, kind: "issue", body: `<!-- gpt-pm-followup:pr167:${"a".repeat(40)}:claude:revise:${round} -->` });
+  const lo = resolveRootCorrections([legacy(4)], 146); // default limit 3
+  assert.equal(lo.count, 4);
+  assert.equal(correctionRound({ resolved: lo, prNumber: 200, chainDepth: 1, floor: 1, limit: 3 }).round, 4, "legacy 4 + default 3 => blocked, not round 1");
+  assert.equal(planLifecycle(base({ round: 4 })).reason, "round_cap_exceeded");
+  assert.equal(resolveRootCorrections([legacy(6)], 146, 5).error, "root_correction_legacy_out_of_range");
+  assert.equal(resolveRootCorrections([{ ...legacy(4), user: MAL }], 146).count, 0, "untrusted legacy ignored");
+  // authorized 5 then lowered to 3 with consumed 4/5 => stays blocked, not reset
+  const five = [cm(1, 153), cm(2, 160), cm(3, 165), cm(4, 170)];
+  const lowered = resolveRootCorrections(five, 146, 3);
+  assert.equal(lowered.count, 4);
+  assert.equal(correctionRound({ resolved: lowered, prNumber: 171, chainDepth: 0, floor: 1, limit: 3 }).round, 4);
+  // an old PR carrying its own lower marker cannot lower the root count
+  assert.equal(correctionRound({ resolved: lowered, prNumber: 153, chainDepth: 1, floor: 1, limit: 3 }).round, 4);
+  // normal current root: n4 allowed (limit 5), final 5 preserved
+  assert.equal(correctionRound({ resolved: resolveRootCorrections(five, 146, 5), prNumber: 180, chainDepth: 1, floor: 1, limit: 5 }).round, 5);
+  // malformed / other-root / future out-of-range stay fail closed
+  assert.equal(resolveRootCorrections([{ user: OWNER, body: "<!-- orch-root-correction:v1 root146 n=x -->" }], 146).error, "root_correction_marker_malformed");
+  assert.equal(resolveRootCorrections([cm(1, 1, H("1"), 99)], 146).error, "root_correction_marker_other_root");
 });

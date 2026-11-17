@@ -47,7 +47,7 @@ export const correctionMarker = ({ root, n, pr, sha }) => `<!-- orch-root-correc
  *    under two different n, or gaps in 1..max => error (fail closed, never silently lowered);
  *  - legacy trusted PM `revise:<round>` markers (core.pmReviseMarkers) are a conservative LOWER BOUND only.
  */
-export function resolveRootCorrections(items = [], root, limit = MAX_CORRECTIONS) {
+export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTIONS) {
   const recs = [];
   for (const it of items) {
     if (!isTrustedPm(it?.user)) continue;
@@ -56,7 +56,8 @@ export function resolveRootCorrections(items = [], root, limit = MAX_CORRECTIONS
       if (!m) return { error: "root_correction_marker_malformed", detail: { marker: raw.slice(0, 120) } };
       const r = { root: Number(m[1]), n: Number(m[2]), pr: Number(m[3]), sha: m[4] };
       if (r.root !== root) return { error: "root_correction_marker_other_root", detail: { expected: root, found: r.root } };
-      if (r.n < 1 || r.n > limit) return { error: "root_correction_n_out_of_range", detail: { n: r.n } };
+      // Bounded by the hard CEILING, NOT the current (possibly lowered) limit: past usage is never discarded.
+      if (r.n < 1 || r.n > CORRECTION_CEILING) return { error: "root_correction_n_out_of_range", detail: { n: r.n } };
       recs.push(r);
     }
   }
@@ -71,7 +72,11 @@ export function resolveRootCorrections(items = [], root, limit = MAX_CORRECTIONS
   }
   const max = Math.max(0, ...byN.keys());
   for (let k = 1; k <= max; k++) if (!byN.has(k)) return { error: "root_correction_gap", detail: { missing: k, max } };
-  const legacy = Math.max(0, ...items.flatMap((it) => pmReviseMarkers(it)).filter((m) => m.sha && SHA.test(m.sha) && m.round >= 1 && m.round <= limit).map((m) => m.round));
+  // Legacy trusted-PM revise rounds are a lower bound regardless of the current limit (default 3 must still see revise:4).
+  // A round beyond the hard ceiling is not a valid history => fail closed rather than silently dropping it.
+  const legacyRounds = items.flatMap((it) => pmReviseMarkers(it)).filter((m) => m.sha && SHA.test(m.sha) && m.round >= 1).map((m) => m.round);
+  if (legacyRounds.some((r) => r > CORRECTION_CEILING)) return { error: "root_correction_legacy_out_of_range", detail: { max: Math.max(...legacyRounds) } };
+  const legacy = Math.max(0, ...legacyRounds);
   return { count: Math.max(max, legacy), records: [...byN.values()].sort((a, b) => a.n - b.n) };
 }
 
