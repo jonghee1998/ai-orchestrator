@@ -2,7 +2,7 @@
 // T6 read-only, bounded post-PR-open observation. Never creates comments/issues.
 import { readFileSync } from "node:fs";
 import { createClient } from "./github.mjs";
-import { latestCodexState, codexReportObservation } from "./core.mjs";
+import { currentCodexState, codexReportObservation } from "./core.mjs";
 import { run } from "./execute.mjs";
 
 export async function observeReview(gh, number, { attempts = 9, intervalMs = 15000, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), out = console.log } = {}) {
@@ -14,9 +14,11 @@ export async function observeReview(gh, number, { attempts = 9, intervalMs = 150
     const pr = await gh.getPull(number);
     if (pr.state !== "open" || pr.head?.sha !== sha) return { result: "skip", reason: "head_moved_or_pr_closed", sha };
     const comments = await gh.listIssueComments(number);
-    const marker = latestCodexState(comments);
+    const selected = currentCodexState(comments, sha);
+    const marker = selected.codex;
     const observation = codexReportObservation(pr, comments);
     out(JSON.stringify({ step: "review_wait", pr: number, attempt: i, ...observation }));
+    if (selected.conflict) return { result: "unverified", reason: "conflicting_codex_state", sha, writes: [] };
     if (marker?.commitSha === sha && marker.status === "completed") {
       // The coordinator itself re-reads live GitHub state; no persisted verdict is inferred.
       const verdict = await run(gh, number, { apply: false, repo: process.env.GITHUB_REPOSITORY || "jonghee1998/ai-orchestrator", log: (v) => out(JSON.stringify(v)) });
@@ -40,3 +42,4 @@ async function main() {
   await observeReview(gh, pr.number);
 }
 if (import.meta.url === `file://${process.argv[1]}`) main().catch((e) => { console.error(e); process.exitCode = 1; });
+

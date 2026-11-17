@@ -20,6 +20,8 @@ export function isTrustedCodex(user) {
 const STATE_RE = /<!--\s*codex-review-state:v1\s+(\{[\s\S]*?\})\s*-->/;
 /** Parse the connector's structured state. Returns null on any shape deviation (fail closed). */
 export function parseCodexState(body) {
+  // Multiple states in one receipt are ambiguous; never silently use the first.
+  if ((body?.match(/<!--\s*codex-review-state:v1\s/g) ?? []).length !== 1) return null;
   const m = STATE_RE.exec(body ?? "");
   if (!m) return null;
   let j;
@@ -45,6 +47,17 @@ export function latestCodexState(comments) {
     if (!best || at > best.at) best = { ...s, at, commentId: c.id, url: c.html_url };
   }
   return best;
+}
+
+/** Select within the current HEAD before timestamps; conflicting receipts fail closed. */
+export function currentCodexState(comments, head) {
+  const exact = comments.filter((c) => isTrustedCodex(c.user))
+    .map((c) => ({ c, state: parseCodexState(c.body) }))
+    .filter(({ state }) => state?.commitSha === head);
+  const completed = exact.filter(({ state }) => state.status === "completed");
+  if (new Set(completed.map(({ state }) => state.hasUnresolvedFindings)).size > 1)
+    return { conflict: true };
+  return { codex: latestCodexState(exact.map(({ c }) => c)) ?? latestCodexState(comments) };
 }
 
 const KEYWORD_REF = /\b(?:refs?|close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*#(\d+)/gi;
@@ -123,7 +136,9 @@ export function gptWriterHandled(items, prNumber, sha) {
 export function decide({ pr, comments, linkedIssue, pmEvidence = [] }) {
   if (!pr || pr.state !== "open") return { action: "noop", reason: "pr_not_open" };
   const head = pr.head?.sha;
-  const codex = latestCodexState(comments);
+  const selected = currentCodexState(comments, head);
+  if (selected.conflict) return { action: "noop", reason: "conflicting_codex_state" };
+  const codex = selected.codex;
   if (!codex) return { action: "noop", reason: "no_trusted_codex_state" };
   if (codex.status !== "completed") return { action: "noop", reason: "codex_not_completed", detail: { status: codex.status } };
   if (codex.commitSha !== head) return { action: "noop", reason: "stale_codex_state", detail: { reviewed: codex.commitSha, head } };
@@ -174,7 +189,9 @@ export function claimBody(plan, state, issue) {
 export function codexReportObservation(pr, comments = []) {
   const head = pr?.head?.sha;
   if (typeof head !== "string" || !/^[a-f0-9]{40}$/.test(head)) return { state: "unknown", reason: "invalid_head" };
-  const structured = latestCodexState(comments);
+  const selected = currentCodexState(comments, head);
+  if (selected.conflict) return { state: "unknown", reason: "conflicting_codex_state", head };
+  const structured = selected.codex;
   if (structured) return structured.commitSha === head
     ? { state: "structured", reason: "structured_state_present", head, status: structured.status }
     : { state: "unknown", reason: "structured_state_stale", head, reviewed: structured.commitSha };
@@ -185,3 +202,4 @@ export function codexReportObservation(pr, comments = []) {
     ? { state: "observed", reason: "unstructured_bot_report_no_verdict", head, count: current.length }
     : { state: "unknown", reason: "report_not_bound_to_current_head", head };
 }
+

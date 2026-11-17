@@ -34,8 +34,12 @@ export async function run(gh, prNumber, opts) {
   if (!opts.apply) return { result: "dry_run", key: plan.key, wouldDo: plan.action, resumeClaim: claim?.commentId ?? null };
 
   const assertHead = async () => {
-    const live = await gh.getPull(prNumber);
+    const liveState = await loadState(gh, prNumber);
+    const live = liveState.pr;
     if (live.state !== "open" || live.head.sha !== plan.sha) throw new StaleError(plan.sha, live.head.sha);
+    const fresh = decide(liveState);
+    if (fresh.action !== plan.action || fresh.key !== plan.key || fresh.agent !== plan.agent || fresh.linkedIssue !== plan.linkedIssue)
+      throw new EvidenceChangedError(fresh);
   };
 
   try {
@@ -62,8 +66,13 @@ export async function run(gh, prNumber, opts) {
     return { result: "created_revision_issue", key: plan.key, issue: issueNumber, claim: claimId };
   } catch (e) {
     if (e instanceof StaleError) return { result: "noop", reason: "head_moved_before_write", detail: e.detail };
+    if (e instanceof EvidenceChangedError) return { result: "noop", reason: "evidence_changed_before_write", detail: e.detail };
     throw e;
   }
+}
+
+class EvidenceChangedError extends Error {
+  constructor(plan) { super("review or routing evidence changed before write"); this.detail = { action: plan.action, reason: plan.reason }; }
 }
 
 export class StaleError extends Error {
@@ -73,3 +82,4 @@ export class StaleError extends Error {
 function summarize(p) {
   return p.action === "noop" ? p : { action: p.action, key: p.key, agent: p.agent, linkedIssue: p.linkedIssue, codexComment: p.codex?.commentId };
 }
+

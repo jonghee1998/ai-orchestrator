@@ -393,3 +393,53 @@ test("T6 bounded observer stops if head changes while awaiting review", async ()
   assert.equal(observed.reason, "head_moved_or_pr_closed");
   assert.deepEqual(gh.db.writes, []);
 });
+
+test("T6 current HEAD is selected before timestamp of a stale receipt", () => {
+  const exact = comment(BOT, stateBody(SHA), "2026-11-15T06:00:00Z");
+  const stale = comment(BOT, stateBody(OLD), "2026-11-15T07:00:00Z");
+  for (const comments of [[exact, stale], [stale, exact]]) {
+    assert.equal(decide({ pr: pull(), comments }).action, "release_ready");
+    assert.equal(codexReportObservation(pull(), comments).state, "structured");
+  }
+});
+
+test("T6 contradictory completed receipts never select a convenient PASS", async () => {
+  const fail = comment(BOT, stateBody(SHA, { unresolved: true }), "2026-11-15T06:00:00Z");
+  const pass = comment(BOT, stateBody(SHA), "2026-11-15T07:00:00Z");
+  for (const comments of [[fail, pass], [pass, fail]]) {
+    const gh = fakeGitHub({ comments });
+    assert.equal((await run(gh, 72, { apply: true, repo: REPO })).reason, "conflicting_codex_state");
+    assert.equal(codexReportObservation(pull(), comments).reason, "conflicting_codex_state");
+    assert.equal((await observeReview(gh, 72, { out: () => {} })).reason, "conflicting_codex_state");
+    assert.deepEqual(gh.db.writes, []);
+  }
+});
+
+test("T6 multiple markers in one receipt are rejected", () => {
+  assert.equal(parseCodexState(stateBody(SHA) + stateBody(SHA, { unresolved: true })), null);
+});
+
+test("T6 review removed or changed after planning prevents release record", async () => {
+  for (const replacement of [[], [comment(BOT, stateBody(SHA, { unresolved: true }))]]) {
+    const gh = fakeGitHub({ comments: [comment(BOT, stateBody(SHA))] });
+    const read = gh.listIssueComments;
+    let reads = 0;
+    gh.listIssueComments = async () => ++reads === 1 ? read() : structuredClone(replacement);
+    assert.equal((await run(gh, 72, { apply: true, repo: REPO })).reason, "evidence_changed_before_write");
+    assert.deepEqual(gh.db.writes, []);
+  }
+});
+
+test("T6 PM handles revision after planning: no competing issue created", async () => {
+  const gh = fakeGitHub({ comments: [comment(BOT, stateBody(SHA, { unresolved: true }))] });
+  const read = gh.listIssueComments;
+  let reads = 0;
+  gh.listIssueComments = async () => {
+    const comments = await read();
+    if (++reads > 1) comments.push(comment(OWNER, `<!-- gpt-pm-followup:pr72:${SHA}:codex:revise:1 -->`));
+    return comments;
+  };
+  assert.equal((await run(gh, 72, { apply: true, repo: REPO })).reason, "evidence_changed_before_write");
+  assert.deepEqual(gh.db.writes, []);
+});
+
