@@ -131,3 +131,89 @@ Files:
    protects the transition.
 4. **Rollback.** Unset `HANDOFF_COORDINATOR_MODE`, which immediately returns the coordinator to
    dry-run, and turn the GPT writer back on.
+
+## T5 lifecycle planner (Issue #136) — dry-run only
+
+`scripts/handoff/lifecycle.mjs` is a pure planner (no GitHub client, no writes; every plan carries
+`mode: "dry-run"`, `live: false`). It does not dispatch, merge, label or enable live mode.
+
+- Idempotency key `orch:v1:req<N>:pr<P>:<step>:r<n>`; `replay()` shows 3 evaluations collapse to one plan digest.
+- Single mechanical writer: only records from `github-actions[bot]` count as claim/issue/done.
+- Ambiguous POST: `recoverAmbiguousPost` adopts exactly one match from a complete scan; incomplete, duplicate
+  or zero matches fail closed (no auto retry).
+- Live head/base must equal expected SHAs; base must be the integration target (`main` etc. rejected);
+  replacement PRs must target the integration branch directly (no stacks) with proven ancestry.
+- Independent review = trusted reviewer, not the PR author, exact SHA, completed, no unresolved findings.
+- PM acceptance marker `<!-- pm-accept:<key> sha=<sha> -->` bound to exact SHA. Posted from the owner account
+  it is a **self-report**, never authenticated authority; completion stays `withheld` (T6 adds the real gate).
+- Completion also requires green integration CI and a successful `dev` deployment on the exact SHA.
+- Round cap `MAX_ROUNDS = 3`; completion/blocked events dedupe by key.
+
+### T5 revision (Issue #138) — wired dry-run, merged-evidence model
+
+- **Wired:** `main.mjs` `handle()` (the real coordinator entrypoint / workflow `plan` job) now runs
+  `lifecycle-run.mjs` after the existing dry-run, through a read-only facade (GET only; never in `--apply`).
+  Evidence is normalized by `lifecycle-evidence.mjs` from real payloads: the Codex bot `codex-review-state:v1`
+  summary comment, the existing PM `gpt-pm-accept:v1 issue<N>:pr<P>:<sha>:target=<branch>` / revise markers,
+  check runs, deployments, commit parents and compare results.
+- **Config (fail closed):** `HANDOFF_LIFECYCLE_ALLOWLIST` (exact branch names, no globs, no main/prod) and
+  `HANDOFF_LIFECYCLE_EXPECTED_BASE` (40-hex). Missing/malformed => `blocked`.
+- **Two phases:** `open_review` (exact PR head; review/revise/accept, never completes) vs `merged` (exact merge SHA:
+  on integration tip, head ancestry for merge commits, CI + `dev` deployment bound to the merge SHA). All evidence
+  present => `evidenceEligible: true` but `completion: "withheld"` (T6 authority; markers stay self-reported).
+  Squash/rebase merges cannot prove head ancestry and stay withheld.
+- **Durable records:** `claimed -> issue(ref) -> done(ref)` from writer records; claimed = `in_flight` (no second
+  planned dispatch), issue = adopt existing, conflicting/ref-less records = `record_conflict`. Complete events dedupe
+  per request across rounds and PRs; blocked per request+round across PRs.
+- **Replacement:** superseded PR may stay open/closed-unmerged (merged is a distinct block); compare must echo the exact
+  superseded-head and replacement-head SHAs. Not yet wired into the entrypoint (pure `validateTarget` only).
+- **Not observed:** no live workflow run of this path; no authenticated PM authority; entrypoint tested with fixture HTTP.
+
+### T5 final correction (Issue #141, Opus F1–F8 on PR139) — still dry-run, no authority until T6
+
+- **F1 base SHA:** no hardcoded base SHA anywhere. An open PR's `base.sha` must be an **ancestor of the live integration
+  branch tip** (`getBranch` + `compare(base.sha → tip)`; `ahead`/`identical` only). Tip moved → still planned; diverged/behind →
+  `base_not_ancestor_of_tip`; unknown/unechoed compare → `base_tip_unverified` (fail closed).
+  `HANDOFF_LIFECYCLE_EXPECTED_BASE` is no longer a gate (optional, validated only if set).
+- **F2 triggers (honest limits):** `issue_comment` and `workflow_dispatch` always run the workflow file on the **default branch
+  (main)**, so they do **not** execute integration-branch code until this file reaches main. Reachable proof routes that do run
+  integration-branch code, both dry-run/read-only:
+  1. the `pull_request` trigger (opened/synchronize/reopened/closed on PRs into `codex/issue-92-mobile-v2`, same-repo only),
+     plan job only — the `apply` job is limited to `issue_comment`/`workflow_dispatch`;
+  2. manual, from a checkout of the integration branch with a read-only token:
+     `GITHUB_TOKEN=… GITHUB_REPOSITORY=jonghee1998/ai-orchestrator HANDOFF_LIFECYCLE_ALLOWLIST=codex/issue-92-mobile-v2 node scripts/handoff/main.mjs --pr <N>`
+     (`--apply` with `--pr` is refused).
+  There is **no verified automated trigger for the post-merge phase**: no `check_run`/`status`/`deployment_status` trigger exists, and a
+  `pull_request: closed` run is unobserved. The merged phase is exercised by the manual route and fixtures only. Live is not enabled; no main/prod path.
+- **F3 root request:** the PR's linked issue is resolved to the canonical **root request** by following
+  `<!-- orch-root-request:v1 #<N> -->` in issue bodies (trusted PM author only). **Superseded by #144: no marker is NOT an own root.**
+  Records/rounds are read from the root issue + current PR + superseded PR (dedup by comment id); keys are `orch:v1:req<ROOT>:…`, so the
+  3-round cap and "complete once" hold across replacement PRs. `eventPlan` is now called from the planner (`complete` once per request,
+  `blocked` once per request+round) and is a planned write only. **Revision issues must carry the root marker** for the chain to be provable.
+- **F4 CI:** check-runs `total_count` must be present and equal the runs returned (else `incomplete`); all-skipped/neutral is `all_skipped`, not green.
+- **F5 deployment:** evidence is the **Vercel commit status** (`context == "Vercel"`) for the exact merge SHA (`GET /commits/{sha}/status`);
+  `total_count` mismatch → `incomplete`, other SHA → `malformed`, newest status per context wins. No GitHub environment name is assumed.
+  Not live-verified: whether Vercel's `Vercel` status on the integration branch counts as "dev" is an owner decision; missing evidence stays withheld.
+- **F6:** `done`/`issue` records without a ref are `ambiguous` for issue-creating steps (complete/blocked event records carry no ref).
+- **F7:** `handle()` always emits the lifecycle dry-run output even if legacy `run()` throws, then rethrows (job still fails closed).
+- **F8:** `<!-- orch-supersedes:v1 pr<N> -->` in the PR body (trusted author) makes `runLifecycle` load the superseded PR and compare
+  `superseded.head → replacement.head`, so `validateTarget` runs through the real entrypoint.
+- **Not observed:** no live workflow run; no authenticated PM authority (T6).
+
+## Issue #144 — explicit root / supersedes markers and round cap (remediation of Opus #143; NOT a cap reset)
+
+- **Root marker is mandatory.** Every request issue (root and revisions) carries `<!-- orch-root-request:v1 #<root> -->` (trusted PM author).
+  The root issue carries the **self** marker. Missing → `root_marker_missing`; ambiguous → `root_request_ambiguous`; named root without a self
+  marker → `root_not_self_marked`. There is no implicit fallback to "the linked issue is the root" (that silently treated #141 as root).
+- **Supersedes marker is mandatory.** Every PR carries `<!-- orch-supersedes:v1 pr<N> -->` or `<!-- orch-supersedes:v1 none -->` (original PR).
+  Missing → `supersedes_marker_missing`; ambiguous → `supersedes_ambiguous`; cycle → `supersedes_cycle`; unreadable link → `superseded_unavailable`.
+- **Verified chain.** `resolveChain` follows supersedes markers to `none` (bounded: original + 3 revisions + 1 probe; deeper → `round_cap_exceeded`)
+  and requires every member's linked issue to resolve to the same root (`chain_root_mismatch`). Durable records are read from the root issue and
+  **all** chain PRs.
+- **Round semantics (existing chain #136 → #138 → #141 → #144).** Original PR (PR137, `none`) is r1 (no revision). Each replacement PR is one revision:
+  round = revision PRs in the chain → PR139 = r1, PR142 = r2, PR for #144 = r3. `MAX_ROUNDS = 3` revisions. round = max(chain depth, closed `revise`
+  records + 1), so bot records (the bot never ran live) cannot lower it and nothing resets it. At r3 an unresolved finding is
+  `round_cap_reached_before_revision` (no 4th revision dispatch); a 4th revision PR is `round_cap_exceeded`.
+- **Required marker edits** (markers only, no code provenance change): #136 self; #138, #141, #144 → #136; PR137 `none`; PR139 `pr137`; PR142 `pr139`;
+  the #144 PR `pr142`.
+- Post-merge CI/deploy re-evaluation remains a **manual** T5 route (`main.mjs --pr <N>`); it is not automatic completion. Dry-run only, no live mode.
