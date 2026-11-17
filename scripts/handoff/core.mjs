@@ -169,3 +169,19 @@ export function claimBody(plan, state, issue) {
     ? `${marker}\nRevision handoff — Codex unresolved findings on exact head \`${plan.sha}\`. Revision issue #${issue} (agent:${plan.agent}, status:ready).${FOOTER}`
     : `${marker}\nRevision handoff claimed for exact head \`${plan.sha}\` — creating revision issue.${FOOTER}`;
 }
+
+/** Read-only diagnostic: prose-only Codex reports are NEVER PASS/FAIL evidence. */
+export function codexReportObservation(pr, comments = []) {
+  const head = pr?.head?.sha;
+  if (typeof head !== "string" || !/^[a-f0-9]{40}$/.test(head)) return { state: "unknown", reason: "invalid_head" };
+  const structured = latestCodexState(comments);
+  if (structured) return structured.commitSha === head
+    ? { state: "structured", reason: "structured_state_present", head, status: structured.status }
+    : { state: "unknown", reason: "structured_state_stale", head, reviewed: structured.commitSha };
+  const reports = comments.filter((c) => isTrustedCodex(c?.user) && typeof c.body === "string" && /^## Review Result\s*$/m.test(c.body));
+  if (!reports.length) return { state: "unknown", reason: "no_trusted_review_report", head };
+  const current = reports.filter((c) => c.body.includes(head));
+  return current.length
+    ? { state: "observed", reason: "unstructured_bot_report_no_verdict", head, count: current.length }
+    : { state: "unknown", reason: "report_not_bound_to_current_head", head };
+}
