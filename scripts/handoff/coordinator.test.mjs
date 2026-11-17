@@ -344,3 +344,26 @@ test("T6 structured review stays authoritative and exact-head", () => {
   assert.equal(codexReportObservation(pull(), [comment(BOT, stateBody(OLD))]).reason, "structured_state_stale");
   assert.equal(decide({ pr: pull(), comments: [comment(BOT, stateBody(SHA))], linkedIssue: issue71 }).action, "release_ready");
 });
+
+// T6 event timing: PR-open dry-run precedes the Codex bot completion comment.
+// The issue_comment event is the post-review wake-up; a read-only plan must
+// re-fetch live comments, accept the exact-head structured PASS and never write.
+test("T6 post-review issue_comment re-evaluates trusted exact-head PASS in dry run", async () => {
+  const event = { issue: { number: 72, pull_request: {} }, comment: { user: BOT } };
+  assert.deepEqual(prFromEvent("issue_comment", event), { pr: 72 });
+  const gh = fakeGitHub();
+  const before = await run(gh, 72, { apply: false, repo: REPO });
+  assert.equal(before.reason, "no_trusted_codex_state");
+  gh.db.comments.push(comment(BOT, stateBody(SHA)));
+  const after = await run(gh, 72, { apply: false, repo: REPO });
+  assert.equal(after.result, "dry_run");
+  assert.equal(after.wouldDo, "release_ready");
+  assert.equal(after.key, handoffKey(72, SHA, "release-ready"));
+  assert.deepEqual(gh.db.writes, []);
+});
+test("T6 post-review edited comment on stale SHA never gets PASS", async () => {
+  const gh = fakeGitHub({ comments: [comment(BOT, stateBody(OLD))] });
+  const r = await run(gh, 72, { apply: false, repo: REPO });
+  assert.equal(r.reason, "stale_codex_state");
+  assert.deepEqual(gh.db.writes, []);
+});
