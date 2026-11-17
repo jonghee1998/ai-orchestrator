@@ -45,8 +45,10 @@ export function parseSecurity(sr, sha) {
   // Real connector shape when no security review ran: `{ "commit_sha": null }` (no status).
   if (sr.status === undefined && sr.commit_sha === null) return { status: "not_run" };
   if (typeof sr.status !== "string") return { status: "invalid" };
-  if (sr.commit_sha !== undefined && sr.commit_sha !== sha) return { status: "invalid" };
+  if (sr.commit_sha !== undefined && sr.commit_sha !== null && sr.commit_sha !== sha) return { status: "invalid" };
   if (sr.status === "completed") {
+    // Exact SHA binding is mandatory: missing/null/wrong commit_sha can never count as a completed security review.
+    if (sr.commit_sha !== sha) return { status: "invalid" };
     return typeof sr.has_unresolved_findings === "boolean" ? { status: "completed", hasUnresolvedFindings: sr.has_unresolved_findings } : { status: "invalid" };
   }
   return { status: sr.status };
@@ -149,8 +151,8 @@ export function decide({ pr, comments, linkedIssue, pmEvidence = [] }) {
     // Issue #156: code PASS alone is never total PASS; security must have completed clean on the same exact SHA.
     const sec = codex.security ?? { status: "not_run" };
     if (sec.status !== "completed") return { action: "noop", reason: "security_review_incomplete", detail: { security: sec.status } };
-    if (sec.hasUnresolvedFindings !== false) return { action: "noop", reason: "security_findings_unresolved" };
-    return { action: "release_ready", key: handoffKey(pr.number, head, "release-ready"), sha: head, codex };
+    // Security-only findings route to revise (below) instead of a permanent noop.
+    if (sec.hasUnresolvedFindings === false) return { action: "release_ready", key: handoffKey(pr.number, head, "release-ready"), sha: head, codex };
   }
   if (gptWriterHandled([...comments, ...pmEvidence], pr.number, head)) return { action: "noop", reason: "gpt_writer_already_handled" };
   const refs = linkedIssueNumbers(pr);

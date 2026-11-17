@@ -337,5 +337,14 @@ test("#156: code PASS without completed clean security is NOT release_ready", ()
   assert.equal(mk(undefined).action, "release_ready");
   assert.equal(mk({ commit_sha: null }).reason, "security_review_incomplete");
   assert.equal(mk({ commit_sha: SHA, status: "blocked" }).reason, "security_review_incomplete");
-  assert.equal(mk({ commit_sha: SHA, status: "completed", has_unresolved_findings: true }).reason, "security_findings_unresolved");
+  // Exact SHA binding: completed security with missing/null/wrong commit_sha never passes (finding 4597259972).
+  const done = { status: "completed", has_unresolved_findings: false };
+  assert.equal(mk({ ...done }).reason, "security_review_incomplete", "missing commit_sha");
+  assert.equal(mk({ ...done, commit_sha: null }).reason, "security_review_incomplete", "null commit_sha");
+  assert.equal(mk({ ...done, commit_sha: "a".repeat(40) }).reason, "security_review_incomplete", "wrong commit_sha");
+  assert.equal(mk({ ...done, commit_sha: SHA }).action, "release_ready", "current commit_sha");
+  // Security-only findings route to revise (not a permanent noop); entitlement gaps stay noop/blocked.
+  const rev = decide({ pr: { number: 5, state: "open", head: { sha: SHA }, body: "Refs #9" }, linkedIssue: { number: 9, labels: [{ name: "agent:claude" }] },
+    comments: [{ id: 1, user: BOT, body: stateBody(SHA, { sec: { commit_sha: SHA, status: "completed", has_unresolved_findings: true } }), updated_at: "2026-01-01T00:00:00Z" }] });
+  assert.equal(rev.action, "revise");
 });
