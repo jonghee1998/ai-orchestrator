@@ -10,7 +10,7 @@ export const MAX_CORRECTIONS = 3; // default for every root
 export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed (except the exact owner-approved exception below)
 // Issue #170: NEW bounded, owner-approved exception (root #146 owner approvals 2026-11-18: correction 6 then exactly one more, 7 of 7, no 8th).
 // It applies ONLY to the exact root listed here; no global raise. Every other root keeps default 3 / ceiling 5.
-export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 7 }); // Issue #172: owner-authorized correction 7/7 for root #146 ONLY; no 8th, no global raise
+export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 8 }); // Issue #172: owner-authorized correction 7/7 for root #146 ONLY; no 8th, no global raise
 export const ceilingFor = (root) => ROOT_CEILING_EXCEPTIONS[root] ?? CORRECTION_CEILING;
 const LIMIT_ANY = /<!--\s*orch-root-correction-limit:v1\b[^>]*-->/g;
 const LIMIT_RE = /^<!--\s*orch-root-correction-limit:v1\s+root(\d+)\s+max=(\d+)\s*-->$/;
@@ -65,7 +65,7 @@ export const correctionMarker = ({ root, n, pr, sha }) => `<!-- orch-root-correc
  *    under two different n, or gaps in 1..max => error (fail closed, never silently lowered);
  *  - legacy trusted PM `revise:<round>` markers (core.pmReviseMarkers) are a conservative LOWER BOUND only.
  */
-export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTIONS, { request = null, derived = [] } = {}) {
+export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTIONS, { request = null, derived = [], destination = null } = {}) {
   const recs = [];
   for (const it of items) {
     if (!isTrustedPm(it?.user)) continue;
@@ -104,8 +104,14 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
   const legacy = Math.max(0, ...legacyRounds);
   const count = Math.max(max, legacy);
   if (requested.length) {
-    // the request must name exactly the next ordinal after everything already consumed (incl. derived records); otherwise block.
-    if (requested.some((r) => r !== count + 1)) return { error: "root_correction_request_mismatch", detail: { requested: [...new Set(requested)], expected: count + 1 } };
+    // Issue #174: two distinct phases. (a) BEFORE the destination PR executed: the request must name the next ordinal (count+1).
+    // (b) RE-EVALUATION after the destination PR's own durable n marker: the request must equal that OWN n, and only when the marker is
+    // bound to the destination PR with the destination head SHA verified identical/descendant (`destination.ancestryOk`). A marker
+    // of another PR/chain can never satisfy (b), so duplicates/historical replays cannot lower or re-use a count.
+    const own = destination ? byPr.get(destination.pr) : null;
+    const ownProven = !!own && own.n === count && (own.sha === destination.sha || destination.ancestryOk === true);
+    const okReq = (r) => r === count + 1 || (ownProven && r === own.n);
+    if (!requested.every(okReq)) return { error: "root_correction_request_mismatch", detail: { requested: [...new Set(requested)], expected: ownProven ? [count, count + 1] : count + 1 } };
   }
   return { count, records: [...byN.values()].sort((a, b) => a.n - b.n) };
 }

@@ -85,7 +85,7 @@ test("unrelated roots keep default 3 / ceiling 5; 8th / 7th elsewhere never allo
   assert.equal(resolveCorrectionLimit([], 99).max, 3);
   assert.equal(resolveCorrectionLimit([l(99, 5)], 99).max, 5);
   assert.equal(resolveCorrectionLimit([l(99, 6)], 99).error, "correction_limit_out_of_range");
-  assert.equal(resolveCorrectionLimit([l(146, 8)], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([l(146, 9)], 146).error, "correction_limit_out_of_range");
 });
 test("n6 is NOT invented: every missing proof blocks with a diagnostic", async () => {
   const cases = {
@@ -103,7 +103,7 @@ test("n6 is NOT invented: every missing proof blocks with a diagnostic", async (
 });
 test("request marker revise:N must equal the next ordinal (replay / wrong N blocks)", async () => {
   const w = world();
-  w.issues[172] = { ...w.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:8 -->` };
+  w.issues[172] = { ...w.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:9 -->` };
   assert.equal((await run(w)).reason, "root_correction_legacy_out_of_range", "8th request exceeds the exact exception");
   const w2 = world();
   w2.issues[172] = { ...w2.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:6 -->` };

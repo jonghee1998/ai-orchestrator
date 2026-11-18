@@ -9,14 +9,15 @@
 //   merged      : PR merged into the integration branch, bound to the exact MERGE SHA (ancestry/target,
 //                 integration CI, dev deployment). PR head is NOT the CI/deploy subject here.
 import { createHash } from "node:crypto";
+import { selectReviewVerdict } from "./review-verdict.mjs";
 
 export const KEY_VERSION = "v1";
 export const STEPS = Object.freeze(["dispatch", "review", "revise", "accept", "complete", "blocked"]);
 export const MAX_ROUNDS = 3;
 /** Hard ceiling for an authorized root-specific override (root-corrections.resolveCorrectionLimit). */
 export const MAX_ROUNDS_CEILING = 5;
-/** Issue #170/#172: the only owner-approved exception (root #146 => 7, no 8th). Mirrors root-corrections.ROOT_CEILING_EXCEPTIONS. */
-export const MAX_ROUNDS_ROOT_EXCEPTIONS = Object.freeze({ 146: 7 });
+/** Issue #170/#172: the only owner-approved exception (root #146 => 8 per owner standing authorization in #174, no 9th without a new PM-persisted authorization). Mirrors root-corrections.ROOT_CEILING_EXCEPTIONS. */
+export const MAX_ROUNDS_ROOT_EXCEPTIONS = Object.freeze({ 146: 8 });
 export const DEPLOY_SOURCE = "vercel_commit_status";
 export const FORBIDDEN_TARGETS = new Set(["main", "master", "production", "prod", "release"]);
 const SHA_RE = /^[a-f0-9]{40}$/;
@@ -193,31 +194,14 @@ export function approvalGates({ ev, headCi, sha }) {
  * SELF-REPORT: T5 never treats any marker as authenticated authority.
  */
 export function reviewEvidence({ pr, sha, reviews = [], pmAccepts = [], pmRevises = [], req, acceptIssues, integrationTarget }) {
-  const trusted = reviews.filter((r) => r?.trusted === true); // adapter-set after login+id+type check
-  // Issue #166: an ambiguous trusted receipt naming this exact SHA is a raw conflict (never dropped, never clean).
-  const ambiguousExact = trusted.some((r) => r.ambiguous === true && Array.isArray(r.mentioned_shas) && r.mentioned_shas.includes(sha));
-  const mine = trusted.filter((r) => r.ambiguous !== true);
-  const exact = mine.filter((r) => r.commit_sha === sha && r.status === "completed" && r.user?.login !== pr.user?.login);
-  const verdicts = new Set(exact.map((r) => r.has_unresolved_findings));
-  const codeConflict = verdicts.size > 1 || [...verdicts].some((v) => typeof v !== "boolean");
-  const stale = mine.some((r) => r.commit_sha !== sha);
-  // Issue #156: security is a separate gate. Contradictory security verdicts on the same SHA fail closed.
-  const secDone = exact.filter((r) => r.security_status === "completed");
-  const secVerdicts = new Set(secDone.map((r) => r.security_unresolved));
-  const secConflict = secVerdicts.size > 1 || [...secVerdicts].some((v) => typeof v !== "boolean") || (secDone.length > 0 && exact.some((r) => r.security_status === "invalid"));
-  const securityPass = !secConflict && secVerdicts.size === 1 && secVerdicts.has(false);
-  const securityUnresolved = !secConflict && secVerdicts.has(true);
-  const security = secConflict ? "conflict" : securityPass ? "pass" : securityUnresolved ? "findings" : "missing";
-  const conflict = codeConflict || secConflict || ambiguousExact;
-  const securityCapability = secConflict || ambiguousExact ? "conflict" : securityPass ? "completed" : securityUnresolved ? "completed" : securityStatusOf(exact);
-  const independent = !conflict && exact.length > 0 && verdicts.has(false) && securityPass;
-  const unresolved = !conflict && (verdicts.has(true) || securityUnresolved);
+  // Issue #174: shared fail-closed selector (also used by the quality gate) — never re-implemented here.
+  const { independent, unresolved, security, securityCapability, codeVerdict, stale, conflict } = selectReviewVerdict({ sha, reviews, prAuthor: pr.user?.login });
   const issues = acceptIssues ?? [req]; // root request, plus the revision issue the PR actually closes
   const accepts = pmAccepts.filter((a) => issues.includes(a.issue) && a.pr === pr.number && a.target === integrationTarget && a.sha === sha);
   const staleAccept = pmAccepts.some((a) => a.sha !== sha);
   const pmConflict = accepts.length > 0 && pmRevises.some((m) => m.sha === sha && m.pr === pr.number);
   const pm = accepts.length > 0 ? { sha, count: accepts.length } : null;
-  return { independent, unresolved, security, securityCapability, codeVerdict: codeConflict || ambiguousExact ? "conflict" : verdicts.size === 0 ? "missing" : verdicts.has(true) ? "findings" : "pass", stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
+  return { independent, unresolved, security, securityCapability, codeVerdict, stale, conflict, pmAcceptance: pm, staleAccept, pmConflict, authority: pm ? "self_reported_marker" : "none" };
 }
 
 /**

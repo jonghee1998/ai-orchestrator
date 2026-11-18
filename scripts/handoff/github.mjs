@@ -62,6 +62,9 @@ export function createClient({ token, repo, fetchImpl = fetch, sleep = (ms) => n
     listIssues: async () => (await paged(`/issues?state=all&sort=created&direction=asc`, 10)).items,
     listPulls: async () => (await paged(`/pulls?state=all&sort=created&direction=asc`, 10)).items,
     listIssueComments: async (n) => (await paged(`/issues/${n}/comments`, 10)).items,
+    // Issue #174: quality-gate CLI. Commits of a PR (bounded) and a commit status (the ONLY write: context-scoped, from trusted base code).
+    listPullCommits: async (n) => (await paged(`/pulls/${n}/commits`, 3)).items,
+    createCommitStatus: (sha, { state, context, description }) => req("POST", `/statuses/${sha}`, { state, context, description: String(description ?? "").slice(0, 140) }),
     createIssueComment: (n, body) => req("POST", `/issues/${n}/comments`, { body }),
     updateIssueComment: (id, body) => req("PATCH", `/issues/comments/${id}`, { body }),
     createIssue: ({ title, body, labels }) => req("POST", `/issues`, { title, body, labels }),

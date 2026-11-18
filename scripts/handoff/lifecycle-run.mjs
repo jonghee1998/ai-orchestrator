@@ -122,7 +122,8 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     if (first.error) return fail(first.error, first.detail);
     const dv = deriveChainCorrection({ chain: ch.chain, chainLinks, records: first.records, commentsByPr });
     if (dv.error) return fail(dv.error, dv.detail);
-    const resolved = resolveRootCorrections(ev.items, req, maxRounds, { request, derived: dv.derived ? [dv.derived] : [] });
+    const resolved = resolveRootCorrections(ev.items, req, maxRounds, { request, derived: dv.derived ? [dv.derived] : [],
+      destination: { pr: prNumber, sha: pr.head?.sha, ancestryOk: !!ancestry && !!request && ancestry.baseSha === request.sha && ancestry.headSha === pr.head?.sha && ["ahead", "identical"].includes(ancestry.status) } });
     const rc = correctionRound({ resolved, prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
     if (rc.error) return fail(rc.error, rc.detail);
     const input = {
