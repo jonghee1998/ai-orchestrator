@@ -11,7 +11,7 @@ import { rootMarker, supersedesMarker, normalizeCodexReviews } from "./lifecycle
 import { isTrustedPm } from "./core.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
-const item = (kind, o) => ({ kind, id: o.id ?? o.number, user: o.user, body: o.body ?? "", created_at: o.created_at ?? null, number: o.number });
+const item = (kind, o) => ({ kind, id: o.id ?? o.number, user: o.user, body: o.body ?? "", created_at: o.created_at ?? null, updated_at: o.updated_at ?? null, number: o.number });
 export const itemKey = (it) => `${it.kind}:${it.id}`;
 export function dedupeItems(list) {
   const seen = new Set();

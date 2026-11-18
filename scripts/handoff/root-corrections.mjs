@@ -10,7 +10,7 @@ export const MAX_CORRECTIONS = 3; // default for every root
 export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed (except the exact owner-approved exception below)
 // Issue #170: NEW bounded, owner-approved exception (root #146 owner approvals 2026-11-18: correction 6 then exactly one more, 7 of 7, no 8th).
 // It applies ONLY to the exact root listed here; no global raise. Every other root keeps default 3 / ceiling 5.
-export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 9 }); // Issue #176: standing owner authorization for correction 9 on root #146 ONLY (n1..n8 history intact); no 10th without PM exact-FAIL + new authorization, no global raise
+export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 10 }); // Issue #178: standing owner authorization for correction 10 on root #146 ONLY (n1..n9 history intact, markers preserved); no 11th without PM exact-FAIL + new authorization, no global raise
 export const ceilingFor = (root) => ROOT_CEILING_EXCEPTIONS[root] ?? CORRECTION_CEILING;
 const LIMIT_ANY = /<!--\s*orch-root-correction-limit:v1\b[^>]*-->/g;
 const LIMIT_RE = /^<!--\s*orch-root-correction-limit:v1\s+root(\d+)\s+max=(\d+)\s*-->$/;
@@ -103,16 +103,18 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
   if (legacyRounds.some((r) => r > ceilingFor(root))) return { error: "root_correction_legacy_out_of_range", detail: { max: Math.max(...legacyRounds) } };
   const legacy = Math.max(0, ...legacyRounds);
   const count = Math.max(max, legacy);
+  // Issue #178: the destination's OWN recorded SHA -> live head is validated UNCONDITIONALLY (with or without a PM revise request).
+  // Missing/diverged/behind/forged proof => reject; the count is preserved by the caller (never lowered), the ordinal is never reused.
+  const own = destination ? byPr.get(destination.pr) : null;
+  const proofBinds = !!own && destination.recordedSha === own.sha && destination.liveSha === destination.sha;
+  const destProven = !!own && SHA.test(destination.sha ?? "") && (own.sha === destination.sha || (destination.ancestryOk === true && proofBinds));
+  if (destination && own && !destProven) return { error: "root_correction_destination_unproven", detail: { pr: destination.pr, n: own.n } };
   if (requested.length) {
     // Issue #174: two distinct phases. (a) BEFORE the destination PR executed: the request must name the next ordinal (count+1).
     // (b) RE-EVALUATION after the destination PR's own durable n marker: the request must equal that OWN n, and only when the marker is
     // bound to the destination PR with the destination head SHA verified identical/descendant (`destination.ancestryOk`). A marker
     // of another PR/chain can never satisfy (b), so duplicates/historical replays cannot lower or re-use a count.
-    const own = destination ? byPr.get(destination.pr) : null;
-    // Issue #176: the proof is about the destination's OWN recorded SHA -> live destination head (see destinationProof), not source ancestry.
-    // A proof that names a different recorded SHA / live head than the ones being judged (forged/stale) is ignored.
-    const proofBinds = !!own && destination.recordedSha === own.sha && destination.liveSha === destination.sha;
-    const ownProven = !!own && own.n === count && (own.sha === destination.sha || (destination.ancestryOk === true && proofBinds));
+    const ownProven = !!own && own.n === count && destProven;
     const okReq = (r) => r === count + 1 || (ownProven && r === own.n);
     if (!requested.every(okReq)) return { error: "root_correction_request_mismatch", detail: { requested: [...new Set(requested)], expected: ownProven ? [count, count + 1] : count + 1 } };
   }

@@ -33,3 +33,19 @@
 - **목적지 증명** — `destinationProof`: 목적지 PR 자신의 durable 기록 SHA → 라이브 목적지 HEAD를 `compare`로 별도 증명한다(source→destination ancestry와 분리). 동일 SHA 수락, 증명된 descendant 수락, 다른 descendant로의 force-push·기록 커밋 삭제·compare 오류·다른 PR/체인의 마커·충돌 마커·위조/오래된 증명은 거부(resolver는 증명이 정확히 그 기록 SHA/라이브 HEAD에 대한 것인지 재확인).
 - **교정 상한**: root #146만 8→9(소유자 상시 승인, #176). n1..n8 기록·이전 limit 마커 보존, 다른 root는 기본 3/상한 5. 10번째 교정은 PM의 exact FAIL 판정과 새 승인이 필요하며 워커가 스스로 디스패치하지 않는다.
 - **강제 한계(주장 금지)**: Required status check(`quality-gate/pre-pr`, `quality-gate/final`)는 신뢰 base 워크플로 + 관리자 ruleset 증거가 있어야 실제 강제된다. 소유자 전용 선행 조건: ① `quality-gate-events.yml` 사본을 main에 배치(선택) ② 통합 브랜치 ruleset에 두 컨텍스트를 Required로 등록 ③ 별도 보안 리뷰 용량 확인. 단위 fixture는 A–F E2E가 아니다.
+
+## Issue #178 — unconditional destination proof & live failure-history RCA gate
+
+**Systemic rule (applies to every reader):** a *required* input that is absent, unreadable or partial is `BLOCKED`/`UNKNOWN`; it is never defaulted to `[]`/`null`/"ok". Only an authoritative empty read is empty.
+
+**Destination proof.** `resolveRootCorrections(..., {destination})` validates the destination PR's own recorded correction SHA → live head *whenever an own marker exists*, with or without a PM `revise` request marker. Accepted: identical SHA, or a descendant proven by `compare(recorded, live)` returning `ahead|identical` bound to exactly those SHAs. Otherwise `root_correction_destination_unproven` (diverged, behind, unknown status, compare error/missing, forged/stale proof, unknown live head). The count is never lowered. Source→destination ancestry (chain links) is a separate proof.
+
+**Failure history.** Trusted-PM marker `<!-- gate:fail-class:v1 root=<R> class=<[a-z0-9-]{1,48}> pr=<P> sha=<40hex> -->`, read root-wide (`collectRootEvidence`: root issue, every root-marked issue/PR, comments, current PR). Distinct `(class,pr,sha)` counts once. Two distinct failures of one class require a trusted-PM `gate:rca` receipt (`class` + `issue` = linked issue or root) last modified before the first code commit. Required at `pre-pr` and `final`. Fingerprint covers root, history and all root items.
+
+**Negative matrix (tests: `scripts/gate/gate178.test.mjs`, `scripts/handoff/root-evidence.test.mjs`):** missing RCA; RCA by untrusted author; RCA edited after code; RCA for other class/issue; duplicate/replayed copies; spoofed failure receipts; malformed or other-root marker; `listIssues`/`listPulls` failure, non-array page; history edit/delete between collect and publish; destination diverged/behind/alternate descendant/API failure/forged proof.
+
+**Trust policy:** only trusted-PM (owner) authored markers count. The PR author is not trusted for failure-class or RCA evidence.
+
+**Limit:** root #146 ceiling is 10 (standing authorization, #178 only); markers n1..n9 preserved; every other root keeps default 3 / ceiling 5; no 11th.
+
+**Not claimed:** the default-branch event workflow, branch ruleset and a separate security review are *not* asserted to be operating by this change.

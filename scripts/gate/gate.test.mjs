@@ -11,7 +11,7 @@ const g = (name, a, user = OWNER, at = "2026-11-18T00:00:00Z") => ({ user, creat
 const codex = (sha, unresolved = false, sec = "completed") => ({ user: BOT, body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: sha, has_unresolved_findings: unresolved, status: "completed" }, security_review: { commit_sha: sha, status: sec, has_unresolved_findings: false } })} -->` });
 const full = () => [g("pm-scope", "issue=1"), { ...g("dev-analysis", "issue=1", OWNER, "2026-11-18T01:00:00Z") }, g("self-test", `issue=1 sha=${HEAD} typecheck=pass test=pass build=pass`),
   codex(HEAD), g("codex-impact", `issue=1 sha=${HEAD} verdict=pass`), g("pm-compare", `issue=1 sha=${HEAD} verdict=pass`)];
-const ev = (items, x = {}) => evaluateGate({ issue: 1, pr: undefined, head: HEAD, items, firstCodeCommitAt: "2026-11-18T02:00:00Z", ...x });
+const ev = (items, x = {}) => evaluateGate({ issue: 1, pr: undefined, head: HEAD, items, firstCodeCommitAt: "2026-11-18T02:00:00Z", failHistory: [], ...x });
 
 test("gate passes only when every stage is evidenced", () => { assert.equal(ev(full()).status, "pass"); });
 test("NEGATIVE: every missing receipt is blocked/unknown, never pass", () => {

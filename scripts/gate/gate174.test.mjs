@@ -18,7 +18,7 @@ const st = (sha, { unresolved = false, sec = "completed", secUnresolved = false,
 const codex = (obj, id = 1) => ({ id, user: BOT, body: `<!-- codex-review-state:v1 ${JSON.stringify(obj)} -->` });
 const clean = () => codex(st(HEAD));
 const rest = () => [gate("pm-scope", "issue=1"), { ...gate("dev-analysis", "issue=1", OWNER, T(1)), trustedWriter: true }, gate("self-test", `issue=1 sha=${HEAD} typecheck=pass test=pass build=pass`), gate("codex-impact", `issue=1 sha=${HEAD} verdict=pass`), gate("pm-compare", `issue=1 sha=${HEAD} verdict=pass`)];
-const viaGate = (reviews) => evaluateGate({ issue: 1, head: HEAD, items: [...rest(), ...reviews], firstCodeCommitAt: T(2) });
+const viaGate = (reviews) => evaluateGate({ issue: 1, head: HEAD, items: [...rest(), ...reviews], firstCodeCommitAt: T(2), failHistory: [] });
 const viaLifecycle = (reviews) => reviewEvidence({ pr: { number: 5, user: { login: "dev" } }, sha: HEAD, reviews: normalizeCodexReviews(reviews), req: 1, integrationTarget: "main" });
 
 test("#174-1 both entrypoints agree: clean passes, every contradictory/invalid evidence is BLOCKED", () => {
@@ -59,7 +59,7 @@ test("#174-2 correction request: before execution = next count, after own n mark
   const dest = (ok) => ({ pr: 175, sha: "c".repeat(40), recordedSha: OLD, liveSha: "c".repeat(40), ancestryOk: ok });
   const after = [...others, mk(8, 175, OLD), req(8, 173, HEAD)];
   assert.equal(resolveRootCorrections(after, 146, 8, { request, destination: dest(true) }).count, 8);
-  assert.equal(resolveRootCorrections(after, 146, 8, { request, destination: dest(false) }).error, "root_correction_request_mismatch", "unproven ancestry");
+  assert.equal(resolveRootCorrections(after, 146, 8, { request, destination: dest(false) }).error, "root_correction_destination_unproven", "unproven ancestry (#178: rejected independent of request)");
   assert.equal(resolveRootCorrections(after, 146, 8, { request, destination: { pr: 999, sha: OLD, ancestryOk: true } }).error, "root_correction_request_mismatch", "other PR cannot claim n8");
   assert.equal(resolveRootCorrections(after, 146, 8, { request }).error, "root_correction_request_mismatch", "no destination");
   // conflicting marker: request names 8 but own marker says 9 => rejected / out of range
@@ -71,7 +71,7 @@ test("#174-2 correction request: before execution = next count, after own n mark
 
 test("#174-3 dev-analysis timing uses last modification, not created_at alone", () => {
   const an = (o) => [...rest().filter((x) => !x.body.includes("dev-analysis")), { ...gate("dev-analysis", "issue=1"), trustedWriter: true, ...o }, clean()];
-  const run = (o, code = T(2)) => evaluateGate({ issue: 1, head: HEAD, items: an(o), firstCodeCommitAt: code }).stages.dev_analysis;
+  const run = (o, code = T(2)) => evaluateGate({ issue: 1, head: HEAD, items: an(o), firstCodeCommitAt: code, failHistory: [] }).stages.dev_analysis;
   assert.equal(run({ created_at: T(1), updated_at: T(1) }).status, "pass");
   assert.equal(run({ created_at: T(0), updated_at: "2026-11-18T01:30:00Z" }).status, "pass", "edited before code");
   assert.equal(run({ created_at: T(1), updated_at: T(3) }).reason, "analysis_edited_after_code");
@@ -88,9 +88,9 @@ test("#174-3 dev-analysis timing uses last modification, not created_at alone", 
 // fake GitHub for the real check command
 const fakeGh = ({ comments = [], issueBody = "", commitAt = T(2), head = HEAD, published } = {}) => ({
   getPull: async () => ({ number: 5, user: { id: 7, login: "dev" }, head: { sha: head }, body: "Closes #1", created_at: T(2), updated_at: T(2) }),
-  getIssue: async () => ({ number: 1, user: OWNER, body: issueBody, created_at: T(0), updated_at: T(0) }),
+  getIssue: async () => ({ number: 1, user: OWNER, body: `<!-- orch-root-request:v1 #1 -->\n${issueBody}`, created_at: T(0), updated_at: T(0) }),
   listPullCommits: async () => [{ commit: { committer: { date: commitAt } } }],
-  listIssueComments: async (n) => (n === 1 ? comments : []),
+  listIssueComments: async (n) => (n === 1 ? comments : []), listIssues: async () => [], listPulls: async () => [],
   createCommitStatus: async (sha, s) => published?.push({ sha, ...s }),
 });
 const c = (id, o) => ({ id, created_at: T(1), updated_at: T(1), ...o });

@@ -26,9 +26,10 @@ function fake({ comments = okComments(), body = "Closes #1", head = HEAD, hooks 
   return {
     w, log, statuses,
     getPull: () => call("getPull", () => ({ number: 5, state: "open", user: DEV, head: { sha: w.head }, base: { ref: BR }, body: w.body, created_at: T(2), updated_at: T(2) })),
-    getIssue: () => call("getIssue", () => ({ number: 1, user: OWNER, body: "", created_at: T(0), updated_at: T(0) })),
+    getIssue: () => call("getIssue", () => ({ number: 1, user: OWNER, body: "<!-- orch-root-request:v1 #1 -->", created_at: T(0), updated_at: T(0) })),
     listPullCommits: () => call("listPullCommits", () => [{ commit: { committer: { date: T(2) } } }]),
     listIssueComments: (i) => call("listIssueComments", () => (i === 1 ? w.comments : [])),
+    listIssues: () => call("listIssues", () => []), listPulls: () => call("listPulls", () => []),
     createCommitStatus: (sha, s) => call("createCommitStatus", () => { statuses.push({ sha, ...s }); }),
   };
 }
@@ -174,7 +175,7 @@ const st = (sha, over = {}) => ({ code_review: { commit_sha: sha, has_unresolved
 const codex = (o, id = 1) => ({ id, user: BOT, body: `<!-- codex-review-state:v1 ${JSON.stringify(o)} -->` });
 test("#176-4 identical receipts: quality gate and lifecycle never disagree on pass; missing security stays BLOCKED", () => {
   const rest = [gate("pm-scope", "issue=1"), { ...gate("dev-analysis", "issue=1", OWNER, T(1)), trustedWriter: true }, gate("self-test", `issue=1 sha=${HEAD} typecheck=pass test=pass build=pass`), gate("codex-impact", `issue=1 sha=${HEAD} verdict=pass`), gate("pm-compare", `issue=1 sha=${HEAD} verdict=pass`)];
-  const g = (rv) => evaluateGate({ issue: 1, head: HEAD, items: [...rest, ...rv], firstCodeCommitAt: T(2) }).status;
+  const g = (rv) => evaluateGate({ issue: 1, head: HEAD, items: [...rest, ...rv], firstCodeCommitAt: T(2), failHistory: [] }).status;
   const l = (rv) => reviewEvidence({ pr: { number: 5, user: DEV }, sha: HEAD, reviews: normalizeCodexReviews(rv), req: 1, integrationTarget: "main" }).independent === true;
   assert.equal(g([codex(st(HEAD))]), "pass"); assert.equal(l([codex(st(HEAD))]), true);
   const bad = { "security not run": [codex(st(HEAD, { sec: { status: "not_run" } }))], "stale sha": [codex(st(NEXT))], "forged author": [{ id: 1, user: MAL, body: codex(st(HEAD)).body }],

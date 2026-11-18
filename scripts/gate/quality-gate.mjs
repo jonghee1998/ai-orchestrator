@@ -17,7 +17,7 @@ const when = (it) => Date.parse(it.created_at ?? "");
  *   items: issue/PR bodies+comments with {user, body, created_at}. failHistory: classes of prior review FAILs on this root.
  * @returns {{status:'pass'|'blocked'|'unknown', stages:Record<string,{status:string,reason?:string}>, unmet:string[]}}
  */
-export function evaluateGate({ issue, pr, head, items = [], firstCodeCommitAt, failHistory = [], stage = "final" }) {
+export function evaluateGate({ issue, root, pr, head, items = [], firstCodeCommitAt, failHistory, stage = "final" }) {
   const st = {};
   const set = (k, status, reason) => { st[k] = reason ? { status, reason } : { status }; };
   const pmItems = items.filter((x) => isTrustedPm(x?.user));
@@ -59,12 +59,23 @@ export function evaluateGate({ issue, pr, head, items = [], firstCodeCommitAt, f
   if (!cp.length) set("pm_compare", "unknown", "pm_comparison_not_recorded");
   else set("pm_compare", cp.some((x) => x.a.verdict === "pass") && cp.every((x) => x.a.verdict === "pass") ? "pass" : "blocked", cp.every((x) => x.a.verdict === "pass") ? undefined : "pm_comparison_not_pass");
   // Repeated same-class FAIL => root-cause analysis receipt required BEFORE another correction.
-  const counts = failHistory.reduce((m, c) => (m.set(c, (m.get(c) ?? 0) + 1), m), new Map());
-  const rca = find(pmItems, "rca");
-  for (const [cls, n] of counts) if (n >= 2 && !rca.some((x) => x.a.class === cls && Number(x.a.issue) === issue)) { set("rca", "blocked", `rca_required_for_repeated_class:${cls}`); break; }
+  // Issue #178: `failHistory` is REQUIRED input. Undefined/non-array (unavailable) is UNKNOWN, never an empty history. The RCA receipt must be a
+  // trusted-PM marker bound to this issue or root, naming the class, and its last modification must precede the first code commit.
+  if (!Array.isArray(failHistory) || failHistory.some((c) => typeof c !== "string")) set("rca", "unknown", "fail_history_unavailable");
+  else {
+    const counts = failHistory.reduce((m, c) => (m.set(c, (m.get(c) ?? 0) + 1), m), new Map());
+    const rcaFor = (cls) => find(pmItems, "rca").filter((x) => x.a.class === cls && [issue, root].some((n) => n !== undefined && Number(x.a.issue) === n));
+    for (const [cls, n] of counts) {
+      if (n < 2) continue;
+      const r = rcaFor(cls);
+      if (!r.length) { set("rca", "blocked", `rca_required_for_repeated_class:${cls}`); break; }
+      if (!Number.isFinite(code)) { set("rca", "unknown", "first_code_commit_time_unknown"); break; }
+      if (!r.some((x) => Number.isFinite(lastTouch(x.it)) && lastTouch(x.it) < code)) { set("rca", "blocked", `rca_not_before_code:${cls}`); break; }
+    }
+  }
   // Issue #174: `pre-pr` (before the PR exists / before its post-open Codex review) only requires stages 1-3; `final` requires everything.
   // Splitting avoids a deadlock where the final gate would wait on a review that can only start after the PR is opened.
-  if (stage === "pre-pr") for (const k of ["codex_review", "codex_impact_review", "pm_compare", "rca"]) delete st[k];
+  if (stage === "pre-pr") for (const k of ["codex_review", "codex_impact_review", "pm_compare"]) delete st[k]; // rca stays required at BOTH stages (must precede code)
   else if (stage !== "final") return { status: "blocked", stages: {}, unmet: [`unknown_stage:${String(stage).slice(0, 20)}`] };
   const unmet = Object.entries(st).filter(([, v]) => v.status !== "pass").map(([k, v]) => `${k}:${v.reason ?? v.status}`);
   const status = Object.values(st).some((v) => v.status === "blocked") ? "blocked" : Object.values(st).some((v) => v.status === "unknown") ? "unknown" : "pass";

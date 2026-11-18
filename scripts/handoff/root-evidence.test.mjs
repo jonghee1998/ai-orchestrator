@@ -85,7 +85,7 @@ test("unrelated roots keep default 3 / ceiling 5; 8th / 7th elsewhere never allo
   assert.equal(resolveCorrectionLimit([], 99).max, 3);
   assert.equal(resolveCorrectionLimit([l(99, 5)], 99).max, 5);
   assert.equal(resolveCorrectionLimit([l(99, 6)], 99).error, "correction_limit_out_of_range");
-  assert.equal(resolveCorrectionLimit([l(146, 10)], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([l(146, 11)], 146).error, "correction_limit_out_of_range");
 });
 test("n6 is NOT invented: every missing proof blocks with a diagnostic", async () => {
   const cases = {
@@ -103,7 +103,7 @@ test("n6 is NOT invented: every missing proof blocks with a diagnostic", async (
 });
 test("request marker revise:N must equal the next ordinal (replay / wrong N blocks)", async () => {
   const w = world();
-  w.issues[172] = { ...w.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:10 -->` };
+  w.issues[172] = { ...w.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:11 -->` };
   assert.equal((await run(w)).reason, "root_correction_legacy_out_of_range", "8th request exceeds the exact exception");
   const w2 = world();
   w2.issues[172] = { ...w2.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:6 -->` };
@@ -194,6 +194,7 @@ const D = (extra = {}) => { // n7 recorded for destination PR173 (n6 for PR171 r
 };
 const runD = (w, calls = [], live = w.pulls[173].head.sha) => { const cmp = w.compare; w.compare = (a, b) => { calls.push([a, b]); return typeof cmp === "function" ? cmp(a, b) : cmp; }; return runLifecycle(ghOf(w), 173, { config: CFG, expectedHead: live }); };
 const MISMATCH = "root_correction_request_mismatch";
+const UNPROVEN = "root_correction_destination_unproven";
 test("#176 destination: own n recorded, live head == recorded SHA => accepted without any compare", async () => {
   const calls = [], p = await runD(D(), calls);
   assert.notEqual(p.reason, MISMATCH, JSON.stringify(p)); assert.equal(p.action === "blocked" && /root_correction/.test(p.reason), false);
@@ -208,15 +209,15 @@ test("#176 destination: valid descendant accepted ONLY via recorded->live compar
 test("#176 destination: force-push to ANOTHER descendant of the source drops the recorded execution => rejected (was accepted in 175)", async () => {
   const w = D({ live: H("9") });
   w.compare = (a, b) => (a === S[173] ? "diverged" : "ahead"); // source(171)->live is still `ahead`: the old check would accept
-  assert.equal((await runD(w)).reason, MISMATCH);
+  assert.equal((await runD(w)).reason, UNPROVEN);
   const behind = D({ live: H("9") }); behind.compare = (a) => (a === S[173] ? "behind" : "ahead");
-  assert.equal((await runD(behind)).reason, MISMATCH, "live head older than the recorded execution");
+  assert.equal((await runD(behind)).reason, UNPROVEN, "live head older than the recorded execution");
 });
 test("#176 destination: removed recorded commit / missing compare / API error => unproven, fail closed", async () => {
   const w = D({ live: H("9") }); w.compare = (a) => { if (a === S[173]) throw new Error("compare 404"); return "ahead"; };
-  assert.equal((await runD(w)).reason, MISMATCH);
+  assert.equal((await runD(w)).reason, UNPROVEN);
   const unk = D({ live: H("9") }); unk.compare = (a) => (a === S[173] ? "weird" : "ahead");
-  assert.equal((await runD(unk)).reason, MISMATCH, "unknown compare status");
+  assert.equal((await runD(unk)).reason, UNPROVEN, "unknown compare status");
 });
 test("#176 destination: other chain's marker, conflicting markers, untrusted marker never satisfy the destination", async () => {
   assert.equal((await runD(D({ markers: [marker(7, 999, H("d"))] }))).reason, MISMATCH, "n7 belongs to another PR");
@@ -244,20 +245,52 @@ test("#176 resolver: forged / stale destination proof (names other SHAs) is igno
   assert.equal(destinationProof({ records: [], pr: 157, liveSha: live, cmp: null }).ancestryOk, false, "no own record");
   const ok = (d) => resolveRootCorrections([...items, req], 146, 9, { request, destination: d }).error;
   assert.equal(ok({ pr: 157, sha: live, ...good }), undefined);
-  assert.equal(ok({ pr: 157, sha: live, recordedSha: H("e"), liveSha: live, ancestryOk: true }), MISMATCH, "proof about a different recorded SHA");
-  assert.equal(ok({ pr: 157, sha: live, recordedSha: rec, liveSha: H("e"), ancestryOk: true }), MISMATCH, "proof about a different live head");
-  assert.equal(ok({ pr: 157, sha: live, recordedSha: rec, liveSha: live, ancestryOk: false }), MISMATCH);
+  assert.equal(ok({ pr: 157, sha: live, recordedSha: H("e"), liveSha: live, ancestryOk: true }), UNPROVEN, "proof about a different recorded SHA");
+  assert.equal(ok({ pr: 157, sha: live, recordedSha: rec, liveSha: H("e"), ancestryOk: true }), UNPROVEN, "proof about a different live head");
+  assert.equal(ok({ pr: 157, sha: live, recordedSha: rec, liveSha: live, ancestryOk: false }), UNPROVEN);
   assert.equal(ok({ pr: 157, sha: rec, ancestryOk: false }), undefined, "sameSHA needs no proof");
 });
-test("#176 ceiling: root146 correction 9 is the ONLY exception; n1..n8 history, other roots and the 10th unchanged", () => {
+test("#178 ceiling: root146 correction 10 is the ONLY exception; n1..n9 history, other roots and the 11th unchanged", () => {
   const cm = (n, root = 146) => ({ user: OWNER, body: correctionMarker({ root, n, pr: 200 + n, sha: String(n % 10).repeat(40) }) });
   const nine = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => cm(n));
   assert.equal(resolveRootCorrections(nine, 146).count, 9);
-  assert.equal(resolveRootCorrections([...nine, cm(10)], 146).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections([...nine, cm(10)], 146).count, 10, "#178 n10 valid for root146 only");
+  assert.equal(resolveRootCorrections([...nine, cm(10), cm(11)], 146).error, "root_correction_n_out_of_range", "no 11th");
+  assert.equal(resolveRootCorrections([cm(6, 136)], 136).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections([1, 2, 3, 4].map((n) => cm(n, 150)), 150).error, undefined, "other roots keep default 3 / ceiling 5 (n4 fine, bound enforced by limit)");
   assert.equal(resolveRootCorrections([cm(6, 136)], 136).error, "root_correction_n_out_of_range");
   const l = (r, m, at) => ({ user: OWNER, created_at: at, id: m, body: `<!-- orch-root-correction-limit:v1 root${r} max=${m} -->` });
   assert.equal(resolveCorrectionLimit([l(146, 7, "2026-11-17T00:00:00Z"), l(146, 9, "2026-11-18T00:00:00Z")], 146).max, 9);
   assert.equal(resolveCorrectionLimit([l(146, 7, "2026-11-17T00:00:00Z"), l(146, 9, "2026-11-18T00:00:00Z")], 146).history.length, 2, "earlier approvals preserved");
   assert.equal(resolveCorrectionLimit([l(136, 6, "2026-11-18T00:00:00Z")], 136).error, "correction_limit_out_of_range");
-  assert.equal(resolveCorrectionLimit([l(146, 10, "2026-11-18T00:00:00Z")], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([l(146, 10, "2026-11-18T00:00:00Z")], 146).max, 10, "#178 max=10 for root146");
+  assert.equal(resolveCorrectionLimit([l(146, 11, "2026-11-18T00:00:00Z")], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([l(150, 6, "2026-11-18T00:00:00Z")], 150).error, "correction_limit_out_of_range", "other roots ceiling 5");
+  assert.equal(resolveCorrectionLimit([], 150).max, 3, "other roots default 3");
+});
+
+// ---- Issue #178: destination proof is validated UNCONDITIONALLY (no PM revise request marker required) ----
+const noReq = (extra = {}) => { const w = D(extra); w.issues[172] = { ...w.issues[172], body: "<!-- orch-root-request:v1 #146 -->" }; return w; };
+const UNPROVEN178 = "root_correction_destination_unproven";
+test("#178 no revise request: live == recorded accepted; proven descendant accepted; every other state rejected, count preserved", async () => {
+  assert.notEqual((await runD(noReq())).reason, UNPROVEN178, "exact SHA");
+  const desc = noReq({ live: H("9") }); desc.compare = (a, b) => (a === S[173] && b === H("9") ? "ahead" : "diverged");
+  assert.notEqual((await runD(desc)).reason, UNPROVEN178, "descendant proven by recorded->live compare");
+  for (const [name, cmp] of [["diverged", () => "diverged"], ["behind", () => "behind"], ["unknown status", () => "weird"], ["api failure", (a) => { if (a === S[173]) throw new Error("compare 404"); return "ahead"; }],
+    ["alternate descendant of source only", (a) => { if (a === S[173]) return "diverged"; return "ahead"; }]]) {
+    const w = noReq({ live: H("9") }); w.compare = cmp;
+    const p = await runD(w);
+    assert.equal(p.reason, UNPROVEN178, name); assert.equal(p.action, "blocked", name);
+  }
+});
+test("#178 resolver: without request marker a forged/stale/missing destination proof is rejected; same SHA needs none; no destination = no claim", () => {
+  const items = [1, 2, 3, 4, 5, 6, 7].map((n) => marker(n, 150 + n, H(String(n))));
+  const rec = H("7"), live = H("9"), r = (d) => resolveRootCorrections(items, 146, 9, { destination: d });
+  assert.equal(r({ pr: 157, sha: live, recordedSha: rec, liveSha: live, ancestryOk: true }).count, 7);
+  for (const bad of [{ recordedSha: H("e"), liveSha: live, ancestryOk: true }, { recordedSha: rec, liveSha: H("e"), ancestryOk: true }, { recordedSha: rec, liveSha: live, ancestryOk: false }, { ancestryOk: true }, {}])
+    assert.equal(r({ pr: 157, sha: live, ...bad }).error, UNPROVEN178, JSON.stringify(bad));
+  assert.equal(r({ pr: 157, sha: rec }).count, 7, "identical SHA");
+  assert.equal(r({ pr: 157, sha: undefined, recordedSha: rec, liveSha: undefined, ancestryOk: true }).error, UNPROVEN178, "live head unknown");
+  assert.equal(r({ pr: 999, sha: live }).count, 7, "PR without its own marker: not a destination replay");
+  assert.equal(r(null).count, 7);
 });

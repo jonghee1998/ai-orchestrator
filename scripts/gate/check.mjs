@@ -6,6 +6,9 @@
 import { createHash } from "node:crypto";
 import { createClient } from "../handoff/github.mjs";
 import { reqFromPr } from "../handoff/lifecycle-evidence.mjs";
+import { resolveRoot } from "../handoff/lifecycle-run.mjs";
+import { collectRootEvidence } from "../handoff/root-evidence.mjs";
+import { resolveFailHistory } from "./fail-history.mjs";
 import { evaluateGate } from "./quality-gate.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -31,10 +34,21 @@ export async function collectGateInput(gh, prNumber, stage, prIn) {
   // 250 is the API cap on this endpoint: a PR at/over it cannot be fully enumerated => time unknown (fail closed).
   const firstCodeCommitAt = commits.length > 0 && commits.length < 250 && times.length === commits.length ? new Date(Math.min(...times)).toISOString() : undefined;
   const issueObj = await gh.getIssue(issue);
-  const items = [tag("issue", issueObj), tag("pr", pr), ...(await gh.listIssueComments(issue)).map((c) => tag("comment", c)), ...(await gh.listIssueComments(prNumber)).map((c) => tag("comment", c))]
+  const prComments = await gh.listIssueComments(prNumber);
+  // Issue #178: ROOT-WIDE failure history. Unresolvable root / unreadable or partial enumeration THROWS or errors => blocked; never defaults to [].
+  const rr = await resolveRoot(gh, issue);
+  if (rr.error) return { unresolvable: rr.error, head };
+  const base = await collectRootEvidence(gh, rr.root, { rootIssue: rr.root === issue ? issueObj : await gh.getIssue(rr.root), rootComments: await gh.listIssueComments(rr.root), pr, prComments });
+  if (base.error) return { unresolvable: base.error, head };
+  const fh = resolveFailHistory(base.items, rr.root);
+  if (fh.error) return { unresolvable: fh.error, head };
+  const items = [tag("issue", issueObj), tag("pr", pr), ...(await gh.listIssueComments(issue)).map((c) => tag("comment", c)), ...prComments.map((c) => tag("comment", c))]
     .map((it) => ({ ...it, trustedWriter: it.user?.id !== undefined && it.user?.id === pr.user?.id }));
-  const fingerprint = createHash("sha256").update(JSON.stringify([head, firstCodeCommitAt ?? null, items.map((i) => [i.kind, i.id, i.user?.id ?? null, i.created_at ?? null, i.updated_at ?? null, i.body])])).digest("hex");
-  return { gate: { issue, pr: prNumber, head, items, firstCodeCommitAt, stage }, head, fingerprint };
+  // RCA receipts may live anywhere in the root (trusted-PM only is enforced by the evaluator); add root items not already present.
+  const have = new Set(items.map((i) => `${i.kind}:${i.id}`));
+  for (const r of base.items) if (!have.has(`${r.kind === "pr-comment" ? "comment" : r.kind}:${r.id}`)) items.push({ ...r, kind: r.kind, updated_at: r.updated_at ?? r.created_at, trustedWriter: false });
+  const fingerprint = createHash("sha256").update(JSON.stringify([head, firstCodeCommitAt ?? null, rr.root, fh.records.map((r) => [r.class, r.pr, r.sha]).sort(), items.map((i) => [i.kind, i.id, i.user?.id ?? null, i.created_at ?? null, i.updated_at ?? null, i.body])])).digest("hex");
+  return { gate: { issue, root: rr.root, pr: prNumber, head, items, firstCodeCommitAt, stage, failHistory: fh.failHistory }, head, fingerprint };
 }
 
 const STATE = { pass: "success", unknown: "pending", blocked: "failure" };
