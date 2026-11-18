@@ -30,3 +30,9 @@
 
 ## 다른 프로젝트
 공통 규칙의 **자동 적용을 주장하지 말 것**. 대상 저장소가 [PROJECT_ADOPTION.md](docs/PROJECT_ADOPTION.md) 절차에 따라 채택하고 CI/Actions/필수 체크에 연결해야 강제할 수 있다.
+
+## 기존 실행 인터페이스 및 GitHub 매핑 유지
+
+역할 분담이 바뀌어도 `src/lib/agents/adapter.ts`의 `AgentAdapter` 계약은 유지한다: `checkConnection()`은 실제 확인 후에만 `connected`, 사용량 측정 불가는 `unknown`, `cloudCapable`은 로컬 인증과 클라우드 실행 가능성을 구분한다. 특정 역할을 어느 어댑터가 구현하는지는 실제 코드와 배포 설정으로 검증한다.
+
+GitHub 운영 기록은 작업 Issue, `agent:<id>` 담당 라벨, `status:<state>` 상태 라벨, `project:<id>` 또는 milestone, 인계 댓글, 연결 PR로 추적한다. 라벨이나 ACK만으로 실행 세션·코드 작업·독립 검수 완료를 추정하지 않는다. 상세 아키텍처는 [ARCHITECTURE.md](docs/ARCHITECTURE.md)를 참조한다.
