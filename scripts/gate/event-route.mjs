@@ -49,12 +49,12 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
   };
   // Issue #182: enumerate FIRST. If even the conservative superset (every eligible open PR) cannot be listed, nothing can be invalidated =>
   // explicit BLOCKED naming what may stay stale. Never a silent skip, never a claim of safety.
-  let open;
-  try { open = await gh.listPulls(); if (!Array.isArray(open)) throw new Error("listPulls returned a non-array"); }
+  let allPulls; // ALL states (open + closed history), not only open PRs
+  try { allPulls = await gh.listPulls(); if (!Array.isArray(allPulls)) throw new Error("listPulls returned a non-array"); }
   catch (e) {
     return { targets: eventIsPr ? [n] : [], blocked: true, error: "pr_enumeration_failed", detail: { message: String(e?.message ?? e).slice(0, 80) }, stale: STALE_NOTE, diagnostics };
   }
-  const eligible = open.filter((p) => ELIGIBLE(p, allowlist));
+  const eligible = allPulls.filter((p) => ELIGIBLE(p, allowlist));
   const superset = () => [...new Set([...(eventIsPr ? [n] : []), ...eligible.map((p) => p.number)])].sort((a, b) => a - b);
   const capped = (r) => {
     if (r.targets.length <= MATRIX_LIMIT) return r;
@@ -64,6 +64,7 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
     const roots = new Set();
     const direct = new Set(eventIsPr ? [n] : []);
     const lost = [];
+    let formerProven = false; // true once a movable event's former root(s) were derived and verified independently of `lost`
     const addRoot = async (issueNo, what) => {
       const r = await rootOf(issueNo);
       // Issue #184: a MISSING current marker is NOT proof of unrelatedness (the marker may be exactly what was just edited/deleted).
@@ -82,6 +83,8 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
     const prevBody = payload?.changes?.body?.from;
     const former = async (issueNo, owner, what) => {
       let present = false;
+      const cur = new Set(issueNo === null ? [] : [issueNo]); // issues whose PR history is scanned: the CURRENT link ...
+      const prior = new Set(); // ... and the payload-PRIOR link (history of the CURRENT link only describes the NEW side when the link moved)
       const addVerified = async (m, src) => {
         if (m === "ambiguous") throw Object.assign(new Error("previous_root_ambiguous"), { detail: { source: what } });
         if (!Number.isInteger(m)) return;
@@ -89,13 +92,17 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
         if (r.error) throw Object.assign(new Error("previous_root_unverifiable"), { detail: { source: what, via: src, why: r.error } });
         roots.add(r.root); diagnostics.push({ source: what, formerRoot: r.root, via: src });
       };
-      if (typeof prevBody === "string") { present = true; const pm = rootMarker({ user: owner, body: prevBody }); await addVerified(pm, "payload_prior"); const pl = reqFromPr({ user: owner, body: prevBody }); if (pl && pl !== issueNo) { const r = await rootOf(pl); if (r.error) throw Object.assign(new Error("previous_root_unverifiable"), { detail: { source: what, via: "payload_prior_link", why: r.error } }); roots.add(r.root); } }
-      for (const p of open) {
+      if (typeof prevBody === "string") { const pm = rootMarker({ user: owner, body: prevBody }); present = Number.isInteger(pm) || (!/orch-root-request:v1/.test(prevBody) && (!eventIsPr || !reqFromPr({ user: owner, body: prevBody }))); /* a prior that names a root but is not verifiable (untrusted author / forged) is NOT proof of "was unmarked" */ await addVerified(pm, "payload_prior"); const pl = reqFromPr({ user: owner, body: prevBody }); if (pl && pl !== issueNo) { prior.add(pl); const r = await rootOf(pl); if (r.error) throw Object.assign(new Error("previous_root_unverifiable"), { detail: { source: what, via: "payload_prior_link", why: r.error } }); roots.add(r.root); diagnostics.push({ source: what, formerRoot: r.root, via: "payload_prior_link" }); present = true; } }
+      for (const p of allPulls) {
         if (p.number === n && eventIsPr) continue;
-        if (reqFromPr(p) !== issueNo && rootMarker(p) !== issueNo) continue;
+        const viaPrior = prior.has(reqFromPr(p)) || prior.has(rootMarker(p)), viaCur = cur.has(reqFromPr(p)) || cur.has(rootMarker(p));
+        if (!viaPrior && !viaCur) continue;
+        // History of the current link proves a FORMER root only when no payload prior exists to say the link may have moved (issue events:
+        // the issue number cannot move). With a payload prior, only the prior side may satisfy `present`.
+        const counts = viaPrior || !eventIsPr || typeof prevBody !== "string";
         const pm = rootMarker(p);
         if (pm === "ambiguous") throw Object.assign(new Error("previous_root_ambiguous"), { detail: { source: what, pr: p.number } });
-        if (Number.isInteger(pm)) { present = true; const r = await rootOf(pm); if (r.error) { roots.add(pm); diagnostics.push({ source: what, formerRoot: pm, via: "history_marker_unverified", why: r.error }); } else { roots.add(r.root); diagnostics.push({ source: what, formerRoot: r.root, via: "history_marker", pr: p.number }); } }
+        if (Number.isInteger(pm)) { if (counts) present = true; const r = await rootOf(pm); if (r.error) { roots.add(pm); diagnostics.push({ source: what, formerRoot: pm, via: "history_marker_unverified", why: r.error }); } else { roots.add(r.root); diagnostics.push({ source: what, formerRoot: r.root, via: "history_marker", pr: p.number, counted: counts }); } }
       }
       if (!present) throw Object.assign(new Error("previous_root_unprovable"), { detail: { source: what } });
     };
@@ -116,17 +123,35 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
         // a PR whose own marker disagrees with its linked lineage was retargeted/forged: the OLD root is unknowable => superset
         if (linkedRoot !== null && mRoot !== null && linkedRoot !== mRoot) throw Object.assign(new Error("root_marker_conflict"), { detail: { pr: n } });
       }
-      if (canMove && !lost.length && linked) await former(linked, evPr.user, `pr#${n}.prior`);
+      // Issue #192: the former root is derived INDEPENDENTLY of `lost` (a combined link+marker edit is exactly when it is needed).
+      // Without a payload prior the old link is unknowable once anything was lost => conservative superset, never B-only.
+      if (canMove) {
+        if (lost.length && typeof prevBody !== "string") throw Object.assign(new Error("root_marker_lost"), { detail: { source: `pr#${n}.prior`, why: "attribution_lost_without_prior_candidate" } });
+        await former(linked ?? null, evPr.user, `pr#${n}.prior`);
+        formerProven = true;
+      }
     } else {
       await addRoot(n, `issue#${n}`);
-      if (canMove && !lost.length) { const ev = await gh.getIssue(n).catch(() => null); await former(n, ev?.user ?? { login: "jonghee1998", id: 129052128, type: "User" }, `issue#${n}.prior`); }
+      // An issue's number cannot change, so its anchors are exactly the PRs linked to it: with a lost marker and NO payload prior the
+      // lost recovery below (history of PRs linked to this very issue; conflict/none => superset) stays the independent source.
+      if (canMove && (!lost.length || typeof prevBody === "string")) {
+        const ev = await gh.getIssue(n).catch(() => null);
+        await former(n, ev?.user ?? { login: "jonghee1998", id: 129052128, type: "User" }, `issue#${n}.prior`);
+        formerProven = true;
+      }
     }
     // Issue #184: recover the FORMER root of every lost source from independently verified history = the PR(s) directly linked to that issue
     // carrying their OWN trusted marker that resolves (self-marked root). No recoverable, agreeing root => conservative superset.
     for (const l of lost) {
+      // Movable event whose former root(s) are already proven independently: the lost marker needs no (current-side-only) recovery. The
+      // current root, when known, came from the live link; a lost link (issue null) still falls to the superset below.
+      if (formerProven && l.issue !== null) continue;
+      // Issue #192 noise control: a NON-moving event (comment / issue opened) on an issue that no PR (any state) links to or names, and that
+      // carries no marker, is anchored to no root. Moving events and any issue with an anchoring PR keep the conservative path.
+      if (!canMove && !eventIsPr && l.issue === n && !allPulls.some((p) => reqFromPr(p) === n || rootMarker(p) === n)) { diagnostics.push({ source: l.source, unrelated: "anchorless_unmarked_issue" }); continue; }
       if (l.issue === null) throw Object.assign(new Error("root_marker_lost"), { detail: { source: l.source, why: "no_linked_issue_for_event_pr" } });
       const hist = new Set();
-      for (const p of eligible) {
+      for (const p of allPulls) {
         if (reqFromPr(p) !== l.issue || p.number === n) continue;
         const pm = rootMarker(p);
         if (pm === "ambiguous") throw Object.assign(new Error("root_marker_lost"), { detail: { source: l.source, why: "historical_marker_ambiguous", pr: p.number } });
@@ -170,7 +195,30 @@ export async function refreshPr({ gh, prNumber, allowlist, publish = true, check
     if (pr && !ELIGIBLE(pr, allowlist)) { out({ event, pr: prNumber, result: "skip", reason: "pr_out_of_scope" }); return []; }
     const expectedHead = SHA.test(pr?.head?.sha ?? "") ? pr.head.sha : (SHA.test(payloadHead ?? "") ? payloadHead : undefined);
     const results = [];
+    // Issue #192: invalidate BOTH contexts on the live head BEFORE any stage collects or evaluates evidence, so no stale success of either
+    // context stays visible while the other stage is being evaluated. A head that moves meanwhile is invalidated too (bounded re-read).
+    // A failed invalidation write is reported (`invalidation_failed`, published:false) and that stage is NOT evaluated; it is never
+    // reported as invalidated. runCheck still invalidates again itself (idempotent), so the check command stays safe on its own.
+    const failedInv = new Set();
+    if (publish && expectedHead) {
+      const done = new Set();
+      let head = expectedHead;
+      for (let i = 0; i < 3 && head && !done.has(head); i++) {
+        done.add(head);
+        for (const stage of STAGES) {
+          try { await gh.createCommitStatus(head, { state: "pending", context: `quality-gate/${stage}`, description: "re-evaluating evidence" }); }
+          catch { failedInv.add(stage); }
+        }
+        let again = null;
+        try { again = await gh.getPull(prNumber); } catch { /* keep the last known head */ }
+        head = SHA.test(again?.head?.sha ?? "") ? again.head.sha : null;
+      }
+    }
     for (const stage of STAGES) {
+      if (failedInv.has(stage)) {
+        const row = { pr: prNumber, stage, status: "blocked", head: expectedHead, published: false, unmet: ["invalidation_failed"] };
+        results.push(row); out({ event, ...row }); continue;
+      }
       const res = await check({ gh, prNumber, stage, publish, expectedHead });
       const row = { pr: prNumber, stage, status: res.status, head: res.head, published: res.published, unmet: res.unmet };
       results.push(row); out({ event, ...row });

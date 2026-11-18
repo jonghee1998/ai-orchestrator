@@ -101,7 +101,7 @@ test("#182-B5 original PR (`supersedes none`) is handled separately: min over it
   assert.equal((await pre(empty)).status, "blocked");
 });
 test("#182-B6 (superseded by #184) root146 bound is 13 for that ordinal only; every other root keeps the default", () => {
-  assert.deepEqual(ROOT_CEILING_EXCEPTIONS, { 146: 15 }); assert.equal(ceilingFor(146), 15);
+  assert.deepEqual(ROOT_CEILING_EXCEPTIONS, { 146: 16 }); assert.equal(ceilingFor(146), 16);
   assert.equal(MAX_CORRECTIONS, 3); assert.equal(ceilingFor(147), 5); assert.equal(ceilingFor(1), 5);
 });
 
@@ -115,6 +115,7 @@ function world(over = {}) {
     getIssue: async (n) => { if (over.gone?.includes(n)) throw new Error(`GitHub GET /issues/${n} -> 404`); return issues[n] ?? { number: n, user: OWNER, body: "plain" }; },
     getPull: async (n) => pulls.find((p) => p.number === n) ?? pr(n, 1),
     listPulls: async () => { if (over.listPulls) return over.listPulls(); return pulls; },
+    createCommitStatus: async () => {}, // refreshPr invalidates both contexts first (#192)
   };
 }
 const ev = (name, number, isPr = false) => ({ name, payload: name === "pull_request_target" ? { pull_request: { number } } : { issue: { number, ...(isPr ? { pull_request: {} } : {}) } } });
@@ -135,7 +136,7 @@ test("#182-A2 deleted root/sibling issue (404) => superset; marker DELETED from 
   assert.deepEqual(noMarker.targets, T4, "#184: a lost marker is NOT proof of unrelatedness => conservative superset"); assert.match(noMarker.error, /root_marker_lost/);
   const del = await targetsFromEvent({ ...ev("issue_comment", 2), gh: world({ issues: { 2: iss(2, 0) } }), allowlist: AL });
   assert.deepEqual(del.targets, T4, "#184: sibling issue lost its marker, former root unprovable => superset");
-  assert.deepEqual((await targetsFromEvent({ ...ev("issue_comment", 99), gh: world(), allowlist: AL })).targets, T4, "#184: unmarked issue is never silently unrelated");
+  assert.equal((await targetsFromEvent({ ...ev("issue_comment", 99), gh: world(), allowlist: AL })).error, undefined, "#192: anchor-less unmarked issue comment is explicitly unrelated (no PR links to / names it)");
 });
 test("#182-A3 PR marker retargeted/forged (marker root != linked root) or ambiguous => superset", async () => {
   const gh = (body) => world({ pulls: [pr(5, 1, { body }), pr(6, 2), pr(7, 3), pr(8, 50)] });

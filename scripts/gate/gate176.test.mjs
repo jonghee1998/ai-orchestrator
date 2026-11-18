@@ -116,7 +116,7 @@ test("#176-1 no-publish mode never writes", async () => {
 
 // ---- 2. trusted EVENT refresh ----
 const prObj = (n, o = {}) => ({ number: n, state: "open", user: DEV, head: { sha: n === 5 ? HEAD : "c".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->", ...o });
-const evGh = (pulls) => ({ getIssue: async (n) => ({ number: n, user: { login: "jonghee1998", id: 129052128, type: "User" }, body: n < 90 ? `<!-- orch-root-request:v1 #${n} -->` : "plain" }), listPulls: async () => pulls, getPull: async (n) => pulls.find((p) => p.number === n) ?? (() => { throw new Error("404"); })() });
+const evGh = (pulls) => ({ createCommitStatus: async () => {}, getIssue: async (n) => ({ number: n, user: { login: "jonghee1998", id: 129052128, type: "User" }, body: n < 90 ? `<!-- orch-root-request:v1 #${n} -->` : "plain" }), listPulls: async () => pulls, getPull: async (n) => pulls.find((p) => p.number === n) ?? (() => { throw new Error("404"); })() });
 const AL = [BR];
 
 test("#176-2 dispatch mapping: PR comment / Issue comment / Issue edit / PR body edit / dispatch, created|edited|deleted alike", async () => {
@@ -135,7 +135,8 @@ test("#176-2 dispatch mapping: PR comment / Issue comment / Issue edit / PR body
 test("#176-2 scope: unrelated issue, closed PR, fork PR, other base branch, unsupported event => skipped (no write)", async () => {
   const gh = evGh([prObj(5, { state: "closed" }), prObj(6, { head: { sha: HEAD, repo: { full_name: "fork/r" } } }), prObj(7, { base: { ref: "main", repo: { full_name: "o/r" } } })]);
   assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh, allowlist: AL })).skip, "no_open_pr_for_root");
-  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 99 } }, gh, allowlist: AL })).error, "root_marker_lost", "#184: unmarked issue is not provably unrelated (superset, empty here as every PR is out of scope)");
+  const anchorless = await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 99 } }, gh, allowlist: AL });
+  assert.deepEqual([anchorless.error, anchorless.skip], [undefined, "unrelated_no_root_marker"], "#192: unmarked issue that NO PR (any state) links to or names is anchored to no root: explicit skip, no red noise");
   assert.equal((await targetsFromEvent({ name: "push", payload: {}, gh, allowlist: AL })).skip, "unsupported_event");
   assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: -1 } }, gh, allowlist: AL })).skip, "invalid_issue");
   const calls = []; const out = await handleEvent({ name: "issue_comment", payload: { issue: { number: 6, pull_request: {} } }, gh, allowlist: AL, check: async (a) => { calls.push(a); return {}; } });

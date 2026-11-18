@@ -624,7 +624,7 @@ test("#161: contradictory / unknown correction records fail closed", () => {
   assert.equal(resolveRootCorrections([cm(1, 153), cm(2, 153)], 146).error, "root_correction_conflict");
   assert.equal(resolveRootCorrections([cm(2, 160)], 146).error, "root_correction_gap");
   assert.equal(resolveRootCorrections([cm(1, 153, undefined, 99)], 146).error, "root_correction_marker_other_root");
-  assert.equal(resolveRootCorrections([cm(16, 153, H("a"))], 146).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections([cm(17, 153, H("a"))], 146).error, "root_correction_n_out_of_range");
   assert.equal(resolveRootCorrections([{ user: OWNER, body: "<!-- orch-root-correction:v1 root146 n=x -->" }], 146).error, "root_correction_marker_malformed");
 });
 test("#161: entrypoint uses the root counter (PR160-like case logs r2, not r1)", async () => {
@@ -668,7 +668,7 @@ test("#166: root-specific correction limit override is trusted, bounded, fail cl
   assert.equal(resolveCorrectionLimit([lim(5)], 146).max, 5);
   assert.equal(resolveCorrectionLimit([lim(5)], 99).error, "correction_limit_other_root");
   assert.equal(resolveCorrectionLimit([lim(5, 146, MAL)], 146).max, 3, "untrusted ignored => default");
-  assert.equal(resolveCorrectionLimit([lim(16)], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([lim(17)], 146).error, "correction_limit_out_of_range");
   assert.equal(resolveCorrectionLimit([lim(7)], 99).error, "correction_limit_other_root");
   assert.equal(resolveCorrectionLimit([lim(2)], 146).error, "correction_limit_out_of_range");
   assert.equal(resolveCorrectionLimit([lim(4), lim(5)], 146).error, "correction_limit_conflict");
@@ -677,7 +677,7 @@ test("#166: root-specific correction limit override is trusted, bounded, fail cl
   const four = [cm(1, 153), cm(2, 160), cm(3, 165), cm(4, 170)];
   assert.equal(resolveRootCorrections(four, 146).count, 4, "over-limit history retained as lower bound (#168)");
   assert.equal(correctionRound({ resolved: resolveRootCorrections(four, 146), prNumber: 180, chainDepth: 1, floor: 1, limit: 3 }).round, 4, "default 3 + 4 consumed => over cap (blocked)");
-  assert.equal(resolveRootCorrections([cm(16, 1, H("a"))], 146, 5).error, "root_correction_n_out_of_range");
+  assert.equal(resolveRootCorrections([cm(17, 1, H("a"))], 146, 5).error, "root_correction_n_out_of_range");
   assert.equal(resolveRootCorrections(four, 146, 5).count, 4);
   const r5 = resolveRootCorrections([...four, cm(5, 175)], 146, 5);
   assert.equal(correctionRound({ resolved: r5, prNumber: 180, chainDepth: 1, floor: 1, limit: 5 }).round, 6, "sixth never");
@@ -707,7 +707,7 @@ test("#168: over-limit legacy/structured correction history is never erased", ()
   assert.equal(lo.count, 4);
   assert.equal(correctionRound({ resolved: lo, prNumber: 200, chainDepth: 1, floor: 1, limit: 3 }).round, 4, "legacy 4 + default 3 => blocked, not round 1");
   assert.equal(planLifecycle(base({ round: 4 })).reason, "round_cap_exceeded");
-  assert.equal(resolveRootCorrections([legacy(16)], 146, 5).error, "root_correction_legacy_out_of_range");
+  assert.equal(resolveRootCorrections([legacy(17)], 146, 5).error, "root_correction_legacy_out_of_range");
   assert.equal(resolveRootCorrections([{ ...legacy(4), user: MAL }], 146).count, 0, "untrusted legacy ignored");
   // authorized 5 then lowered to 3 with consumed 4/5 => stays blocked, not reset
   const five = [cm(1, 153), cm(2, 160), cm(3, 165), cm(4, 170)];
@@ -736,7 +736,7 @@ test("#170: root146 max=6 with prior 5 is allowed; 7 / malformed / other roots /
   const m = (r, k) => `<!-- orch-root-correction-limit:v1 root${r} max=${k} -->`;
   assert.equal(resolveCorrectionLimit([T(m(146, 6))], 146).max, 6);
   assert.equal(resolveCorrectionLimit([T(m(146, 7))], 146).max, 7, "#172 exact exception");
-  assert.equal(resolveCorrectionLimit([T(m(146, 16))], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([T(m(146, 17))], 146).error, "correction_limit_out_of_range");
   assert.equal(resolveCorrectionLimit([T(m(136, 6))], 136).error, "correction_limit_out_of_range", "no global raise");
   assert.equal(resolveCorrectionLimit([T(m(136, 7))], 136).error, "correction_limit_out_of_range", "no global raise (7)");
   assert.equal(resolveCorrectionLimit([], 146).max, 3, "default stays 3");
@@ -747,13 +747,13 @@ test("#170: root146 max=6 with prior 5 is allowed; 7 / malformed / other roots /
   assert.equal(resolveRootCorrections(five, 146).count, 5, "n5 preserved");
   assert.equal(resolveRootCorrections([...five, cm(6, 170)], 146).count, 6, "n6 valid for root146");
   assert.equal(resolveRootCorrections([...five, cm(6, 170), cm(7, 171)], 146).count, 7, "#172 n7 valid for root146");
-  assert.equal(resolveRootCorrections([...five, cm(6, 170), cm(7, 171), cm(16, 173, 146)], 146).error, "root_correction_n_out_of_range", "no 16th");
+  assert.equal(resolveRootCorrections([...five, cm(6, 170), cm(7, 171), cm(17, 173, 146)], 146).error, "root_correction_n_out_of_range", "no 17th");
   assert.equal(resolveRootCorrections([cm(6, 170, 136)], 136).error, "root_correction_n_out_of_range", "n6 invalid elsewhere");
   // 6 prior + max 6 => the next PR is round 7 = limit+1 (blocked by planner as cap reached)
   const r = correctionRound({ resolved: resolveRootCorrections([...five, cm(6, 170)], 146), prNumber: 172, chainDepth: 1, floor: 1, limit: 6 });
   assert.equal(r.round, 7);
   assert.equal(planLifecycle(base({ req: 146, round: 6, maxRounds: 6, reviews: [review({ has_unresolved_findings: true })] })).reason, "round_cap_reached_before_revision");
   assert.equal(planLifecycle(base({ req: 146, maxRounds: 7 })).reason, undefined);
-  assert.equal(planLifecycle(base({ req: 146, maxRounds: 16 })).reason, "invalid_round_limit");
+  assert.equal(planLifecycle(base({ req: 146, maxRounds: 17 })).reason, "invalid_round_limit");
   assert.equal(planLifecycle(base({ req: 136, maxRounds: 6 })).reason, "invalid_round_limit");
 });

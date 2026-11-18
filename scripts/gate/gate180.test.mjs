@@ -22,6 +22,7 @@ function world(over = {}) {
     getIssue: async (n) => { if (over.getIssueFail === n) throw new Error("GitHub GET 403"); return issues[n] ?? { number: n, user: OWNER, body: "plain" }; },
     getPull: async (n) => pulls.find((p) => p.number === n) ?? { number: n, state: "open", user: DEV, head: { sha: "9".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->" },
     listPulls: async () => { if (over.listPulls) return over.listPulls(); return pulls; },
+    createCommitStatus: async () => {}, // refreshPr invalidates both contexts first (#192)
   };
 }
 const ev = (name, number, isPr = false) => ({ name, payload: name === "pull_request_target" ? { pull_request: { number } } : { issue: { number, ...(isPr ? { pull_request: {} } : {}) } } });
@@ -62,8 +63,10 @@ test("#180 S5 fail closed with concrete diagnostics: non-array, partial/API fail
   assert.deepEqual(r.targets, [5]); assert.ok(r.error);
 });
 test("#180 S5b (#184) issue without any root marker is NOT unrelated: conservative superset; a sibling with unresolvable lineage is diagnosed AND targeted (#182: never left with a stale success)", async () => {
-  const a = await targetsFromEvent({ ...ev("issue_comment", 60), gh: world(), allowlist: AL });
-  assert.ok(a.targets.length > 0 && /root_marker_lost/.test(a.error), "#184: a missing marker is NOT proof of unrelatedness => conservative superset");
+  const a = await targetsFromEvent({ ...ev("issue_comment", 60), gh: world({ pulls: [pr(5, 1), pr(11, 60)] }), allowlist: AL });
+  assert.ok(a.targets.length > 0 && /root_marker_lost/.test(a.error), "#184: a missing marker with an ANCHORING PR (linked to the issue) is NOT proof of unrelatedness => conservative superset");
+  const free = await targetsFromEvent({ ...ev("issue_comment", 60), gh: world(), allowlist: AL });
+  assert.deepEqual([free.error, free.skip], [undefined, "unrelated_no_root_marker"], "#192: anchor-less unmarked issue comment is not red noise");
   const b = await targetsFromEvent({ ...ev("issue_comment", 1), gh: world({ pulls: [pr(5, 1), pr(11, 60)] }), allowlist: AL });
   assert.deepEqual(b.targets, [5, 11]); assert.deepEqual(b.diagnostics, [{ pr: 11, unattributable: "root_marker_missing" }]);
 });

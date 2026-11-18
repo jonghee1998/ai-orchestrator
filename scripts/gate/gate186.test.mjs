@@ -47,7 +47,9 @@ test("#186-A2 only the link absent / only the marker absent => lost policy, neve
   assert.deepEqual(noLink.targets, [5, 6, 8]); assert.match(noLink.error, /root_marker_lost/);
   // marker absent, another PR linked to the same issue carries a verified marker => history recovers root 1 (siblings of root 1 only)
   const rec = await targetsFromEvent({ ...prEv(5), gh: world({ pulls: [pr(5, 2, { body: "Closes #2" }), pr(6, 3), pr(7, 2), pr(8, 50)] }), allowlist: AL });
-  assert.deepEqual([rec.targets, rec.error], [[5, 6, 7], undefined]);
+  assert.deepEqual([rec.targets, rec.error], [[5, 6, 7, 8], "root_marker_lost"], "#192: no payload prior + lost marker => the OLD link is unknowable => superset, never history-of-current-link only");
+  const withPrior = await targetsFromEvent({ name: "pull_request_target", payload: { action: "edited", changes: { body: { from: "Closes #2\n<!-- orch-root-request:v1 #1 -->" } }, pull_request: { number: 5 } }, gh: world({ pulls: [pr(5, 2, { body: "Closes #2" }), pr(6, 3), pr(7, 2), pr(8, 50)] }), allowlist: AL });
+  assert.deepEqual([withPrior.targets, withPrior.error], [[5, 6, 7], undefined], "#192: payload prior (candidate) verified live => former root A, not a superset");
   // marker absent, no independent history => superset
   const none = await targetsFromEvent({ ...prEv(5), gh: world({ pulls: [pr(5, 2, { body: "Closes #2" }), pr(6, 3), pr(8, 50)] }), allowlist: AL });
   assert.deepEqual(none.targets, [5, 6, 8]); assert.match(none.error, /root_marker_lost/);
@@ -99,7 +101,9 @@ test("#186-B2 issues.opened of a NEW trusted-root issue (same-class fail history
 });
 test("#186-B3 opened issue with missing / other-root marker: lost => superset (missing); verified other root => only that root", async () => {
   const missing = await targetsFromEvent({ name: "issues", payload: { action: "opened", issue: { number: 21 } }, gh: world({ issues: { 21: iss(21, 0) } }), allowlist: AL });
-  assert.deepEqual(missing.targets, [5, 6, 8]);
+  assert.deepEqual([missing.targets, missing.error], [[], undefined], "#192: anchor-less unmarked new issue is unrelated, not red noise");
+  const anchored = await targetsFromEvent({ name: "issues", payload: { action: "opened", issue: { number: 21 } }, gh: world({ issues: { 21: iss(21, 0) }, pulls: [pr(5, 21, { body: "Closes #21" }), pr(6, 3), pr(8, 50)] }), allowlist: AL });
+  assert.deepEqual(anchored.targets, [5, 6, 8]); assert.match(anchored.error, /root_marker_lost/);
   const other = await targetsFromEvent({ name: "issues", payload: { action: "opened", issue: { number: 50 } }, gh: world(), allowlist: AL });
   assert.deepEqual(other.targets, [8]);
 });

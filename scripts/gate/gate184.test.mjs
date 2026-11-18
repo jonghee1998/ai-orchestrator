@@ -54,8 +54,10 @@ test("#184-A2 marker removed AND no verified historical link => superset: both s
 test("#184-A3 no directly linked PR / root-only issue / unmarked issue: never silently UNRELATED", async () => {
   const none = await targetsFromEvent({ ...ev("issues", 2), gh: world({ issues: { 2: iss(2, 0) }, pulls: [pr(6, 3), pr(8, 50)] }), allowlist: AL });
   assert.deepEqual(none.targets, [6, 8]); assert.match(none.error, /root_marker_lost/);
-  const unmarked = await targetsFromEvent({ ...ev("issue_comment", 99), gh: world(), allowlist: AL });
-  assert.deepEqual(unmarked.targets, [5, 6, 8]);
+  const unmarked = await targetsFromEvent({ ...ev("issue_comment", 99), gh: world({ pulls: [pr(5, 99), pr(6, 3), pr(8, 50)] }), allowlist: AL });
+  assert.deepEqual(unmarked.targets, [5, 6, 8]); assert.match(unmarked.error, /root_marker_lost/); // anchored by PR5 -> #99: never silently unrelated
+  const anchorless = await targetsFromEvent({ ...ev("issue_comment", 99), gh: world(), allowlist: AL });
+  assert.deepEqual([anchorless.targets, anchorless.skip, anchorless.error], [[], "unrelated_no_root_marker", undefined]); // #192
   const rootOnly = await targetsFromEvent({ ...ev("issue_comment", 1), gh: world(), allowlist: AL });
   assert.deepEqual(rootOnly.targets, [5, 6]); assert.equal(rootOnly.error, undefined);
 });
@@ -92,13 +94,13 @@ test("#184-A7 event trace: handleEvent reports targets and statuses; nothing wri
 test("#184-B1 resolver, planner and lifecycle share ONE policy object (no duplicate constants)", () => {
   assert.equal(rc.ceilingFor, policy.ceilingFor); assert.equal(rc.ROOT_CEILING_EXCEPTIONS, policy.ROOT_CEILING_EXCEPTIONS);
   assert.equal(lc.MAX_ROUNDS_ROOT_EXCEPTIONS, policy.ROOT_CEILING_EXCEPTIONS); assert.equal(lc.MAX_ROUNDS_CEILING, policy.CORRECTION_CEILING);
-  assert.deepEqual({ ...policy.ROOT_CEILING_EXCEPTIONS }, { 146: 15 });
+  assert.deepEqual({ ...policy.ROOT_CEILING_EXCEPTIONS }, { 146: 16 });
 });
 test("#184-B2 every supported bound agrees across resolver and planner; unsupported/low/other-root rejected by both", () => {
   const T = (b) => ({ user: OWNER, created_at: T0, updated_at: T0, body: b });
   const lim = (root, max) => rc.resolveCorrectionLimit([T(`<!-- orch-root-correction-limit:v1 root${root} max=${max} -->`)], root);
   const plan = (req, maxRounds) => lc.planLifecycle({ req, round: 1, maxRounds, config: lc.parseConfig({ allowlist: [BR], expectedBase: "c".repeat(40) }), integrationTarget: BR, pr: null, reviews: [], pmAccepts: [], pmRevises: [], records: [] }).reason;
-  for (const [root, max, ok] of [[146, 3, true], [146, 12, true], [146, 13, true], [146, 14, true], [146, 15, true], [146, 16, false], [146, 2, false], [136, 5, true], [136, 6, false], [147, 15, false]]) {
+  for (const [root, max, ok] of [[146, 3, true], [146, 12, true], [146, 13, true], [146, 14, true], [146, 15, true], [146, 16, true], [146, 17, false], [146, 2, false], [136, 5, true], [136, 6, false], [147, 15, false]]) {
     const a = !lim(root, max).error, b = plan(root, max) !== "invalid_round_limit";
     assert.equal(a, ok, `resolver ${root}/${max}`); assert.equal(b, ok, `planner ${root}/${max}`);
   }
@@ -117,7 +119,7 @@ test("#184-B3 runLifecycle root146 with n1..n12 + max=13: no invalid_round_limit
   assert.ok(!/correction_limit|n_out_of_range/.test(r.reason ?? ""), JSON.stringify(r));
   assert.notEqual(r.action, "merge"); // no review / security evidence: still not a pass
   // exceeding the authorized bound is rejected
-  const over = { ...limit, body: limit.body.replace("max=13", "max=16") };
+  const over = { ...limit, body: limit.body.replace("max=13", "max=17") };
   const r2 = await runLifecycle({ ...gh, listIssueComments: async (n) => (n === 146 ? [over, ...marks] : []) }, 400, { config: lc.parseConfig({ allowlist: [BR], expectedBase: "c".repeat(40) }), expectedHead: "e".repeat(40) });
   assert.equal(r2.reason, "correction_limit_out_of_range");
 });
