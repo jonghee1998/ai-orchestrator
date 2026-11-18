@@ -72,6 +72,33 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
       roots.add(r.root);
       return r.root;
     };
+    // Issue #188: OLD-ROOT / NEW-ROOT UNION. A current valid root is NOT proof of the former root: an event that can change attribution
+    // (issue edited/deleted/unknown action, PR edited/unknown action) refreshes dependents(old) UNION dependents(new). Former roots come from
+    // (a) payload `changes.body.from` - a CANDIDATE only (never instruction/evidence/PASS), each verified live through resolveRoot; and
+    // (b) independent live history: every PR (any state) linked to the issue, or carrying a trusted marker naming it. Neither source =>
+    // previous_root_unprovable => conservative superset. Ambiguous / unverifiable prior => superset.
+    const act = payload?.action;
+    const canMove = isIssueEvt ? (name === "issues" && act !== "opened") : act !== "opened" && act !== "reopened" && act !== "synchronize" && act !== "ready_for_review";
+    const prevBody = payload?.changes?.body?.from;
+    const former = async (issueNo, owner, what) => {
+      let present = false;
+      const addVerified = async (m, src) => {
+        if (m === "ambiguous") throw Object.assign(new Error("previous_root_ambiguous"), { detail: { source: what } });
+        if (!Number.isInteger(m)) return;
+        const r = await rootOf(m);
+        if (r.error) throw Object.assign(new Error("previous_root_unverifiable"), { detail: { source: what, via: src, why: r.error } });
+        roots.add(r.root); diagnostics.push({ source: what, formerRoot: r.root, via: src });
+      };
+      if (typeof prevBody === "string") { present = true; const pm = rootMarker({ user: owner, body: prevBody }); await addVerified(pm, "payload_prior"); const pl = reqFromPr({ user: owner, body: prevBody }); if (pl && pl !== issueNo) { const r = await rootOf(pl); if (r.error) throw Object.assign(new Error("previous_root_unverifiable"), { detail: { source: what, via: "payload_prior_link", why: r.error } }); roots.add(r.root); } }
+      for (const p of open) {
+        if (p.number === n && eventIsPr) continue;
+        if (reqFromPr(p) !== issueNo && rootMarker(p) !== issueNo) continue;
+        const pm = rootMarker(p);
+        if (pm === "ambiguous") throw Object.assign(new Error("previous_root_ambiguous"), { detail: { source: what, pr: p.number } });
+        if (Number.isInteger(pm)) { present = true; const r = await rootOf(pm); if (r.error) { roots.add(pm); diagnostics.push({ source: what, formerRoot: pm, via: "history_marker_unverified", why: r.error }); } else { roots.add(r.root); diagnostics.push({ source: what, formerRoot: r.root, via: "history_marker", pr: p.number }); } }
+      }
+      if (!present) throw Object.assign(new Error("previous_root_unprovable"), { detail: { source: what } });
+    };
     if (eventIsPr) {
       const evPr = await gh.getPull(n);
       const linked = reqFromPr(evPr);
@@ -89,8 +116,10 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
         // a PR whose own marker disagrees with its linked lineage was retargeted/forged: the OLD root is unknowable => superset
         if (linkedRoot !== null && mRoot !== null && linkedRoot !== mRoot) throw Object.assign(new Error("root_marker_conflict"), { detail: { pr: n } });
       }
+      if (canMove && !lost.length && linked) await former(linked, evPr.user, `pr#${n}.prior`);
     } else {
       await addRoot(n, `issue#${n}`);
+      if (canMove && !lost.length) { const ev = await gh.getIssue(n).catch(() => null); await former(n, ev?.user ?? { login: "jonghee1998", id: 129052128, type: "User" }, `issue#${n}.prior`); }
     }
     // Issue #184: recover the FORMER root of every lost source from independently verified history = the PR(s) directly linked to that issue
     // carrying their OWN trusted marker that resolves (self-marked root). No recoverable, agreeing root => conservative superset.

@@ -32,7 +32,7 @@ test("#180 S1/S3 root-issue, revision-issue and sibling-chain events refresh ALL
     assert.deepEqual(r.targets, [5, 6, 7], `issue ${n}`);
     assert.equal(r.error, undefined);
   }
-  const u = await targetsFromEvent({ ...ev("issues", 50), gh: world(), allowlist: AL });
+  const u = await targetsFromEvent({ name: "issues", payload: { action: "edited", changes: { body: { from: mark(50) } }, issue: { number: 50 } }, gh: world(), allowlist: AL }); // #188: edit events carry the prior body
   assert.deepEqual(u.targets, [8]);
 });
 test("#180 S2 sibling PR comment / body event fans out to every PR of the root; dispatch stays single", async () => {

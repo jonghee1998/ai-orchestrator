@@ -125,7 +125,8 @@ test("#176-2 dispatch mapping: PR comment / Issue comment / Issue edit / PR body
     assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 5, pull_request: {} } }, gh, allowlist: AL })).targets, [5, 6, 7], `#186 unmarked event PR => superset; PR comment ${action} (root-wide fan-out #180)`);
     assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 1 } }, gh, allowlist: AL })).targets, [5, 7], `linked Issue comment ${action}`);
   }
-  assert.deepEqual((await targetsFromEvent({ name: "issues", payload: { action: "edited", issue: { number: 2 } }, gh, allowlist: AL })).targets, [6]);
+  assert.deepEqual((await targetsFromEvent({ name: "issues", payload: { action: "edited", issue: { number: 2 } }, gh, allowlist: AL })).targets, [5, 6, 7], "#188: edited issue with no previous body and no independent history => former root unprovable => superset");
+  assert.deepEqual((await targetsFromEvent({ name: "issues", payload: { action: "edited", changes: { body: { from: "<!-- orch-root-request:v1 #2 -->" } }, issue: { number: 2 } }, gh, allowlist: AL })).targets, [6], "#188: prior payload root=2 verified live (A->A): no widening");
   assert.deepEqual((await targetsFromEvent({ name: "pull_request_target", payload: { action: "edited", pull_request: { number: 5 } }, gh, allowlist: AL })).targets, [5, 6, 7], "#186: event PR carries no root marker => lost policy => superset");
   assert.deepEqual((await targetsFromEvent({ name: "workflow_dispatch", payload: { inputs: { pr: "9" } }, gh, allowlist: AL })).targets, [9]);
   assert.equal((await targetsFromEvent({ name: "workflow_dispatch", payload: { inputs: { pr: "x" } }, gh, allowlist: AL })).skip, "invalid_dispatch_input");

@@ -32,7 +32,7 @@ function world(o = {}) {
 const last = (g, n, c) => g.statuses.filter((s) => s.sha === sha(n) && s.context === c).at(-1)?.state;
 const lostGreen = (g, ns) => ns.every((n) => CTX.every((c) => last(g, n, c) !== "success"));
 const keptGreen = (g, ns) => ns.every((n) => CTX.every((c) => last(g, n, c) === "success"));
-const prEv = (n) => ({ name: "pull_request_target", payload: { pull_request: { number: n } } });
+const prEv = (n, action) => ({ name: "pull_request_target", payload: { ...(action ? { action } : {}), pull_request: { number: n } } });
 const run = (g, e) => handleEvent({ ...e, gh: g, allowlist: AL, lock: createPrLock() });
 
 test("#186-A1 source PR loses BOTH linked issue and root marker: ALL eligible siblings lose green through real runCheck", async () => {
@@ -71,9 +71,9 @@ test("#186-A4 closed historical source PR edited with no linked/marker, and dele
   assert.deepEqual([blocked.blocked, blocked.error, blocked.targets], [true, "pr_enumeration_failed", [5]]); assert.match(blocked.stale, /may remain stale/);
 });
 test("#186-A5 restoration and unrelated verified root: normal routing, no error", async () => {
-  const ok = await targetsFromEvent({ ...prEv(5), gh: world(), allowlist: AL });
+  const ok = await targetsFromEvent({ name: "pull_request_target", payload: { action: "edited", changes: { body: { from: "Closes #2\n<!-- orch-root-request:v1 #1 -->" } }, pull_request: { number: 5 } }, gh: world(), allowlist: AL }); // #188: edit carries prior body (A->A)
   assert.deepEqual([ok.targets, ok.error], [[5, 6], undefined]);
-  const other = await targetsFromEvent({ ...prEv(8), gh: world(), allowlist: AL });
+  const other = await targetsFromEvent({ ...prEv(8, "synchronize"), gh: world(), allowlist: AL });
   assert.deepEqual([other.targets, other.error], [[8], undefined]);
 });
 test("#186-A6 duplicate / out-of-order events are serialized per PR and never publish green after the lost event", async () => {

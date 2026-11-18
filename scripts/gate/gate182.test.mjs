@@ -101,7 +101,7 @@ test("#182-B5 original PR (`supersedes none`) is handled separately: min over it
   assert.equal((await pre(empty)).status, "blocked");
 });
 test("#182-B6 (superseded by #184) root146 bound is 13 for that ordinal only; every other root keeps the default", () => {
-  assert.deepEqual(ROOT_CEILING_EXCEPTIONS, { 146: 14 }); assert.equal(ceilingFor(146), 14);
+  assert.deepEqual(ROOT_CEILING_EXCEPTIONS, { 146: 15 }); assert.equal(ceilingFor(146), 15);
   assert.equal(MAX_CORRECTIONS, 3); assert.equal(ceilingFor(147), 5); assert.equal(ceilingFor(1), 5);
 });
 

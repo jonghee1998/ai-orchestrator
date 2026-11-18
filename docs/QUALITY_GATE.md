@@ -100,3 +100,16 @@ Root #146 bound is 13 for this ordinal only (n1..n12 preserved; single authority
 | PR closed/merged state | not read as evidence (`state=all` enumeration) | not verdict-relevant |
 | GPT-direct "edited summary" wake | unsupported by GPT subscription | not fabricated |
 | Activation | `issues`/`issue_comment` workflows run only from the default branch | BLOCKED (owner action; no actual-event E2E claimed) |
+
+## Issue #188 — old-root / new-root dependency union
+
+A current valid root is not proof of the former root. For events that can change root attribution (`issues` edited/deleted/unknown action;
+`pull_request_target` edited/unknown action) the refresh set is dependents(old) ∪ dependents(new) ∪ event PR:
+
+- former roots come from (a) payload `changes.body.from` — a *candidate* only, each verified live via `resolveRoot`, never instruction/evidence/PASS —
+  and (b) independent live history: every PR (any state, incl. closed) linked to the issue or carrying a trusted marker naming it;
+- no payload previous body and no independent history => `previous_root_unprovable` => conservative superset (all eligible open PRs);
+- ambiguous / unverifiable prior marker => superset (`previous_root_ambiguous` / `previous_root_unverifiable`);
+- `opened` / `reopened` / `synchronize` / `ready_for_review` / comment events carry no attribution change and need no former root;
+- A→A edits do not widen to unrelated roots. Enumeration failure stays BLOCKED (stale statuses named), never "safe".
+- Residual: fixture-based (fake API) only; no real GitHub E2E; `issues`/`issue_comment` workflows remain inert until on the default branch.
