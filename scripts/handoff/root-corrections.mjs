@@ -7,7 +7,11 @@
 import { isTrustedPm, pmReviseMarkers } from "./core.mjs";
 
 export const MAX_CORRECTIONS = 3; // default for every root
-export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed
+export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed (except the exact owner-approved exception below)
+// Issue #170: NEW bounded, owner-approved exception (root #146 owner approval 2026-11-18, correction 6 of 6, no 7th).
+// It applies ONLY to the exact root listed here; no global raise. Every other root keeps default 3 / ceiling 5.
+export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 6 });
+export const ceilingFor = (root) => ROOT_CEILING_EXCEPTIONS[root] ?? CORRECTION_CEILING;
 const LIMIT_ANY = /<!--\s*orch-root-correction-limit:v1\b[^>]*-->/g;
 const LIMIT_RE = /^<!--\s*orch-root-correction-limit:v1\s+root(\d+)\s+max=(\d+)\s*-->$/;
 
@@ -26,7 +30,7 @@ export function resolveCorrectionLimit(items = [], root) {
       if (!m) return { error: "correction_limit_marker_malformed", detail: { marker: raw.slice(0, 120) } };
       if (Number(m[1]) !== root) return { error: "correction_limit_other_root", detail: { expected: root, found: Number(m[1]) } };
       const max = Number(m[2]);
-      if (max < MAX_CORRECTIONS || max > CORRECTION_CEILING) return { error: "correction_limit_out_of_range", detail: { max } };
+      if (max < MAX_CORRECTIONS || max > ceilingFor(root)) return { error: "correction_limit_out_of_range", detail: { max } };
       found.add(max);
     }
   }
@@ -57,7 +61,7 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
       const r = { root: Number(m[1]), n: Number(m[2]), pr: Number(m[3]), sha: m[4] };
       if (r.root !== root) return { error: "root_correction_marker_other_root", detail: { expected: root, found: r.root } };
       // Bounded by the hard CEILING, NOT the current (possibly lowered) limit: past usage is never discarded.
-      if (r.n < 1 || r.n > CORRECTION_CEILING) return { error: "root_correction_n_out_of_range", detail: { n: r.n } };
+      if (r.n < 1 || r.n > ceilingFor(root)) return { error: "root_correction_n_out_of_range", detail: { n: r.n } };
       recs.push(r);
     }
   }
@@ -75,7 +79,7 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
   // Legacy trusted-PM revise rounds are a lower bound regardless of the current limit (default 3 must still see revise:4).
   // A round beyond the hard ceiling is not a valid history => fail closed rather than silently dropping it.
   const legacyRounds = items.flatMap((it) => pmReviseMarkers(it)).filter((m) => m.sha && SHA.test(m.sha) && m.round >= 1).map((m) => m.round);
-  if (legacyRounds.some((r) => r > CORRECTION_CEILING)) return { error: "root_correction_legacy_out_of_range", detail: { max: Math.max(...legacyRounds) } };
+  if (legacyRounds.some((r) => r > ceilingFor(root))) return { error: "root_correction_legacy_out_of_range", detail: { max: Math.max(...legacyRounds) } };
   const legacy = Math.max(0, ...legacyRounds);
   return { count: Math.max(max, legacy), records: [...byN.values()].sort((a, b) => a.n - b.n) };
 }

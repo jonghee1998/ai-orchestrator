@@ -14,7 +14,7 @@ export interface LiveStatus {
   verdict: Verdict; verdictLabel: string;
   summary: string;
 }
-const isCurrent = (t: ModelTask) => t.phase === "active" || t.phase === "review" || t.phase === "blocked";
+const isCurrent = (t: ModelTask) => t.phase === "active" || t.phase === "reported" || t.phase === "review" || t.phase === "blocked";
 
 /** Verdict priority: a blocked/needs-decision task is current truth; otherwise the newest history signal; otherwise none. */
 export function latestVerdict(p: Pick<ModelProject, "tasks" | "history">): Verdict {
@@ -33,6 +33,6 @@ export function liveStatus(p: ModelProject): LiveStatus {
   const goal = p.goal ?? "목표 미확인";
   const { completed, remaining, active, unknown } = p.counts;
   const summary = p.counts.total === 0 ? "확인된 업무가 없습니다."
-    : `완료 ${completed}건, 진행 ${active}건, 남은 ${remaining}건${unknown ? `, 확인 불가 ${unknown}건` : ""}. ${VERDICT_LABEL[verdict]}.`;
+    : `완료 ${completed}건, 진행 ${active}건, 남은 ${remaining}건${p.counts.reported ? `, 접수 보고 ${p.counts.reported}건(실행 미확인)` : ""}${unknown ? `, 확인 불가 ${unknown}건` : ""}. ${VERDICT_LABEL[verdict]}.`;
   return { goal, doneCount: completed, currentCount: current.length, remainingCount: remaining, unknownCount: unknown, current, verdict, verdictLabel: VERDICT_LABEL[verdict], summary };
 }

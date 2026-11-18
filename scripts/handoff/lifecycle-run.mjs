@@ -90,7 +90,7 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     // Issue #166: root-specific correction limit (default 3, trusted PM marker may raise to <=5) from root issue + root comments.
     const rootIssue = await gh.getIssue(req);
     const rootComments = await gh.listIssueComments(req);
-    const lim = resolveCorrectionLimit([rootIssue, ...rootComments], req);
+    const lim = resolveCorrectionLimit([{ ...rootIssue, kind: "issue" }, ...rootComments], req);
     if (lim.error) return fail(lim.error, lim.detail);
     const maxRounds = lim.max;
     const ch = await resolveChain(gh, pr, req, maxRounds);
@@ -111,7 +111,7 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     // Expected head: explicit (event/dispatch) else the exact SHA of the trusted Codex verdict being acted on.
     const head = expectedHead ?? reviews.filter((r) => !r.ambiguous).at(-1)?.commit_sha;
     // Issue #161: durable ROOT-level correction counter (spans separate chains of the same root; never lowered).
-    const rc = correctionRound({ resolved: resolveRootCorrections([rootIssue, ...comments], req, maxRounds), prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
+    const rc = correctionRound({ resolved: resolveRootCorrections([{ ...rootIssue, kind: "issue" }, ...comments], req, maxRounds), prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
     if (rc.error) return fail(rc.error, rc.detail);
     const input = {
       req, round: rc.round, maxRounds, config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,

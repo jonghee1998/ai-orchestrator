@@ -35,3 +35,13 @@ test("live status: later non-verdict events do not erase the latest real review 
   assert.equal(latestVerdict(project([task("1", "blocked")], h)), "blocked");
   assert.equal(latestVerdict(project([task("1", "review")], h)), "approval_needed");
 });
+
+test("live status #170: reported (ACK/in-progress) tasks are current, honestly unverified, never START/active", () => {
+  const p = project([task("1", "reported"), task("2", "remaining")]);
+  p.counts.reported = 1;
+  const s = liveStatus(p);
+  assert.deepEqual(s.current.map(c => [c.id, c.stage]), [["1", "reported"]]);
+  assert.equal(s.currentCount, 1);
+  assert.match(s.summary, /접수 보고 1건\(실행 미확인\)/);
+  assert.doesNotMatch(s.summary, /진행 1건/);
+});
