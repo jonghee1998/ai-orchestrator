@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "issue": 198,
+  "source": {
+    "repo": "affaan-m/ECC",
+    "url": "https://github.com/affaan-m/ECC",
+    "commit": "3f14a103a8694e51c1df9a806217a6d0b5f7a6f7",
+    "version": "2.2.3",
+    "license": "MIT"
+  },
+  "installMode": "vendored-adapted; no npm package, no installer, no plugin, no global ~/.claude changes",
+  "adopted": [
+    {
+      "path": ".claude/skills/ecc-verify/SKILL.md",
+      "upstreamPath": "skills/verification-loop/SKILL.md",
+      "upstreamSha256": "9ee288d426660b0c785f534a003a4960fb4d8083a21302d8a4fd9b035b2edbb1",
+      "localSha256": "e88a1d23df9748ded58aece67603426e03a6c37a88bf0fca58c5204bb35b2c3d",
+      "mode": "adapted"
+    },
+    {
+      "path": ".claude/skills/ecc-change-impact/SKILL.md",
+      "upstreamPath": "skills/change-impact/SKILL.md",
+      "upstreamSha256": "b8d8a11417af8b84e93983a8eb682e3b9a16d04f926778eb635c96e90019bf18",
+      "localSha256": "f84a92ea60a6574b708ae3f04f16ceb535d4205e1ff55e425e746f39104861fd",
+      "mode": "adapted"
+    }
+  ],
+  "hooksEnabled": [],
+  "reviewed": [
+    { "component": "hooks/hooks.json (28 hooks)", "decision": "rejected", "reason": "every hook is a node -e bootstrap that searches CLAUDE_PLUGIN_ROOT, ~/.claude and plugin caches and require()s whatever ECC root it finds; code is not pinned to this lock" },
+    { "component": "skills/delivery-gate", "decision": "rejected", "reason": "global ~/.claude Stop hook blocking on learning-log mtimes; not a project requirement" },
+    { "component": "skills/gateguard", "decision": "deferred", "reason": "PreToolUse denies first Edit/Write/Bash; deadlock risk for unattended runs; needs separate approval and E2E" },
+    { "component": "skills/security-scan (AgentShield)", "decision": "replaced", "reason": "requires npx ecc-agentshield (external npm supply chain) and --opus uses a paid API; replaced by scripts/ecc/project-check.mjs" },
+    { "component": "skills/tdd-workflow", "decision": "deferred", "reason": "80% coverage target conflicts with current test tooling (no coverage runner); candidate for slice 2" }
+  ]
+}
