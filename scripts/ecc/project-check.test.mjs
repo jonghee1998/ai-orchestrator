@@ -5,11 +5,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs";
+import { lstatSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runChecks, exitCodeFor, scanWorkflow, LOCK_PATH } from "./project-check.mjs";
+import { runChecks, exitCodeFor, scanWorkflow, safeRead, redact, LOCK_PATH } from "./project-check.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
@@ -55,7 +56,7 @@ function treeHash(dir) {
     for (const name of readdirSync(d).sort()) {
       if (name === ".git") continue;
       const p = join(d, name);
-      if (statSync(p).isDirectory()) walk(p);
+      if (lstatSync(p).isDirectory()) walk(p);
       else h.update(p).update(readFileSync(p));
     }
   };
@@ -220,6 +221,162 @@ test("T13 the check is read-only: working tree bytes are unchanged", () => {
     runChecks({ root: dir });
     runChecks({ root: dir });
     assert.equal(treeHash(dir), before);
+  });
+});
+
+// ---- correction 1: PR #199 Codex P2 x4 + #198 requests 6980639080 / 6980813600 ----
+
+const ghToken = () => "gh" + "p_" + "Z".repeat(36);
+
+function outsideDir(content) {
+  const d = mkdtempSync(join(tmpdir(), "ecc-outside-"));
+  writeFileSync(join(d, "outside.txt"), content);
+  return d;
+}
+
+test("T15 a tracked symlink to a file outside the repo is not followed", () => {
+  const out = outsideDir(`token=${ghToken()}\n`);
+  const dir = fixture({});
+  try {
+    symlinkSync(join(out, "outside.txt"), join(dir, "linked.txt"));
+    execFileSync("git", ["add", "linked.txt"], { cwd: dir });
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "link"], { cwd: dir });
+    const r = runChecks({ root: dir });
+    assert.equal(r.verdict, "pass", JSON.stringify(r));
+    assert.deepEqual(r.findings, []);
+    assert.deepEqual(r.coverage.excluded, [{ file: "linked.txt", reason: "tracked-symlink-not-followed" }]);
+    assert.equal(safeRead(realpathSync(dir), "linked.txt").kind, "symlink");
+  } finally { rmSync(dir, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
+});
+
+test("T16 a symlinked parent directory (.claude -> outside) is rejected for settings and adopted files", () => {
+  const out = mkdtempSync(join(tmpdir(), "ecc-outside-"));
+  mkdirSync(join(out, "skills/demo"), { recursive: true });
+  writeFileSync(join(out, "skills/demo/SKILL.md"), SKILL);
+  writeFileSync(join(out, "settings.json"), JSON.stringify({ permissions: { allow: [ghToken()] } }));
+  const dir = fixture({});
+  try {
+    rmSync(join(dir, ".claude"), { recursive: true, force: true });
+    symlinkSync(out, join(dir, ".claude"));
+    const r = runChecks({ root: dir });
+    assert.equal(r.verdict, "fail");
+    assert.ok(rules(r).includes("adopted-file-not-regular-in-repo"));
+    assert.ok(rules(r).includes("settings-not-regular-in-repo"));
+    assert.equal(r.checks.find((c) => c.name === "secrets").status, "blocked", "tracked files behind the symlink are missing coverage");
+    assert.ok(!JSON.stringify(r).includes(ghToken()));
+    assert.equal(safeRead(realpathSync(dir), ".claude/settings.json").kind, "outside");
+  } finally { rmSync(dir, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
+});
+
+test("T17 an oversized tracked file blocks coverage instead of passing (padding bypass)", () => {
+  const padded = `t=${ghToken()}\n` + "x".repeat(4096);
+  withFixture({ "src/big.txt": padded }, {}, (dir) => {
+    const r = runChecks({ root: dir, maxBytes: 1024 });
+    assert.equal(r.verdict, "blocked");
+    assert.equal(r.checks.find((c) => c.name === "secrets").status, "blocked");
+    assert.deepEqual(r.coverage.missing.map((m) => [m.file, m.reason]), [["src/big.txt", "too-large"]]);
+  });
+  // Oversized workflow / agent instruction files block their own checks too.
+  withFixture({ ".github/workflows/ci.yml": GOOD_WF + "#".repeat(4096) }, {}, (dir) => {
+    assert.equal(runChecks({ root: dir, maxBytes: 1024 }).checks.find((c) => c.name === "workflows").status, "blocked");
+  });
+});
+
+test("T18 size is checked before allocation and reads are bounded", () => {
+  withFixture({ "src/big.txt": "y".repeat(8192), "src/small.txt": "ok\n" }, {}, (dir) => {
+    const real = realpathSync(dir);
+    let requested = 0;
+    const io = { ...fs, readFileSync() { throw new Error("unbounded read used"); }, readSync(fd, buf, off, len, pos) { requested += len; return fs.readSync(fd, buf, off, len, pos); } };
+    assert.equal(safeRead(real, "src/big.txt", { maxBytes: 1024, io }).kind, "too-large");
+    assert.equal(requested, 0, "oversized file must not be read at all");
+    const ok = safeRead(real, "src/small.txt", { maxBytes: 1024, io });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.buf.toString(), "ok\n");
+    assert.ok(requested <= 1025);
+    // Full run with the metered io never uses an unbounded read.
+    assert.equal(runChecks({ root: dir, io, maxBytes: 16384 }).verdict, "pass");
+  });
+});
+
+test("T19 an unreadable tracked file is a missing required target -> blocked", () => {
+  withFixture({ "src/locked.txt": "data\n" }, {}, (dir) => {
+    const io = { ...fs, openSync(p, flags) { if (String(p).endsWith("locked.txt")) { const e = new Error("EACCES"); e.code = "EACCES"; throw e; } return fs.openSync(p, flags); } };
+    const r = runChecks({ root: dir, io });
+    assert.equal(r.verdict, "blocked");
+    assert.deepEqual(r.coverage.missing, [{ file: "src/locked.txt", reason: "unreadable" }]);
+  });
+  // A tracked path replaced by a directory is not a regular file.
+  withFixture({ "src/was-file.txt": "data\n" }, {}, (dir) => {
+    rmSync(join(dir, "src/was-file.txt"));
+    mkdirSync(join(dir, "src/was-file.txt"));
+    assert.equal(runChecks({ root: dir }).verdict, "blocked");
+  });
+});
+
+test("T20 HEAD verification failure is blocked even when inventory works", () => {
+  withFixture({}, {}, (dir) => {
+    const git = (root, args) => {
+      if (args[0] === "rev-parse") throw new Error("no HEAD");
+      return execFileSync("git", args, { cwd: root });
+    };
+    const r = runChecks({ root: dir, git });
+    assert.equal(r.verdict, "blocked");
+    assert.equal(r.head, null);
+    assert.equal(r.checks.find((c) => c.name === "head").reason, "head-unverified");
+  });
+});
+
+test("T21 scope distinguishes a clean commit from working-tree modifications", () => {
+  withFixture({ "src/a.ts": "export const a = 1;\n" }, {}, (dir) => {
+    const clean = runChecks({ root: dir });
+    assert.deepEqual(clean.worktree, { scope: "commit", changedEntries: 0 });
+    writeFileSync(join(dir, "src/a.ts"), "export const a = 2;\n");
+    const dirty = runChecks({ root: dir });
+    assert.equal(dirty.worktree.scope, "working-tree");
+    assert.equal(dirty.head, clean.head, "same HEAD, but the result covers modified inputs");
+    // A file deleted in the working tree is an explicit exclusion, not a silent skip.
+    rmSync(join(dir, "README.md"));
+    const del = runChecks({ root: dir });
+    assert.equal(del.verdict, "pass");
+    assert.ok(del.coverage.excluded.some((e) => e.file === "README.md" && e.reason === "deleted-in-working-tree"));
+    // Status failure -> blocked.
+    const git = (root, args) => { if (args.includes("status")) throw new Error("x"); return execFileSync("git", args, { cwd: root }); };
+    assert.equal(runChecks({ root: dir, git }).verdict, "blocked");
+  });
+});
+
+test("T22 repository-controlled strings are redacted everywhere in the report", () => {
+  const tok = ghToken();
+  const skills = { ".claude/skills/demo/SKILL.md": SKILL };
+  const lockText = lockFor(skills, {
+    adopted: [
+      ...JSON.parse(lockFor(skills)).adopted,
+      { path: `docs/${tok}.md`, upstreamSha256: "a".repeat(64), localSha256: "b".repeat(64) },
+      { path: `../${tok}`, upstreamSha256: "a".repeat(64), localSha256: "b".repeat(64) },
+    ],
+  });
+  const settings = JSON.stringify({ permissions: { allow: ["Bash(*)"] }, broken: tok });
+  withFixture({ [`notes/${tok}.txt`]: "plain\n", ".claude/settings.json": settings }, { lockText }, (dir) => {
+    const r = runChecks({ root: dir });
+    const out = JSON.stringify(r);
+    assert.equal(r.verdict, "fail");
+    assert.ok(!out.includes(tok), "token leaked through a diagnostic field");
+    assert.ok(!out.includes("Z".repeat(36)));
+    assert.ok(out.includes("[REDACTED:github-token]"));
+  });
+  assert.equal(redact(`a ${tok} b`), "a [REDACTED:github-token] b");
+  assert.ok(redact("q".repeat(1000)).length < 400);
+});
+
+test("T23 binary files and lockfiles are explicit policy exclusions and keep pass", () => {
+  withFixture({ "img/x.png": Buffer.from([0x89, 0x50, 0, 1, 2]), "package-lock.json": `{"t":"${ghToken()}"}\n` }, {}, (dir) => {
+    const r = runChecks({ root: dir });
+    assert.equal(r.verdict, "pass");
+    assert.deepEqual(
+      r.coverage.excluded.map((e) => [e.file, e.reason]).sort(),
+      [["img/x.png", "binary"], ["package-lock.json", "lockfile-not-secret-scanned"]],
+    );
+    assert.deepEqual(r.coverage.missing, []);
   });
 });
 

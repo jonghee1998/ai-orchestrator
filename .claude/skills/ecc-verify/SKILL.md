@@ -39,6 +39,9 @@ If the working tree is dirty, the receipt covers the working tree, not the SHA. 
 4. Login smoke: `node --test scripts/login-smoke.test.mjs`
 5. ECC project check (read-only, no network): `npm run ecc:check`
    exit 0 = pass, 1 = fail, 2 = blocked. Its JSON output says `authoritative: false`.
+   Copy `worktree.scope` into the receipt: `commit` means the inputs were exactly HEAD's
+   tracked files; `working-tree` means local modifications were checked, which is not a
+   verification of the commit. Any `coverage.missing` entry makes the check `blocked`.
 6. Diff review: `git diff --stat <base-sha>...HEAD`. Check every changed file for
    unintended changes, missing error handling and untested failure paths.
 
@@ -55,7 +58,7 @@ Types:       PASS|FAIL|NOT_RUN (<reason>)
 Tests:       PASS|FAIL|NOT_RUN (<passed>/<total>)
 Build:       PASS|FAIL|NOT_RUN
 Login smoke: PASS|FAIL|NOT_RUN
-ECC check:   PASS|FAIL|BLOCKED|NOT_RUN (<errors> errors, <warnings> warnings)
+ECC check:   PASS|FAIL|BLOCKED|NOT_RUN (<errors> errors, <warnings> warnings, scope commit|working-tree)
 Diff:        <n> files changed
 Overall:     READY_FOR_PR | NOT_READY
 Not covered: CI, Codex review, security review, E2E, owner approval

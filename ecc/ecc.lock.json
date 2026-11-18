@@ -14,7 +14,7 @@
       "path": ".claude/skills/ecc-verify/SKILL.md",
       "upstreamPath": "skills/verification-loop/SKILL.md",
       "upstreamSha256": "9ee288d426660b0c785f534a003a4960fb4d8083a21302d8a4fd9b035b2edbb1",
-      "localSha256": "e88a1d23df9748ded58aece67603426e03a6c37a88bf0fca58c5204bb35b2c3d",
+      "localSha256": "b1363ff7a0a0e24cf13dff5726e383d07f8ad2aa0341559b29ded482531f391e",
       "mode": "adapted"
     },
     {

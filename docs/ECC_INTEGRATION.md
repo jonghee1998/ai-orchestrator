@@ -18,7 +18,7 @@
 | `.claude/skills/ecc-change-impact/SKILL.md` | `skills/change-impact` 각색 | G2 사전 분석 형식과 첫 커밋 이전 게시 규칙(E11). 구현 후에는 계획과 diff를 대조한다 |
 | `ecc/ecc.lock.json` | 신규 | 원본 SHA, 버전, 라이선스, 도입 파일의 upstream/local sha256, `hooksEnabled: []`, 검토 결정 |
 | `scripts/ecc/project-check.mjs` | 신규 (AgentShield 대체) | 선택 실행하는 읽기 전용 검사. 검사 항목은 아래에 정리 |
-| `scripts/ecc/project-check.test.mjs` | 신규 | T1–T14 fixture 테스트. `npm test`에 포함됨 |
+| `scripts/ecc/project-check.test.mjs` | 신규 | T1–T23 fixture 테스트. `npm test`에 포함됨 |
 
 ### project-check 판정 규칙
 **검사 항목**
@@ -34,7 +34,33 @@
 - 그 외에는 `pass` (exit 0).
 - 빈 파일 목록은 안전의 증거가 아니다 (WORKFLOW_RULES 불변조건 3).
 
-**읽기 전용 계약:** 네트워크와 쓰기를 하지 않는다. 하위 프로세스는 `git ls-files -z`와 `git rev-parse HEAD`뿐이다. 파일 내용은 정규식 매칭만 하는 untrusted data로 취급한다. 읽기 전용 여부는 T13이 트리 해시를 비교해 확인한다.
+**HEAD와 입력 범위 (A8)**
+- `git rev-parse HEAD`가 실패하면 `blocked`다.
+- `worktree.scope`가 `commit`이면 입력은 HEAD의 추적 파일 그대로다. `working-tree`이면 로컬 수정본을 검사한 결과이며, 커밋을 검증한 것이 아니다.
+- `git status`가 실패하면 `blocked`다.
+
+**파일 읽기와 커버리지**
+- 모든 읽기는 `safeRead()` 한 경로를 거친다.
+  - 실제 경로(`realpath`)가 저장소 안이어야 하고, 경로 중 어느 구성요소든 symlink면 거부한다(상위 디렉터리 포함).
+  - `O_NOFOLLOW`로 연다.
+  - 일반 파일인지와 크기를 **읽기 전에** 확인한다.
+  - 최대 `maxBytes+1` 바이트만 bounded read한다.
+- **정책 제외 (`coverage.excluded`, 판정 유지):** git에 추적된 symlink 자체(따라가지 않음), NUL을 포함한 binary, 이름이 고정된 lockfile(secrets 검사 제외), 작업 트리에서 삭제된 파일(git status로 확인).
+- **필수 대상 누락 (`coverage.missing`, 해당 검사 `blocked`):** too-large, unreadable, outside, not-file, symlink 상위 경로.
+- lock 파일, 도입 파일, `.claude/settings*.json`이 symlink이거나 저장소 밖을 가리키면 **error**다.
+
+**출력 마스킹:** 보고서의 모든 문자열 필드(경로, 상세, 사유 포함)는 반환 전에 SECRET_RULES로 전역 치환되어 `[REDACTED:<rule>]`이 되고, 길이도 제한된다. 저장소가 제어하는 어떤 필드도 자격증명 원문을 노출하지 않는다.
+
+**읽기 전용 계약**
+- 네트워크와 쓰기를 하지 않는다.
+- 하위 프로세스는 `git rev-parse HEAD`, `git ls-files -s -z`, `git --no-optional-locks status --porcelain -z`뿐이다. 마지막 명령은 index를 갱신하는 쓰기를 하지 않는다.
+- 파일 내용은 정규식 매칭만 하는 untrusted data로 취급한다.
+- 읽기 전용 여부는 T13이 트리 해시를 비교해 확인한다.
+
+### 수정 이력 (#198 일반 한도 3회)
+| 회차 | 기준 HEAD | 반영 | 사전 기록 |
+|---|---|---|---|
+| 1 | `dc69c2c0a7e3fa4627a0c3688169832bf5ce82ed` | Codex P2 4건(r4615106878 symlink, r4615106897 커버리지, r4615106913 읽기 전 크기 제한, r4615106928 진단 출력 마스킹) + #198 요청 6980639080(3건)·6980813600. T15–T23 추가 | [#198 6981149461](https://github.com/jonghee1998/ai-orchestrator/issues/198#issuecomment-6981149461) |
 
 ## ECC 조사 (고정 SHA 기준)
 | 영역 | 소스 경로 | 동작·의존성 | 결정 | 이유 |
