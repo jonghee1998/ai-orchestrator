@@ -46,6 +46,14 @@
 
 **Trust policy:** only trusted-PM (owner) authored markers count. The PR author is not trusted for failure-class or RCA evidence.
 
-**Limit:** root #146 ceiling is 10 (standing authorization, #178 only); markers n1..n9 preserved; every other root keeps default 3 / ceiling 5; no 11th.
+**Limit:** root #146 ceiling is 11 (standing owner authorization for this ordinal only, #180); markers n1..n10 preserved; every other root keeps default 3 / ceiling 5; no 12th without a PM exact-FAIL judgement under the owner's standing authorization (the worker never self-dispatches). The earlier "no 11th / new approval" wording is superseded by that standing approval.
 
 **Not claimed:** the default-branch event workflow, branch ruleset and a separate security review are *not* asserted to be operating by this change.
+
+## Issue #180 — root-wide fan-out and one per-PR writer
+
+**Fan-out.** Evidence is root-wide, so any create/edit/delete of root evidence (root issue, sibling revision issue, sibling/historical PR body or comment) refreshes **every eligible open PR of the event source's root** (`event-route.targetsFromEvent`). The root is re-derived from live reads (`resolveRoot`); the payload only wakes. Closed / fork / off-allowlist / unrelated-root PRs are not targeted. Ambiguous, not-self-marked, API-failed or non-enumerable roots return an `error` diagnostic (job fails; the event PR is still refreshed so its own status fails closed). Sibling PRs whose own lineage is unresolvable are listed in `diagnostics` only (their own check fails closed).
+
+**One writer per PR.** All publishing goes through `refreshPr` under lock domain `quality-gate-pr-<N>` spanning pending invalidation → collect → final re-read → publish for both stages. In CI this is the job-level concurrency group of the `refresh` matrix job, identical in `quality-gate.yml` and `quality-gate-events.yml` (asserted by `gate180.test.mjs`); `check.mjs --publish` and `event-route.mjs --pr` refuse to publish without `QUALITY_GATE_PR_LOCK`. Actions keeps one running + the latest pending run per group; that is safe because each run re-reads live state, but a stale `success` can remain briefly while a newer run is queued.
+
+**Status / not claimed.** Verified by unit + deterministic simulation against a fake API (including the pause-after-validation race). Not a live E2E: both workflows are inert until a default-branch copy and the required ruleset/security capability exist (BLOCKED, owner action; nothing in main/base was changed).

@@ -1,9 +1,10 @@
 name: quality-gate
-# Issue #174. pull_request_target runs the workflow + scripts from the BASE branch, so a PR cannot edit/disable the checker it is judged by.
+# Issue #174/#180. pull_request_target runs the workflow + scripts from the BASE branch, so a PR cannot edit/disable the checker it is judged by.
 # Do NOT add a checkout of the PR head or any step that executes PR-supplied code here.
+# A PR body is root evidence for sibling PRs: the PR event goes through the same root-aware plan and the SAME per-PR lock group as the events workflow.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review, edited]  # #176: PR body (receipts live there too) edits refresh the status
+    types: [opened, reopened, synchronize, ready_for_review, edited]
   workflow_dispatch:
     inputs:
       pr: { description: "PR number to (re)evaluate", required: true }
@@ -12,24 +13,53 @@ permissions:
   issues: read
   pull-requests: read
   statuses: write
-concurrency:
-  group: quality-gate-${{ github.event.pull_request.number || inputs.pr }} # one writer per PR; every run re-reads live state
-  cancel-in-progress: false
 jobs:
-  gate:
+  plan:
+    if: github.repository == 'jonghee1998/ai-orchestrator'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        stage: [pre-pr, final]
+    outputs:
+      targets: ${{ steps.plan.outputs.targets }}
+      error: ${{ steps.plan.outputs.error }}
     steps:
       - uses: actions/checkout@v4 # default ref for pull_request_target = BASE branch (trusted)
         with:
           persist-credentials: false
+          sparse-checkout: scripts
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node scripts/gate/check.mjs --repo "$GITHUB_REPOSITORY" --pr "$PR" --stage "${{ matrix.stage }}" --publish
+      - id: plan
+        run: node scripts/gate/event-route.mjs --plan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          QUALITY_GATE_ALLOWLIST: codex/issue-92-mobile-v2
+      - name: fail closed on root/enumeration diagnostic
+        if: steps.plan.outputs.error != ''
+        run: echo "event fan-out failed closed - ${{ steps.plan.outputs.error }}" && exit 1
+  refresh:
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.targets != '' && needs.plan.outputs.targets != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.plan.outputs.targets) }}
+    # Issue #180: ONE writer domain per PR for EVERY path (this workflow, quality-gate.yml, dispatch). Same group name in both workflow files
+    # (asserted by gate180.test.mjs). Running + latest-pending semantics are safe because each run re-reads live state; both stages run inside
+    # the one lock so invalidate -> collect -> re-read -> publish never interleaves with another writer of this PR.
+    concurrency:
+      group: quality-gate-pr-${{ matrix.pr }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4 # default ref for pull_request_target = BASE branch (trusted)
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node scripts/gate/event-route.mjs --pr "${{ matrix.pr }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUALITY_GATE_ALLOWLIST: codex/issue-92-mobile-v2
+          QUALITY_GATE_PR_LOCK: quality-gate-pr-${{ matrix.pr }}

@@ -3,68 +3,135 @@
 // payload (comment/body text, sha, labels) is an instruction or evidence. Targets are re-derived from LIVE API reads, the exact head SHA
 // is the live one, and the checker (check.mjs) re-reads every evidence item itself. Runs from trusted BASE code, never PR code.
 //   node scripts/gate/event-route.mjs   (reads GITHUB_EVENT_NAME / GITHUB_EVENT_PATH; --dry-run prints targets only)
-import { readFileSync } from "node:fs";
+import { readFileSync, appendFileSync } from "node:fs";
 import { createClient } from "../handoff/github.mjs";
-import { reqFromPr } from "../handoff/lifecycle-evidence.mjs";
+import { reqFromPr, rootMarker } from "../handoff/lifecycle-evidence.mjs";
+import { resolveRoot } from "../handoff/lifecycle-run.mjs";
+import { LOCK_GROUP, defaultPrLock } from "./pr-lock.mjs";
 import { runCheck } from "./check.mjs";
 
 export const STAGES = Object.freeze(["pre-pr", "final"]);
 const SHA = /^[a-f0-9]{40}$/;
 const posInt = (n) => Number.isInteger(n) && n > 0;
 
+const ELIGIBLE = (pr, allowlist) => pr && pr.state === "open" && pr.head?.repo?.full_name === pr.base?.repo?.full_name && allowlist.includes(pr.base?.ref);
+const UNRELATED = new Set(["root_marker_missing", "req_unresolvable"]);
+
 /**
- * Map an event to the PR numbers whose evidence MAY have changed. Pure over (event, live reads).
- *  - issue_comment on a PR            -> that PR (covers PR comments + Codex review-summary edits + receipt removal)
- *  - issue_comment / issues on an Issue -> every OPEN same-repo PR on an allowlisted base whose canonical linked issue is that Issue
- *  - pull_request_target                -> that PR
- *  - workflow_dispatch                  -> input pr
- * created / edited / deleted all map identically: the checker re-reads, so a removed receipt simply stops counting.
- * @returns {{targets:number[], skip?:string}}
+ * Issue #180 — ROOT-AWARE fan-out. Evidence is root-wide (check.mjs/collectRootEvidence), so an event on ANY root evidence source
+ * (root issue, sibling revision issue, sibling/historical PR body or comment — created/edited/deleted) must refresh EVERY eligible open
+ * PR that shares the event source's root. Pure over (event, live reads); the payload only WAKES/selects, it never supplies a root or SHA.
+ *   - the event source's root is re-derived from live reads through the verified lineage (resolveRoot: linked issue -> trusted root marker ->
+ *     self-marked root); a PR event also contributes the root named by the PR's own marker (verified the same way)
+ *   - candidates: open, same-repo, allowlisted-base PRs whose OWN linked issue resolves (live) to one of those roots; plus PRs directly linked
+ *     to the event issue; the event PR itself is always a target (its own check fails closed if unresolvable)
+ *   - a source root that is ambiguous / not self-marked / un-enumerable => {error} (fail closed, concrete diagnostic), never silent-empty.
+ *     A sibling PR whose own lineage is unresolvable cannot be attributed to the root; it fails closed in its own check and is only listed
+ *     in `diagnostics`. A source with no root marker at all is unrelated (explicit skip reason, not an error).
+ * workflow_dispatch / pull_request_target targets stay the single named PR (pull_request_target is routed through the same plan, see
+ * rootsForPr use below: a PR body edit is root evidence for siblings, so it fans out too).
+ * @returns {{targets:number[], skip?:string, error?:string, detail?:object, roots?:number[], diagnostics?:object[]}}
  */
 export async function targetsFromEvent({ name, payload, gh, allowlist }) {
-  const ok = (pr) => pr && pr.state === "open" && pr.head?.repo?.full_name === pr.base?.repo?.full_name && allowlist.includes(pr.base?.ref);
   if (name === "workflow_dispatch") { const n = Number(payload?.inputs?.pr); return posInt(n) ? { targets: [n] } : { targets: [], skip: "invalid_dispatch_input" }; }
-  if (name === "pull_request_target") { const n = payload?.pull_request?.number; return posInt(n) ? { targets: [n] } : { targets: [], skip: "invalid_pull_request" }; }
-  if (name === "issue_comment" || name === "issues") {
-    const n = payload?.issue?.number;
-    if (!posInt(n)) return { targets: [], skip: "invalid_issue" };
-    if (payload.issue.pull_request) return { targets: [n] };
+  const isIssueEvt = name === "issue_comment" || name === "issues";
+  if (!isIssueEvt && name !== "pull_request_target") return { targets: [], skip: "unsupported_event" };
+  const n = isIssueEvt ? payload?.issue?.number : payload?.pull_request?.number;
+  if (!posInt(n)) return { targets: [], skip: isIssueEvt ? "invalid_issue" : "invalid_pull_request" };
+  const eventIsPr = !isIssueEvt || !!payload.issue.pull_request;
+  const diagnostics = [];
+  const cache = new Map();
+  const rootOf = async (issueNo) => {
+    if (!cache.has(issueNo)) cache.set(issueNo, await resolveRoot(gh, issueNo));
+    return cache.get(issueNo);
+  };
+  try {
+    const roots = new Set();
+    const direct = new Set(eventIsPr ? [n] : []);
+    const addRoot = async (issueNo, what) => {
+      const r = await rootOf(issueNo);
+      if (r.error) { if (UNRELATED.has(r.error)) return; throw Object.assign(new Error(r.error), { detail: { ...r.detail, source: what } }); }
+      roots.add(r.root);
+    };
+    if (eventIsPr) {
+      const evPr = await gh.getPull(n);
+      const linked = reqFromPr(evPr);
+      if (linked) await addRoot(linked, `pr#${n}.linked`);
+      const m = rootMarker(evPr);
+      if (m === "ambiguous") throw Object.assign(new Error("root_request_ambiguous"), { detail: { pr: n } });
+      if (Number.isInteger(m)) await addRoot(m, `pr#${n}.marker`);
+    } else {
+      await addRoot(n, `issue#${n}`);
+    }
     const open = await gh.listPulls();
     if (!Array.isArray(open)) throw new Error("listPulls returned a non-array");
-    const t = open.filter((p) => ok(p) && reqFromPr(p) === n).map((p) => p.number);
-    return t.length ? { targets: [...new Set(t)].sort((a, b) => a - b) } : { targets: [], skip: "no_linked_open_pr" };
+    for (const p of open) {
+      if (!ELIGIBLE(p, allowlist) || p.number === n) continue;
+      const l = reqFromPr(p);
+      if (!l) continue;
+      if (l === n && !eventIsPr) { direct.add(p.number); continue; }
+      if (!roots.size) continue;
+      const r = await rootOf(l);
+      if (r.error) { diagnostics.push({ pr: p.number, unattributable: r.error }); continue; }
+      if (roots.has(r.root)) direct.add(p.number);
+    }
+    const targets = [...direct].sort((a, b) => a - b);
+    return targets.length ? { targets, roots: [...roots], diagnostics } : { targets: [], skip: roots.size ? "no_open_pr_for_root" : "unrelated_no_root_marker", roots: [...roots], diagnostics };
+  } catch (e) {
+    // fail closed with a concrete diagnostic; the event PR (if any) is still refreshed so its own status reflects the failure
+    return { targets: eventIsPr ? [n] : [], error: String(e?.message ?? e).slice(0, 120), detail: e?.detail, diagnostics };
   }
-  return { targets: [], skip: "unsupported_event" };
 }
 
 /**
- * Wake -> validate -> (re)evaluate every target for BOTH stages. For each target the LIVE PR is read first: closed/fork/off-allowlist
- * PRs are skipped without writing; the exact SHA published is the live head (the payload SHA is only ever a hint for failures).
+ * ONE per-PR refresh: the ONLY path that publishes `quality-gate/*` statuses. Runs inside the per-PR lock so invalidate -> collect ->
+ * final re-read -> publish for BOTH stages cannot interleave with any other writer of the same PR (events, PR workflow, dispatch, CLI).
+ * The LIVE PR is read first: closed/fork/off-allowlist PRs are skipped without writing; the published SHA is the live head.
  */
-export async function handleEvent({ name, payload, gh, allowlist, publish = true, check = runCheck, out = () => {} }) {
-  const r = await targetsFromEvent({ name, payload, gh, allowlist });
-  if (!r.targets.length) { out({ event: name, result: "skip", reason: r.skip }); return { results: [], skipped: r.skip }; }
-  const results = [];
-  for (const prNumber of r.targets) { // sequential per PR: one writer per PR, order-independent because each run re-reads live state
+export async function refreshPr({ gh, prNumber, allowlist, publish = true, check = runCheck, lock = defaultPrLock, payloadHead, out = () => {}, event }) {
+  return lock.run(LOCK_GROUP(prNumber), async () => {
     let pr;
     try { pr = await gh.getPull(prNumber); } catch { pr = null; }
-    if (pr && !ok_(pr, allowlist)) { out({ event: name, pr: prNumber, result: "skip", reason: "pr_out_of_scope" }); continue; }
-    const expectedHead = SHA.test(pr?.head?.sha ?? "") ? pr.head.sha : (SHA.test(payload?.pull_request?.head?.sha ?? "") ? payload.pull_request.head.sha : undefined);
+    if (pr && !ELIGIBLE(pr, allowlist)) { out({ event, pr: prNumber, result: "skip", reason: "pr_out_of_scope" }); return []; }
+    const expectedHead = SHA.test(pr?.head?.sha ?? "") ? pr.head.sha : (SHA.test(payloadHead ?? "") ? payloadHead : undefined);
+    const results = [];
     for (const stage of STAGES) {
       const res = await check({ gh, prNumber, stage, publish, expectedHead });
-      results.push({ pr: prNumber, stage, status: res.status, head: res.head, published: res.published, unmet: res.unmet });
-      out({ event: name, pr: prNumber, stage, status: res.status, head: res.head, published: res.published, unmet: res.unmet });
+      const row = { pr: prNumber, stage, status: res.status, head: res.head, published: res.published, unmet: res.unmet };
+      results.push(row); out({ event, ...row });
     }
-  }
-  return { results };
+    return results;
+  });
 }
-const ok_ = (pr, allowlist) => pr.state === "open" && pr.head?.repo?.full_name === pr.base?.repo?.full_name && allowlist.includes(pr.base?.ref);
 
+/** Wake -> root-aware targets (deduped) -> refresh each. Different PRs are independent (own lock key); the same PR is serialized. */
+export async function handleEvent({ name, payload, gh, allowlist, publish = true, check = runCheck, lock = defaultPrLock, out = () => {} }) {
+  const r = await targetsFromEvent({ name, payload, gh, allowlist });
+  if (r.error) out({ event: name, result: "error", reason: r.error, detail: r.detail });
+  if (!r.targets.length) { if (!r.error) out({ event: name, result: "skip", reason: r.skip }); return { results: [], skipped: r.skip, error: r.error }; }
+  const all = await Promise.all(r.targets.map((prNumber) => refreshPr({ gh, prNumber, allowlist, publish, check, lock, out, event: name, payloadHead: payload?.pull_request?.number === prNumber ? payload.pull_request.head?.sha : undefined })));
+  return { results: all.flat(), error: r.error, targets: r.targets };
+}
+
+// CLI modes (workflows): `--plan` prints/emits the root-aware target list (never writes statuses); `--pr N` refreshes ONE PR under the lock
+// marker QUALITY_GATE_PR_LOCK=quality-gate-pr-N (set only by the per-PR concurrency job). Publishing without that marker is refused.
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : undefined; };
   const allowlist = (process.env.QUALITY_GATE_ALLOWLIST ?? "").split(",").map((x) => x.trim()).filter(Boolean);
   if (!process.env.GITHUB_TOKEN || !allowlist.length) { console.error("GITHUB_TOKEN and QUALITY_GATE_ALLOWLIST required"); process.exit(2); }
   const gh = createClient({ token: process.env.GITHUB_TOKEN, repo: process.env.GITHUB_REPOSITORY });
   const payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
-  const { results } = await handleEvent({ name: process.env.GITHUB_EVENT_NAME, payload, gh, allowlist, publish: !process.argv.includes("--dry-run"), out: (o) => console.log(JSON.stringify(o)) });
+  const name = process.env.GITHUB_EVENT_NAME;
+  const out = (o) => console.log(JSON.stringify(o));
+  if (process.argv.includes("--plan")) {
+    const r = await targetsFromEvent({ name, payload, gh, allowlist });
+    out({ event: name, ...r });
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `targets=${JSON.stringify(r.targets)}\nerror=${r.error ?? ""}\n`);
+    process.exit(0); // the workflow's next step fails the job when `error` is non-empty (targets still run so each PR publishes its own verdict)
+  }
+  const pr = Number(arg("pr"));
+  if (!posInt(pr)) { console.error("usage: event-route.mjs --plan | --pr N"); process.exit(2); }
+  if (process.env.QUALITY_GATE_PR_LOCK !== LOCK_GROUP(pr) && !process.argv.includes("--dry-run")) { console.error(`refusing to publish without lock marker ${LOCK_GROUP(pr)}`); process.exit(2); }
+  const results = await refreshPr({ gh, prNumber: pr, allowlist, publish: !process.argv.includes("--dry-run"), out, event: name, payloadHead: payload?.pull_request?.head?.sha });
   process.exit(results.some((x) => x.published === false && !process.argv.includes("--dry-run")) ? 1 : 0);
 }

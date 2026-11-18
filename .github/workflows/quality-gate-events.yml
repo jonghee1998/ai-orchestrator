@@ -1,27 +1,28 @@
 name: quality-gate-events
-# Issue #176 — EVENT refresh of the quality-gate statuses when evidence is created/edited/deleted in PR comments or the linked Issue.
-# BLOCKED / INERT: GitHub runs `issue_comment` and `issues` workflows ONLY from the DEFAULT branch copy. This file lives on the
-# integration branch, so it does nothing until an owner puts a copy on the default branch (a main change this work is forbidden to make).
-# Safe by construction when activated: it checks out the allowlisted INTEGRATION branch (trusted base code), never a PR head, and the
-# event payload only selects PR numbers; every verdict is re-read from the API by scripts/gate/check.mjs. See docs/QUALITY_GATE.md.
+# Issue #176/#180 — EVENT refresh of the quality-gate statuses when ANY root evidence (root issue, sibling revision issues, sibling PR bodies/
+# comments; created/edited/deleted) changes. Root-aware fan-out refreshes EVERY eligible open PR of the event source's root.
+# BLOCKED / INERT: GitHub runs `issue_comment` and `issues` workflows ONLY from the DEFAULT branch copy. This file lives on the integration
+# branch, so it does nothing until an owner puts a copy on the default branch (a main change this work is forbidden to make).
+# Safe by construction when activated: checks out the allowlisted INTEGRATION branch (trusted base code), never a PR head; the payload only
+# selects wake/PR numbers; every verdict is re-read from the API. See docs/QUALITY_GATE.md.
 on:
   issue_comment:
     types: [created, edited, deleted]
   issues:
-    types: [edited]
+    types: [edited, deleted]
 permissions:
   contents: read
   issues: read
   pull-requests: read
   statuses: write
-concurrency:
-  group: quality-gate-events-${{ github.event.issue.number }}
-  cancel-in-progress: false
 jobs:
-  refresh:
+  plan:
     if: github.repository == 'jonghee1998/ai-orchestrator'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.plan.outputs.targets }}
+      error: ${{ steps.plan.outputs.error }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,7 +31,39 @@ jobs:
           sparse-checkout: scripts
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: node scripts/gate/event-route.mjs
+      - id: plan
+        run: node scripts/gate/event-route.mjs --plan
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           QUALITY_GATE_ALLOWLIST: codex/issue-92-mobile-v2
+      - name: fail closed on root/enumeration diagnostic
+        if: steps.plan.outputs.error != ''
+        run: echo "event fan-out failed closed - ${{ steps.plan.outputs.error }}" && exit 1
+  refresh:
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.targets != '' && needs.plan.outputs.targets != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.plan.outputs.targets) }}
+    # Issue #180: ONE writer domain per PR for EVERY path (this workflow, quality-gate.yml, dispatch). Same group name in both workflow files
+    # (asserted by gate180.test.mjs). Running + latest-pending semantics are safe because each run re-reads live state; both stages run inside
+    # the one lock so invalidate -> collect -> re-read -> publish never interleaves with another writer of this PR.
+    concurrency:
+      group: quality-gate-pr-${{ matrix.pr }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/issue-92-mobile-v2 # trusted base code; NOT the PR head
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node scripts/gate/event-route.mjs --pr "${{ matrix.pr }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUALITY_GATE_ALLOWLIST: codex/issue-92-mobile-v2
+          QUALITY_GATE_PR_LOCK: quality-gate-pr-${{ matrix.pr }}

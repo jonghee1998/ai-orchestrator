@@ -116,30 +116,30 @@ test("#176-1 no-publish mode never writes", async () => {
 
 // ---- 2. trusted EVENT refresh ----
 const prObj = (n, o = {}) => ({ number: n, state: "open", user: DEV, head: { sha: n === 5 ? HEAD : "c".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1", ...o });
-const evGh = (pulls) => ({ listPulls: async () => pulls, getPull: async (n) => pulls.find((p) => p.number === n) ?? (() => { throw new Error("404"); })() });
+const evGh = (pulls) => ({ getIssue: async (n) => ({ number: n, user: { login: "jonghee1998", id: 129052128, type: "User" }, body: n < 90 ? `<!-- orch-root-request:v1 #${n} -->` : "plain" }), listPulls: async () => pulls, getPull: async (n) => pulls.find((p) => p.number === n) ?? (() => { throw new Error("404"); })() });
 const AL = [BR];
 
 test("#176-2 dispatch mapping: PR comment / Issue comment / Issue edit / PR body edit / dispatch, created|edited|deleted alike", async () => {
   const gh = evGh([prObj(5), prObj(6, { body: "Closes #2" }), prObj(7, { body: "Closes #1" })]);
   for (const action of ["created", "edited", "deleted"]) {
-    assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 5, pull_request: {} } }, gh, allowlist: AL })).targets, [5], `PR comment ${action}`);
+    assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 5, pull_request: {} } }, gh, allowlist: AL })).targets, [5, 7], `PR comment ${action} (root-wide fan-out #180)`);
     assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 1 } }, gh, allowlist: AL })).targets, [5, 7], `linked Issue comment ${action}`);
   }
   assert.deepEqual((await targetsFromEvent({ name: "issues", payload: { action: "edited", issue: { number: 2 } }, gh, allowlist: AL })).targets, [6]);
-  assert.deepEqual((await targetsFromEvent({ name: "pull_request_target", payload: { action: "edited", pull_request: { number: 5 } }, gh, allowlist: AL })).targets, [5]);
+  assert.deepEqual((await targetsFromEvent({ name: "pull_request_target", payload: { action: "edited", pull_request: { number: 5 } }, gh, allowlist: AL })).targets, [5, 7]);
   assert.deepEqual((await targetsFromEvent({ name: "workflow_dispatch", payload: { inputs: { pr: "9" } }, gh, allowlist: AL })).targets, [9]);
   assert.equal((await targetsFromEvent({ name: "workflow_dispatch", payload: { inputs: { pr: "x" } }, gh, allowlist: AL })).skip, "invalid_dispatch_input");
 });
 
 test("#176-2 scope: unrelated issue, closed PR, fork PR, other base branch, unsupported event => skipped (no write)", async () => {
   const gh = evGh([prObj(5, { state: "closed" }), prObj(6, { head: { sha: HEAD, repo: { full_name: "fork/r" } } }), prObj(7, { base: { ref: "main", repo: { full_name: "o/r" } } })]);
-  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh, allowlist: AL })).skip, "no_linked_open_pr");
-  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 99 } }, gh, allowlist: AL })).skip, "no_linked_open_pr");
+  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh, allowlist: AL })).skip, "no_open_pr_for_root");
+  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 99 } }, gh, allowlist: AL })).skip, "unrelated_no_root_marker");
   assert.equal((await targetsFromEvent({ name: "push", payload: {}, gh, allowlist: AL })).skip, "unsupported_event");
   assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: -1 } }, gh, allowlist: AL })).skip, "invalid_issue");
   const calls = []; const out = await handleEvent({ name: "issue_comment", payload: { issue: { number: 6, pull_request: {} } }, gh, allowlist: AL, check: async (a) => { calls.push(a); return {}; } });
   assert.equal(calls.length, 0, "fork PR never evaluated/written"); assert.equal(out.results.length, 0);
-  await assert.rejects(targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh: { listPulls: async () => ({}) }, allowlist: AL }), /non-array/);
+  assert.match((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh: { ...gh, listPulls: async () => ({}) }, allowlist: AL })).error, /non-array/); // #180: fail closed with a diagnostic, not a throw/silent empty
 });
 
 test("#176-2 exact SHA: the LIVE head is used, never the payload SHA; both stages run; payload text is never instruction", async () => {

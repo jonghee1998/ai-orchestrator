@@ -85,7 +85,7 @@ test("unrelated roots keep default 3 / ceiling 5; 8th / 7th elsewhere never allo
   assert.equal(resolveCorrectionLimit([], 99).max, 3);
   assert.equal(resolveCorrectionLimit([l(99, 5)], 99).max, 5);
   assert.equal(resolveCorrectionLimit([l(99, 6)], 99).error, "correction_limit_out_of_range");
-  assert.equal(resolveCorrectionLimit([l(146, 11)], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([l(146, 12)], 146).error, "correction_limit_out_of_range");
 });
 test("n6 is NOT invented: every missing proof blocks with a diagnostic", async () => {
   const cases = {
@@ -103,7 +103,7 @@ test("n6 is NOT invented: every missing proof blocks with a diagnostic", async (
 });
 test("request marker revise:N must equal the next ordinal (replay / wrong N blocks)", async () => {
   const w = world();
-  w.issues[172] = { ...w.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:11 -->` };
+  w.issues[172] = { ...w.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:12 -->` };
   assert.equal((await run(w)).reason, "root_correction_legacy_out_of_range", "8th request exceeds the exact exception");
   const w2 = world();
   w2.issues[172] = { ...w2.issues[172], body: `<!-- orch-root-request:v1 #146 -->\n<!-- gpt-pm-followup:pr171:${S[171]}:claude:revise:6 -->` };
@@ -250,12 +250,13 @@ test("#176 resolver: forged / stale destination proof (names other SHAs) is igno
   assert.equal(ok({ pr: 157, sha: live, recordedSha: rec, liveSha: live, ancestryOk: false }), UNPROVEN);
   assert.equal(ok({ pr: 157, sha: rec, ancestryOk: false }), undefined, "sameSHA needs no proof");
 });
-test("#178 ceiling: root146 correction 10 is the ONLY exception; n1..n9 history, other roots and the 11th unchanged", () => {
+test("#178 ceiling: root146 correction 11 is the ONLY exception; n1..n10 history, other roots and the 12th unchanged", () => {
   const cm = (n, root = 146) => ({ user: OWNER, body: correctionMarker({ root, n, pr: 200 + n, sha: String(n % 10).repeat(40) }) });
   const nine = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => cm(n));
   assert.equal(resolveRootCorrections(nine, 146).count, 9);
-  assert.equal(resolveRootCorrections([...nine, cm(10)], 146).count, 10, "#178 n10 valid for root146 only");
-  assert.equal(resolveRootCorrections([...nine, cm(10), cm(11)], 146).error, "root_correction_n_out_of_range", "no 11th");
+  assert.equal(resolveRootCorrections([...nine, cm(10)], 146).count, 10, "n10 preserved");
+  assert.equal(resolveRootCorrections([...nine, cm(10), cm(11)], 146).count, 11, "#180 n11 valid for root146 only");
+  assert.equal(resolveRootCorrections([...nine, cm(10), cm(11), cm(12)], 146).error, "root_correction_n_out_of_range", "no 12th");
   assert.equal(resolveRootCorrections([cm(6, 136)], 136).error, "root_correction_n_out_of_range");
   assert.equal(resolveRootCorrections([1, 2, 3, 4].map((n) => cm(n, 150)), 150).error, undefined, "other roots keep default 3 / ceiling 5 (n4 fine, bound enforced by limit)");
   assert.equal(resolveRootCorrections([cm(6, 136)], 136).error, "root_correction_n_out_of_range");
@@ -264,7 +265,8 @@ test("#178 ceiling: root146 correction 10 is the ONLY exception; n1..n9 history,
   assert.equal(resolveCorrectionLimit([l(146, 7, "2026-11-17T00:00:00Z"), l(146, 9, "2026-11-18T00:00:00Z")], 146).history.length, 2, "earlier approvals preserved");
   assert.equal(resolveCorrectionLimit([l(136, 6, "2026-11-18T00:00:00Z")], 136).error, "correction_limit_out_of_range");
   assert.equal(resolveCorrectionLimit([l(146, 10, "2026-11-18T00:00:00Z")], 146).max, 10, "#178 max=10 for root146");
-  assert.equal(resolveCorrectionLimit([l(146, 11, "2026-11-18T00:00:00Z")], 146).error, "correction_limit_out_of_range");
+  assert.equal(resolveCorrectionLimit([l(146, 11, "2026-11-18T00:00:00Z")], 146).max, 11, "#180 max=11 for root146");
+  assert.equal(resolveCorrectionLimit([l(146, 12, "2026-11-18T00:00:00Z")], 146).error, "correction_limit_out_of_range");
   assert.equal(resolveCorrectionLimit([l(150, 6, "2026-11-18T00:00:00Z")], 150).error, "correction_limit_out_of_range", "other roots ceiling 5");
   assert.equal(resolveCorrectionLimit([], 150).max, 3, "other roots default 3");
 });

@@ -10,6 +10,7 @@ import { resolveRoot } from "../handoff/lifecycle-run.mjs";
 import { collectRootEvidence } from "../handoff/root-evidence.mjs";
 import { resolveFailHistory } from "./fail-history.mjs";
 import { evaluateGate } from "./quality-gate.mjs";
+import { LOCK_GROUP } from "./pr-lock.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const tag = (kind, o) => ({ kind, id: o.id ?? o.number, user: o.user, body: o.body ?? "", created_at: o.created_at, updated_at: o.updated_at });
@@ -111,6 +112,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : undefined; };
   const stage = arg("stage"), pr = Number(arg("pr")), repo = arg("repo") ?? process.env.GITHUB_REPOSITORY;
   if (!["pre-pr", "final"].includes(stage) || !Number.isInteger(pr) || !process.env.GITHUB_TOKEN) { console.error("usage: check.mjs --pr N --stage pre-pr|final [--repo o/r] [--publish] (GITHUB_TOKEN required)"); process.exit(2); }
+  // Issue #180: a publishing run must hold the per-PR lock domain (job concurrency group quality-gate-pr-<N>); direct unlocked publish is refused.
+  if (process.argv.includes("--publish") && process.env.QUALITY_GATE_PR_LOCK !== LOCK_GROUP(pr)) { console.error(`refusing --publish without lock marker ${LOCK_GROUP(pr)}`); process.exit(2); }
   const res = await runCheck({ gh: createClient({ token: process.env.GITHUB_TOKEN, repo }), prNumber: pr, stage, publish: process.argv.includes("--publish"), expectedHead: arg("head") });
   console.log(JSON.stringify(res, null, 2));
   // With --publish the REQUIRED CHECK is the commit status; the job fails unless evidence is `pass` AND the success status was really written.
