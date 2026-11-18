@@ -55,6 +55,18 @@ export function createClient({ token, repo, fetchImpl = fetch, sleep = (ms) => n
     getCommit: (sha) => req("GET", `/commits/${sha}`),
     getBranch: (name) => req("GET", `/branches/${encodeURIComponent(name)}`),
     compare: (base, head) => req("GET", `/compare/${base}...${head}?per_page=1`),
+    // Issue #182: full compare (commits list, bounded). Used ONLY for the correction boundary; any gap throws => fail closed.
+    compareCommits: async (base, head) => {
+      const first = await req("GET", `/compare/${base}...${head}?per_page=100&page=1`);
+      const commits = Array.isArray(first?.commits) ? [...first.commits] : null;
+      if (!commits) throw new Error("compare returned no commits array");
+      for (let page = 2; commits.length < (first.total_commits ?? 0) && page <= 3; page++) {
+        const next = await req("GET", `/compare/${base}...${head}?per_page=100&page=${page}`);
+        if (!Array.isArray(next?.commits) || next.commits.length === 0) break;
+        commits.push(...next.commits);
+      }
+      return { status: first.status, ahead_by: first.ahead_by, behind_by: first.behind_by, merge_base_sha: first.merge_base_commit?.sha, total_commits: first.total_commits, commits };
+    },
     listCheckRuns: (sha) => req("GET", `/commits/${sha}/check-runs?per_page=100`),
     // Vercel reports a COMMIT STATUS on this repo (not a GitHub deployment environment) — Issue #141 F5.
     getCombinedStatus: (sha) => req("GET", `/commits/${sha}/status?per_page=100`),

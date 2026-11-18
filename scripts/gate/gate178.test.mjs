@@ -6,7 +6,7 @@ import { evaluateGate } from "./quality-gate.mjs";
 import { resolveFailHistory } from "./fail-history.mjs";
 
 const OWNER = { login: "jonghee1998", id: 129052128, type: "User" };
-const DEV = { login: "dev", id: 7, type: "User" };
+const DEV = { login: "jonghee1998", id: 129052128, type: "User" }; // #182: real PR author is the trusted PM writer (supersedes marker is trusted-PM only)
 const MAL = { login: "mallory", id: 6, type: "User" };
 const HEAD = "a".repeat(40), F1 = "1".repeat(40), F2 = "2".repeat(40);
 const T = (h) => `2026-11-18T0${h}:00:00Z`;
@@ -22,7 +22,7 @@ function fake({ comments = base(), prComments = [], extraIssues = [], extraPulls
   const call = async (name, f) => { await hooks[name]?.(w); return f(); };
   return {
     w, statuses,
-    getPull: () => call("getPull", () => ({ number: 5, state: "open", user: DEV, head: { sha: w.head }, base: { ref: BR }, body: "Closes #1", created_at: T(2), updated_at: T(2) })),
+    getPull: () => call("getPull", () => ({ number: 5, state: "open", user: DEV, head: { sha: w.head }, base: { ref: BR }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->", created_at: T(2), updated_at: T(2) })),
     getIssue: (n) => call("getIssue", () => ({ number: n, user: OWNER, body: "<!-- orch-root-request:v1 #1 -->", created_at: T(0), updated_at: T(0) })),
     listPullCommits: () => call("listPullCommits", () => [{ commit: { committer: { date: T(2) } } }]),
     listIssueComments: (n) => call("listIssueComments", () => (n === 1 ? w.comments : n === 5 ? w.prComments : w.other[n] ?? [])),

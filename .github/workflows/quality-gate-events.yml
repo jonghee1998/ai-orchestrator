@@ -23,6 +23,7 @@ jobs:
     outputs:
       targets: ${{ steps.plan.outputs.targets }}
       error: ${{ steps.plan.outputs.error }}
+      stale: ${{ steps.plan.outputs.stale }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,7 +39,15 @@ jobs:
           QUALITY_GATE_ALLOWLIST: codex/issue-92-mobile-v2
       - name: fail closed on root/enumeration diagnostic
         if: steps.plan.outputs.error != ''
-        run: echo "event fan-out failed closed - ${{ steps.plan.outputs.error }}" && exit 1
+        env:
+          PLAN_ERROR: ${{ steps.plan.outputs.error }}
+          PLAN_STALE: ${{ steps.plan.outputs.stale }}
+        # Issue #182: values passed via env (never interpolated into the script). A non-empty `stale` means the conservative set could NOT be
+        # fully invalidated (BLOCKED) - those statuses may be stale; this is NOT a safe state.
+        run: |
+          echo "event fan-out failed closed - $PLAN_ERROR"
+          [ -z "$PLAN_STALE" ] || echo "BLOCKED: $PLAN_STALE"
+          exit 1
   refresh:
     needs: plan
     if: ${{ !cancelled() && needs.plan.outputs.targets != '' && needs.plan.outputs.targets != '[]' }}

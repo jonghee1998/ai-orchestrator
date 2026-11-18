@@ -7,7 +7,7 @@ import { createPrLock, LOCK_GROUP } from "./pr-lock.mjs";
 import { runCheck } from "./check.mjs";
 
 const OWNER = { login: "jonghee1998", id: 129052128, type: "User" };
-const DEV = { login: "dev", id: 7, type: "User" };
+const DEV = { login: "jonghee1998", id: 129052128, type: "User" }; // #182: real PR author is the trusted PM writer (supersedes marker is trusted-PM only)
 const BR = "codex/issue-92-mobile-v2", AL = [BR];
 const T = (h) => `2026-11-18T0${h}:00:00Z`;
 const mark = (root) => `<!-- orch-root-request:v1 #${root} -->`;
@@ -20,7 +20,7 @@ function world(over = {}) {
   const pulls = over.pulls ?? [pr(5, 1), pr(6, 2), pr(7, 3), pr(8, 50)];
   return {
     getIssue: async (n) => { if (over.getIssueFail === n) throw new Error("GitHub GET 403"); return issues[n] ?? { number: n, user: OWNER, body: "plain" }; },
-    getPull: async (n) => pulls.find((p) => p.number === n) ?? { number: n, state: "open", user: DEV, head: { sha: "9".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1" },
+    getPull: async (n) => pulls.find((p) => p.number === n) ?? { number: n, state: "open", user: DEV, head: { sha: "9".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->" },
     listPulls: async () => { if (over.listPulls) return over.listPulls(); return pulls; },
   };
 }
@@ -47,8 +47,8 @@ test("#180 S4 closed / fork / off-allowlist / unrelated-root PRs are never targe
 });
 test("#180 S5 fail closed with concrete diagnostics: non-array, partial/API failure, ambiguous, not-self-marked, 403 — never silent no_linked_open_pr", async () => {
   const bad = [
-    [{ listPulls: () => ({}) }, /non-array/],
-    [{ listPulls: () => { throw new Error("pagination bound exceeded"); } }, /pagination/],
+    [{ listPulls: () => ({}) }, /pr_enumeration_failed/],
+    [{ listPulls: () => { throw new Error("pagination bound exceeded"); } }, /pr_enumeration_failed/],
     [{ getIssueFail: 1 }, /403/],
     [{ issues: { 1: iss(1, 1, { body: `${mark(1)}${mark(2)}` }) } }, /root_request_ambiguous/],
     [{ issues: { 1: iss(1, 9), 9: iss(9, 7) } }, /root_not_self_marked/],
@@ -61,11 +61,11 @@ test("#180 S5 fail closed with concrete diagnostics: non-array, partial/API fail
   const r = await targetsFromEvent({ ...ev("issue_comment", 5, true), gh: world({ listPulls: () => ({}) }), allowlist: AL });
   assert.deepEqual(r.targets, [5]); assert.ok(r.error);
 });
-test("#180 S5b issue without any root marker is explicitly UNRELATED (not an error); a sibling with unresolvable lineage is diagnosed, not targeted, never blocks the rest", async () => {
+test("#180 S5b issue without any root marker is explicitly UNRELATED (not an error); a sibling with unresolvable lineage is diagnosed AND targeted (#182: never left with a stale success)", async () => {
   const a = await targetsFromEvent({ ...ev("issue_comment", 60), gh: world(), allowlist: AL });
   assert.deepEqual([a.targets, a.skip, a.error], [[], "unrelated_no_root_marker", undefined]);
   const b = await targetsFromEvent({ ...ev("issue_comment", 1), gh: world({ pulls: [pr(5, 1), pr(11, 60)] }), allowlist: AL });
-  assert.deepEqual(b.targets, [5]); assert.deepEqual(b.diagnostics, [{ pr: 11, unattributable: "root_marker_missing" }]);
+  assert.deepEqual(b.targets, [5, 11]); assert.deepEqual(b.diagnostics, [{ pr: 11, unattributable: "root_marker_missing" }]);
 });
 test("#180 handleEvent fan-out exercises refreshPr for every target and never publishes for out-of-scope PRs", async () => {
   const calls = [];
@@ -87,7 +87,7 @@ function fakeGh({ onStatus, perm } = {}) {
   const w = { comments: receipts(), statuses: [], starts: 0, perm };
   return {
     w,
-    getPull: async () => { w.starts++; return { number: 5, state: "open", user: DEV, head: { sha: HEAD, repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1", created_at: T(2), updated_at: T(2) }; },
+    getPull: async () => { w.starts++; return { number: 5, state: "open", user: DEV, head: { sha: HEAD, repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->", created_at: T(2), updated_at: T(2) }; },
     getIssue: async (n) => ({ number: n, user: OWNER, body: mark(1), created_at: T(0), updated_at: T(0) }),
     listPullCommits: async () => [{ commit: { committer: { date: T(2) } } }],
     listIssueComments: async (n) => (n === 1 ? w.comments : []),

@@ -11,6 +11,7 @@ import { collectRootEvidence } from "../handoff/root-evidence.mjs";
 import { resolveFailHistory } from "./fail-history.mjs";
 import { evaluateGate } from "./quality-gate.mjs";
 import { LOCK_GROUP } from "./pr-lock.mjs";
+import { resolveCorrectionBoundary } from "./correction-boundary.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const tag = (kind, o) => ({ kind, id: o.id ?? o.number, user: o.user, body: o.body ?? "", created_at: o.created_at, updated_at: o.updated_at });
@@ -24,17 +25,18 @@ export const safeError = (e) => String(e?.message ?? e ?? "error")
  * API/permission failure) throws or yields unresolvable => never pass. `fingerprint` changes whenever any evidence item is created,
  * edited or deleted, so a snapshot race (same SHA) is detectable before a green is published.
  */
-export async function collectGateInput(gh, prNumber, stage, prIn) {
+export async function collectGateInput(gh, prNumber, stage, prIn, opts = {}) {
   const pr = prIn ?? await gh.getPull(prNumber);
   const head = pr.head?.sha;
   if (!SHA.test(head ?? "")) throw new Error("pr_head_unknown");
   const issue = reqFromPr(pr);
   if (!issue) return { unresolvable: "req_unresolvable", head };
-  const commits = await gh.listPullCommits(prNumber);
-  const times = commits.map((c) => Date.parse(c?.commit?.committer?.date ?? "")).filter(Number.isFinite);
-  // 250 is the API cap on this endpoint: a PR at/over it cannot be fully enumerated => time unknown (fail closed).
-  const firstCodeCommitAt = commits.length > 0 && commits.length < 250 && times.length === commits.length ? new Date(Math.min(...times)).toISOString() : undefined;
   const issueObj = await gh.getIssue(issue);
+  // Issue #182: first-code time = first commit NEW to THIS correction (verified superseded HEAD -> current HEAD boundary), never min(all PR commits).
+  const commits = await gh.listPullCommits(prNumber);
+  const bd = await resolveCorrectionBoundary({ gh, pr, linkedIssue: issueObj, commits, now: opts.now });
+  if (bd.error) return { unresolvable: `boundary:${bd.error}`, head };
+  const firstCodeCommitAt = bd.firstCodeCommitAt;
   const prComments = await gh.listIssueComments(prNumber);
   // Issue #178: ROOT-WIDE failure history. Unresolvable root / unreadable or partial enumeration THROWS or errors => blocked; never defaults to [].
   const rr = await resolveRoot(gh, issue);
@@ -48,7 +50,7 @@ export async function collectGateInput(gh, prNumber, stage, prIn) {
   // RCA receipts may live anywhere in the root (trusted-PM only is enforced by the evaluator); add root items not already present.
   const have = new Set(items.map((i) => `${i.kind}:${i.id}`));
   for (const r of base.items) if (!have.has(`${r.kind === "pr-comment" ? "comment" : r.kind}:${r.id}`)) items.push({ ...r, kind: r.kind, updated_at: r.updated_at ?? r.created_at, trustedWriter: false });
-  const fingerprint = createHash("sha256").update(JSON.stringify([head, firstCodeCommitAt ?? null, rr.root, fh.records.map((r) => [r.class, r.pr, r.sha]).sort(), items.map((i) => [i.kind, i.id, i.user?.id ?? null, i.created_at ?? null, i.updated_at ?? null, i.body])])).digest("hex");
+  const fingerprint = createHash("sha256").update(JSON.stringify([head, firstCodeCommitAt ?? null, rr.root, bd.source ?? null, fh.records.map((r) => [r.class, r.pr, r.sha]).sort(), items.map((i) => [i.kind, i.id, i.user?.id ?? null, i.created_at ?? null, i.updated_at ?? null, i.body])])).digest("hex");
   return { gate: { issue, root: rr.root, pr: prNumber, head, items, firstCodeCommitAt, stage, failHistory: fh.failHistory }, head, fingerprint };
 }
 
@@ -62,7 +64,7 @@ const STATE = { pass: "success", unknown: "pending", blocked: "failure" };
  * Returns {status, unmet, head, invalidated, published, publishError?}. `status:"pass"` only when the success status was really written
  * (or no publish was requested). Nothing here reports a successful invalidation/publication when the write failed.
  */
-export async function runCheck({ gh, prNumber, stage, publish = false, expectedHead }) {
+export async function runCheck({ gh, prNumber, stage, publish = false, expectedHead, now }) {
   const context = `quality-gate/${stage}`;
   const res = { status: "blocked", stages: {}, unmet: [], head: null, invalidated: false, published: false };
   const write = async (sha, state, description) => {
@@ -94,14 +96,14 @@ export async function runCheck({ gh, prNumber, stage, publish = false, expectedH
   // 3. collect
   let c;
   if (!live) return finish("failure", { status: "blocked", unmet: [...res.unmet, "evidence_incomplete:pr_unreadable"] }, "blocked: pr_unreadable");
-  try { c = await collectGateInput(gh, prNumber, stage, pr); }
+  try { c = await collectGateInput(gh, prNumber, stage, pr, { now }); }
   catch (e) { return finish("failure", { status: "blocked", unmet: [`evidence_incomplete:${safeError(e)}`] }, "blocked: evidence_incomplete"); }
   if (c.unresolvable) return finish("failure", { status: "blocked", unmet: [c.unresolvable] }, `blocked: ${c.unresolvable}`);
   const ev = evaluateGate(c.gate);
   if (ev.status !== "pass") return finish(STATE[ev.status] ?? "failure", { status: ev.status, stages: ev.stages, unmet: ev.unmet }, `${ev.status}: ${ev.unmet.join(",")}`);
   // 4. a green must survive a second, later read of HEAD + every evidence item
   let again;
-  try { again = await collectGateInput(gh, prNumber, stage); }
+  try { again = await collectGateInput(gh, prNumber, stage, undefined, { now }); }
   catch (e) { return finish("failure", { status: "blocked", unmet: [`evidence_incomplete:${safeError(e)}`] }, "blocked: evidence_incomplete"); }
   if (again.head !== head) return { ...res, status: "blocked", stages: ev.stages, unmet: ["stale_head"] }; // newer run owns the new HEAD; never green it
   if (again.unresolvable || again.fingerprint !== c.fingerprint) return finish("pending", { status: "unknown", stages: ev.stages, unmet: ["evidence_changed_during_check"] }, "unknown: evidence_changed_during_check");

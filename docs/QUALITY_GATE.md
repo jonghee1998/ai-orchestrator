@@ -57,3 +57,23 @@
 **One writer per PR.** All publishing goes through `refreshPr` under lock domain `quality-gate-pr-<N>` spanning pending invalidation → collect → final re-read → publish for both stages. In CI this is the job-level concurrency group of the `refresh` matrix job, identical in `quality-gate.yml` and `quality-gate-events.yml` (asserted by `gate180.test.mjs`); `check.mjs --publish` and `event-route.mjs --pr` refuse to publish without `QUALITY_GATE_PR_LOCK`. Actions keeps one running + the latest pending run per group; that is safe because each run re-reads live state, but a stale `success` can remain briefly while a newer run is queued.
 
 **Status / not claimed.** Verified by unit + deterministic simulation against a fake API (including the pause-after-validation race). Not a live E2E: both workflows are inert until a default-branch copy and the required ruleset/security capability exist (BLOCKED, owner action; nothing in main/base was changed).
+
+## Issue #182 — fail-closed root fan-out and per-correction analysis clock
+
+**Fan-out (`scripts/gate/event-route.mjs`).** Whenever the event source's root cannot be proven (ambiguous / edited / forged marker, root not
+self-marked, deleted or unreadable issue, PR marker retargeted away from its linked lineage) the target set is the conservative superset:
+every eligible open PR (open, same-repo, allowlisted base). A sibling PR whose lineage is unresolvable is refreshed too (it blocks itself)
+instead of only being listed in `diagnostics`; an event on an unmarked issue is skipped only if no eligible PR's lineage touches it. If even
+the superset cannot be listed (`pr_enumeration_failed`) or exceeds the 256-entry Actions matrix, the plan returns `blocked` + a `stale`
+statement; the workflow job fails loudly and prints it. This is NOT a safe state: the named statuses may still show an old success. Values are
+passed to the shell via `env`, never interpolated. Statuses are still written only by the per-PR lock job from trusted base code.
+
+**Analysis clock (`scripts/gate/correction-boundary.mjs`).** `firstCodeCommitAt` is the earliest commit NEW to this correction:
+`compare(source…head)` must be `ahead`, `merge_base == source`, fully enumerated (`<250`, last commit == head). The source SHA comes from the
+trusted-PM revision-issue `gpt-pm-followup:pr<N>:<sha>` marker (single PR + SHA), must equal the PM supersedes marker and the superseded PR's
+live head. Exact (no new commit), diverged/behind (rewrite), force-push mismatch, ambiguous/missing marker, compare/API failure all block.
+Commit times in the future or older than the source head are rejected. The original PR of a chain (`supersedes none`) uses all its own
+commits. Dev-analysis and the repeated-failure RCA use the same value. Residual (unproven): committer dates are author-controlled inside the
+accepted window; there is no server-side push time in this API.
+
+Root #146 bound is 12 for this ordinal only (n1..n11 preserved); all other roots keep default 3 / ceiling 5.

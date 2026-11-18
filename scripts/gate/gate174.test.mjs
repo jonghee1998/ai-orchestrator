@@ -87,7 +87,7 @@ test("#174-3 dev-analysis timing uses last modification, not created_at alone", 
 
 // fake GitHub for the real check command
 const fakeGh = ({ comments = [], issueBody = "", commitAt = T(2), head = HEAD, published } = {}) => ({
-  getPull: async () => ({ number: 5, user: { id: 7, login: "dev" }, head: { sha: head }, body: "Closes #1", created_at: T(2), updated_at: T(2) }),
+  getPull: async () => ({ number: 5, user: { id: 129052128, login: "jonghee1998", type: "User" }, head: { sha: head }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->", created_at: T(2), updated_at: T(2) }),
   getIssue: async () => ({ number: 1, user: OWNER, body: `<!-- orch-root-request:v1 #1 -->\n${issueBody}`, created_at: T(0), updated_at: T(0) }),
   listPullCommits: async () => [{ commit: { committer: { date: commitAt } } }],
   listIssueComments: async (n) => (n === 1 ? comments : []), listIssues: async () => [], listPulls: async () => [],
@@ -96,7 +96,7 @@ const fakeGh = ({ comments = [], issueBody = "", commitAt = T(2), head = HEAD, p
 const c = (id, o) => ({ id, created_at: T(1), updated_at: T(1), ...o });
 test("#174-4 real check command: omission/tampering never passes; stages split; status published", async () => {
   const pub = [];
-  const preOk = [c(1, gate("pm-scope", "issue=1")), c(2, { ...gate("dev-analysis", "issue=1", { login: "dev", id: 7, type: "User" }, T(1)) }), c(3, gate("self-test", `issue=1 sha=${HEAD} typecheck=pass test=pass build=pass`))];
+  const preOk = [c(1, gate("pm-scope", "issue=1")), c(2, { ...gate("dev-analysis", "issue=1", OWNER, T(1)) }), c(3, gate("self-test", `issue=1 sha=${HEAD} typecheck=pass test=pass build=pass`))];
   assert.equal((await runCheck({ gh: fakeGh({ comments: preOk, published: pub }), prNumber: 5, stage: "pre-pr", publish: true })).status, "pass");
   // #176: the FIRST write is the invalidation (pending); the verdict follows.
   assert.deepEqual([pub[0].state, pub[1].state, pub[1].context, pub[1].sha], ["pending", "success", "quality-gate/pre-pr", HEAD]);

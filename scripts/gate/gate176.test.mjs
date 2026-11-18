@@ -9,7 +9,7 @@ import { normalizeCodexReviews } from "../handoff/lifecycle-evidence.mjs";
 import { CODEX_BOT } from "../handoff/core.mjs";
 
 const OWNER = { login: "jonghee1998", id: 129052128, type: "User" };
-const DEV = { login: "dev", id: 7, type: "User" };
+const DEV = { login: "jonghee1998", id: 129052128, type: "User" }; // #182: real PR author is the trusted PM writer (supersedes marker is trusted-PM only)
 const MAL = { login: "mallory", id: 6, type: "User" };
 const BOT = { login: CODEX_BOT.login, id: CODEX_BOT.id, type: "Bot" };
 const HEAD = "a".repeat(40), NEXT = "b".repeat(40);
@@ -20,7 +20,7 @@ const c = (id, o) => ({ id, created_at: T(1), updated_at: T(1), ...o });
 const okComments = (head = HEAD) => [c(1, gate("pm-scope", "issue=1")), c(2, gate("dev-analysis", "issue=1", DEV, T(1))), c(3, gate("self-test", `issue=1 sha=${head} typecheck=pass test=pass build=pass`))];
 
 /** Fake GitHub. `hooks[name](callIndex)` may throw / mutate world to model failures and races. `log` records every call in order. */
-function fake({ comments = okComments(), body = "Closes #1", head = HEAD, hooks = {}, log = [], statuses = [] } = {}) {
+function fake({ comments = okComments(), body = "Closes #1\n<!-- orch-supersedes:v1 none -->", head = HEAD, hooks = {}, log = [], statuses = [] } = {}) {
   const n = {}; const w = { comments, body, head };
   const call = async (name, f) => { n[name] = (n[name] ?? 0) + 1; log.push(name); await hooks[name]?.(n[name], w); return f(); };
   return {
@@ -115,12 +115,12 @@ test("#176-1 no-publish mode never writes", async () => {
 });
 
 // ---- 2. trusted EVENT refresh ----
-const prObj = (n, o = {}) => ({ number: n, state: "open", user: DEV, head: { sha: n === 5 ? HEAD : "c".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1", ...o });
+const prObj = (n, o = {}) => ({ number: n, state: "open", user: DEV, head: { sha: n === 5 ? HEAD : "c".repeat(40), repo: { full_name: "o/r" } }, base: { ref: BR, repo: { full_name: "o/r" } }, body: "Closes #1\n<!-- orch-supersedes:v1 none -->", ...o });
 const evGh = (pulls) => ({ getIssue: async (n) => ({ number: n, user: { login: "jonghee1998", id: 129052128, type: "User" }, body: n < 90 ? `<!-- orch-root-request:v1 #${n} -->` : "plain" }), listPulls: async () => pulls, getPull: async (n) => pulls.find((p) => p.number === n) ?? (() => { throw new Error("404"); })() });
 const AL = [BR];
 
 test("#176-2 dispatch mapping: PR comment / Issue comment / Issue edit / PR body edit / dispatch, created|edited|deleted alike", async () => {
-  const gh = evGh([prObj(5), prObj(6, { body: "Closes #2" }), prObj(7, { body: "Closes #1" })]);
+  const gh = evGh([prObj(5), prObj(6, { body: "Closes #2" }), prObj(7, { body: "Closes #1\n<!-- orch-supersedes:v1 none -->" })]);
   for (const action of ["created", "edited", "deleted"]) {
     assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 5, pull_request: {} } }, gh, allowlist: AL })).targets, [5, 7], `PR comment ${action} (root-wide fan-out #180)`);
     assert.deepEqual((await targetsFromEvent({ name: "issue_comment", payload: { action, issue: { number: 1 } }, gh, allowlist: AL })).targets, [5, 7], `linked Issue comment ${action}`);
@@ -139,7 +139,7 @@ test("#176-2 scope: unrelated issue, closed PR, fork PR, other base branch, unsu
   assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: -1 } }, gh, allowlist: AL })).skip, "invalid_issue");
   const calls = []; const out = await handleEvent({ name: "issue_comment", payload: { issue: { number: 6, pull_request: {} } }, gh, allowlist: AL, check: async (a) => { calls.push(a); return {}; } });
   assert.equal(calls.length, 0, "fork PR never evaluated/written"); assert.equal(out.results.length, 0);
-  assert.match((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh: { ...gh, listPulls: async () => ({}) }, allowlist: AL })).error, /non-array/); // #180: fail closed with a diagnostic, not a throw/silent empty
+  assert.match((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh: { ...gh, listPulls: async () => ({}) }, allowlist: AL })).error, /pr_enumeration_failed/); // #180/#182: fail closed with an explicit BLOCKED diagnostic, not a throw/silent empty
 });
 
 test("#176-2 exact SHA: the LIVE head is used, never the payload SHA; both stages run; payload text is never instruction", async () => {

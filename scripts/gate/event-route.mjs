@@ -16,6 +16,8 @@ const posInt = (n) => Number.isInteger(n) && n > 0;
 
 const ELIGIBLE = (pr, allowlist) => pr && pr.state === "open" && pr.head?.repo?.full_name === pr.base?.repo?.full_name && allowlist.includes(pr.base?.ref);
 const UNRELATED = new Set(["root_marker_missing", "req_unresolvable"]);
+const MATRIX_LIMIT = 256; // GitHub Actions matrix cap
+const STALE_NOTE = "quality-gate/* statuses of open PRs outside this run's targets may remain stale (previous success NOT invalidated)";
 
 /**
  * Issue #180 — ROOT-AWARE fan-out. Evidence is root-wide (check.mjs/collectRootEvidence), so an event on ANY root evidence source
@@ -45,41 +47,59 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
     if (!cache.has(issueNo)) cache.set(issueNo, await resolveRoot(gh, issueNo));
     return cache.get(issueNo);
   };
+  // Issue #182: enumerate FIRST. If even the conservative superset (every eligible open PR) cannot be listed, nothing can be invalidated =>
+  // explicit BLOCKED naming what may stay stale. Never a silent skip, never a claim of safety.
+  let open;
+  try { open = await gh.listPulls(); if (!Array.isArray(open)) throw new Error("listPulls returned a non-array"); }
+  catch (e) {
+    return { targets: eventIsPr ? [n] : [], blocked: true, error: "pr_enumeration_failed", detail: { message: String(e?.message ?? e).slice(0, 80) }, stale: STALE_NOTE, diagnostics };
+  }
+  const eligible = open.filter((p) => ELIGIBLE(p, allowlist));
+  const superset = () => [...new Set([...(eventIsPr ? [n] : []), ...eligible.map((p) => p.number)])].sort((a, b) => a - b);
+  const capped = (r) => {
+    if (r.targets.length <= MATRIX_LIMIT) return r;
+    return { ...r, targets: r.targets.slice(0, MATRIX_LIMIT), blocked: true, error: "target_set_exceeds_matrix_limit", stale: `${STALE_NOTE} (not refreshed: ${r.targets.slice(MATRIX_LIMIT, MATRIX_LIMIT + 50).join(",")}${r.targets.length > MATRIX_LIMIT + 50 ? ",…" : ""})` };
+  };
   try {
     const roots = new Set();
     const direct = new Set(eventIsPr ? [n] : []);
     const addRoot = async (issueNo, what) => {
       const r = await rootOf(issueNo);
-      if (r.error) { if (UNRELATED.has(r.error)) return; throw Object.assign(new Error(r.error), { detail: { ...r.detail, source: what } }); }
+      if (r.error) { if (UNRELATED.has(r.error)) return null; throw Object.assign(new Error(r.error), { detail: { ...r.detail, source: what } }); }
       roots.add(r.root);
+      return r.root;
     };
     if (eventIsPr) {
       const evPr = await gh.getPull(n);
       const linked = reqFromPr(evPr);
-      if (linked) await addRoot(linked, `pr#${n}.linked`);
+      const linkedRoot = linked ? await addRoot(linked, `pr#${n}.linked`) : null;
       const m = rootMarker(evPr);
       if (m === "ambiguous") throw Object.assign(new Error("root_request_ambiguous"), { detail: { pr: n } });
-      if (Number.isInteger(m)) await addRoot(m, `pr#${n}.marker`);
+      if (Number.isInteger(m)) {
+        const mRoot = await addRoot(m, `pr#${n}.marker`);
+        // a PR whose own marker disagrees with its linked lineage was retargeted/forged: the OLD root is unknowable => superset
+        if (linkedRoot !== null && mRoot !== null && linkedRoot !== mRoot) throw Object.assign(new Error("root_marker_conflict"), { detail: { pr: n } });
+      }
     } else {
       await addRoot(n, `issue#${n}`);
     }
-    const open = await gh.listPulls();
-    if (!Array.isArray(open)) throw new Error("listPulls returned a non-array");
-    for (const p of open) {
-      if (!ELIGIBLE(p, allowlist) || p.number === n) continue;
+    for (const p of eligible) {
+      if (p.number === n) continue;
       const l = reqFromPr(p);
-      if (!l) continue;
+      if (!l) continue; // no linked issue: cannot be attributed, and its own check already fails closed on req_unresolvable
       if (l === n && !eventIsPr) { direct.add(p.number); continue; }
-      if (!roots.size) continue;
       const r = await rootOf(l);
-      if (r.error) { diagnostics.push({ pr: p.number, unattributable: r.error }); continue; }
-      if (roots.has(r.root)) direct.add(p.number);
+      // Unattributable lineage may be exactly the evidence that was just edited/deleted: REFRESH it (it fails closed in its own check)
+      // instead of leaving a stale success behind.
+      if (r.error) { diagnostics.push({ pr: p.number, unattributable: r.error }); direct.add(p.number); continue; }
+      if (roots.has(r.root) || r.root === n) direct.add(p.number);
     }
     const targets = [...direct].sort((a, b) => a - b);
-    return targets.length ? { targets, roots: [...roots], diagnostics } : { targets: [], skip: roots.size ? "no_open_pr_for_root" : "unrelated_no_root_marker", roots: [...roots], diagnostics };
+    return capped(targets.length ? { targets, roots: [...roots], diagnostics } : { targets: [], skip: roots.size ? "no_open_pr_for_root" : "unrelated_no_root_marker", roots: [...roots], diagnostics });
   } catch (e) {
-    // fail closed with a concrete diagnostic; the event PR (if any) is still refreshed so its own status reflects the failure
-    return { targets: eventIsPr ? [n] : [], error: String(e?.message ?? e).slice(0, 120), detail: e?.detail, diagnostics };
+    // Root/marker not provably resolved => conservative SUPERSET: every eligible open PR is re-evaluated (invalidated, then its own check
+    // fails closed or re-proves). A failing plan job alone does NOT invalidate anything.
+    return capped({ targets: superset(), error: String(e?.message ?? e).slice(0, 120), detail: e?.detail, diagnostics, superset: true });
   }
 }
 
@@ -107,10 +127,10 @@ export async function refreshPr({ gh, prNumber, allowlist, publish = true, check
 /** Wake -> root-aware targets (deduped) -> refresh each. Different PRs are independent (own lock key); the same PR is serialized. */
 export async function handleEvent({ name, payload, gh, allowlist, publish = true, check = runCheck, lock = defaultPrLock, out = () => {} }) {
   const r = await targetsFromEvent({ name, payload, gh, allowlist });
-  if (r.error) out({ event: name, result: "error", reason: r.error, detail: r.detail });
-  if (!r.targets.length) { if (!r.error) out({ event: name, result: "skip", reason: r.skip }); return { results: [], skipped: r.skip, error: r.error }; }
+  if (r.error) out({ event: name, result: r.blocked ? "BLOCKED" : "error", reason: r.error, detail: r.detail, stale: r.stale });
+  if (!r.targets.length) { if (!r.error) out({ event: name, result: "skip", reason: r.skip }); return { results: [], skipped: r.skip, error: r.error, blocked: r.blocked, stale: r.stale }; }
   const all = await Promise.all(r.targets.map((prNumber) => refreshPr({ gh, prNumber, allowlist, publish, check, lock, out, event: name, payloadHead: payload?.pull_request?.number === prNumber ? payload.pull_request.head?.sha : undefined })));
-  return { results: all.flat(), error: r.error, targets: r.targets };
+  return { results: all.flat(), error: r.error, blocked: r.blocked, stale: r.stale, targets: r.targets };
 }
 
 // CLI modes (workflows): `--plan` prints/emits the root-aware target list (never writes statuses); `--pr N` refreshes ONE PR under the lock
@@ -126,7 +146,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (process.argv.includes("--plan")) {
     const r = await targetsFromEvent({ name, payload, gh, allowlist });
     out({ event: name, ...r });
-    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `targets=${JSON.stringify(r.targets)}\nerror=${r.error ?? ""}\n`);
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `targets=${JSON.stringify(r.targets)}\nerror=${r.error ?? ""}\nstale=${r.stale ?? ""}\n`);
     process.exit(0); // the workflow's next step fails the job when `error` is non-empty (targets still run so each PR publishes its own verdict)
   }
   const pr = Number(arg("pr"));
