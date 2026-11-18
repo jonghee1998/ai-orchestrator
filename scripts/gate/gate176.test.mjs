@@ -134,7 +134,7 @@ test("#176-2 dispatch mapping: PR comment / Issue comment / Issue edit / PR body
 test("#176-2 scope: unrelated issue, closed PR, fork PR, other base branch, unsupported event => skipped (no write)", async () => {
   const gh = evGh([prObj(5, { state: "closed" }), prObj(6, { head: { sha: HEAD, repo: { full_name: "fork/r" } } }), prObj(7, { base: { ref: "main", repo: { full_name: "o/r" } } })]);
   assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 1 } }, gh, allowlist: AL })).skip, "no_open_pr_for_root");
-  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 99 } }, gh, allowlist: AL })).skip, "unrelated_no_root_marker");
+  assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: 99 } }, gh, allowlist: AL })).error, "root_marker_lost", "#184: unmarked issue is not provably unrelated (superset, empty here as every PR is out of scope)");
   assert.equal((await targetsFromEvent({ name: "push", payload: {}, gh, allowlist: AL })).skip, "unsupported_event");
   assert.equal((await targetsFromEvent({ name: "issue_comment", payload: { issue: { number: -1 } }, gh, allowlist: AL })).skip, "invalid_issue");
   const calls = []; const out = await handleEvent({ name: "issue_comment", payload: { issue: { number: 6, pull_request: {} } }, gh, allowlist: AL, check: async (a) => { calls.push(a); return {}; } });

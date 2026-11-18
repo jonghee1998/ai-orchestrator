@@ -100,8 +100,8 @@ test("#182-B5 original PR (`supersedes none`) is handled separately: min over it
   const empty = fake({ prBody: "Closes #1\n<!-- orch-supersedes:v1 none -->" }); empty.listPullCommits = async () => [];
   assert.equal((await pre(empty)).status, "blocked");
 });
-test("#182-B6 root146 bound is 12 for that ordinal only; every other root keeps the default", () => {
-  assert.deepEqual(ROOT_CEILING_EXCEPTIONS, { 146: 12 }); assert.equal(ceilingFor(146), 12);
+test("#182-B6 (superseded by #184) root146 bound is 13 for that ordinal only; every other root keeps the default", () => {
+  assert.deepEqual(ROOT_CEILING_EXCEPTIONS, { 146: 13 }); assert.equal(ceilingFor(146), 13);
   assert.equal(MAX_CORRECTIONS, 3); assert.equal(ceilingFor(147), 5); assert.equal(ceilingFor(1), 5);
 });
 
@@ -132,10 +132,10 @@ test("#182-A1 ambiguous / edited / forged root marker => conservative SUPERSET (
 test("#182-A2 deleted root/sibling issue (404) => superset; marker DELETED from the root => lineage-touching PRs refreshed, unrelated root untouched", async () => {
   assert.deepEqual((await targetsFromEvent({ ...ev("issues", 1), gh: world({ gone: [1] }), allowlist: AL })).targets, T4);
   const noMarker = await targetsFromEvent({ ...ev("issues", 1), gh: world({ issues: { 1: iss(1, 0) } }), allowlist: AL });
-  assert.deepEqual(noMarker.targets, [5, 6, 7]); assert.equal(noMarker.skip, undefined);
+  assert.deepEqual(noMarker.targets, T4, "#184: a lost marker is NOT proof of unrelatedness => conservative superset"); assert.match(noMarker.error, /root_marker_lost/);
   const del = await targetsFromEvent({ ...ev("issue_comment", 2), gh: world({ issues: { 2: iss(2, 0) } }), allowlist: AL });
-  assert.deepEqual(del.targets, [6], "sibling issue lost its marker: its own PR is refreshed (fails closed itself)");
-  assert.deepEqual((await targetsFromEvent({ ...ev("issue_comment", 99), gh: world(), allowlist: AL })).skip, "unrelated_no_root_marker");
+  assert.deepEqual(del.targets, T4, "#184: sibling issue lost its marker, former root unprovable => superset");
+  assert.deepEqual((await targetsFromEvent({ ...ev("issue_comment", 99), gh: world(), allowlist: AL })).targets, T4, "#184: unmarked issue is never silently unrelated");
 });
 test("#182-A3 PR marker retargeted/forged (marker root != linked root) or ambiguous => superset", async () => {
   const gh = (body) => world({ pulls: [pr(5, 1, { body }), pr(6, 2), pr(7, 3), pr(8, 50)] });

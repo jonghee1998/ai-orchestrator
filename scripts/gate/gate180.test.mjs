@@ -61,9 +61,9 @@ test("#180 S5 fail closed with concrete diagnostics: non-array, partial/API fail
   const r = await targetsFromEvent({ ...ev("issue_comment", 5, true), gh: world({ listPulls: () => ({}) }), allowlist: AL });
   assert.deepEqual(r.targets, [5]); assert.ok(r.error);
 });
-test("#180 S5b issue without any root marker is explicitly UNRELATED (not an error); a sibling with unresolvable lineage is diagnosed AND targeted (#182: never left with a stale success)", async () => {
+test("#180 S5b (#184) issue without any root marker is NOT unrelated: conservative superset; a sibling with unresolvable lineage is diagnosed AND targeted (#182: never left with a stale success)", async () => {
   const a = await targetsFromEvent({ ...ev("issue_comment", 60), gh: world(), allowlist: AL });
-  assert.deepEqual([a.targets, a.skip, a.error], [[], "unrelated_no_root_marker", undefined]);
+  assert.ok(a.targets.length > 0 && /root_marker_lost/.test(a.error), "#184: a missing marker is NOT proof of unrelatedness => conservative superset");
   const b = await targetsFromEvent({ ...ev("issue_comment", 1), gh: world({ pulls: [pr(5, 1), pr(11, 60)] }), allowlist: AL });
   assert.deepEqual(b.targets, [5, 11]); assert.deepEqual(b.diagnostics, [{ pr: 11, unattributable: "root_marker_missing" }]);
 });

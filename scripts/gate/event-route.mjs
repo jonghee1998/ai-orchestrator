@@ -63,9 +63,12 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
   try {
     const roots = new Set();
     const direct = new Set(eventIsPr ? [n] : []);
+    const lost = [];
     const addRoot = async (issueNo, what) => {
       const r = await rootOf(issueNo);
-      if (r.error) { if (UNRELATED.has(r.error)) return null; throw Object.assign(new Error(r.error), { detail: { ...r.detail, source: what } }); }
+      // Issue #184: a MISSING current marker is NOT proof of unrelatedness (the marker may be exactly what was just edited/deleted).
+      // Record the lost source; it is recovered from independently verified history below or falls back to the conservative superset.
+      if (r.error) { if (UNRELATED.has(r.error)) { lost.push({ source: what, issue: issueNo, error: r.error }); return null; } throw Object.assign(new Error(r.error), { detail: { ...r.detail, source: what } }); }
       roots.add(r.root);
       return r.root;
     };
@@ -82,6 +85,22 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
       }
     } else {
       await addRoot(n, `issue#${n}`);
+    }
+    // Issue #184: recover the FORMER root of every lost source from independently verified history = the PR(s) directly linked to that issue
+    // carrying their OWN trusted marker that resolves (self-marked root). No recoverable, agreeing root => conservative superset.
+    for (const l of lost) {
+      const hist = new Set();
+      for (const p of eligible) {
+        if (reqFromPr(p) !== l.issue) continue;
+        const pm = rootMarker(p);
+        if (pm === "ambiguous") throw Object.assign(new Error("root_marker_lost"), { detail: { source: l.source, why: "historical_marker_ambiguous", pr: p.number } });
+        if (!Number.isInteger(pm)) continue;
+        const pr = await rootOf(pm);
+        if (pr.error) continue;
+        hist.add(pr.root);
+      }
+      if (hist.size !== 1) throw Object.assign(new Error("root_marker_lost"), { detail: { source: l.source, why: hist.size ? "historical_roots_conflict" : "no_verified_historical_link" } });
+      const [hr] = hist; roots.add(hr); diagnostics.push({ source: l.source, recoveredRoot: hr, via: "linked_pr_marker" });
     }
     for (const p of eligible) {
       if (p.number === n) continue;

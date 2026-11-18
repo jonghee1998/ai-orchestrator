@@ -13,11 +13,11 @@ import { selectReviewVerdict } from "./review-verdict.mjs";
 
 export const KEY_VERSION = "v1";
 export const STEPS = Object.freeze(["dispatch", "review", "revise", "accept", "complete", "blocked"]);
-export const MAX_ROUNDS = 3;
-/** Hard ceiling for an authorized root-specific override (root-corrections.resolveCorrectionLimit). */
-export const MAX_ROUNDS_CEILING = 5;
-/** Issue #170/#172/#178: the only owner-approved exception (root #146 => 11 per owner standing authorization in #180; no 12th without PM exact-FAIL + authorization). Mirrors root-corrections.ROOT_CEILING_EXCEPTIONS. */
-export const MAX_ROUNDS_ROOT_EXCEPTIONS = Object.freeze({ 146: 11 });
+import { MAX_CORRECTIONS, CORRECTION_CEILING, ROOT_CEILING_EXCEPTIONS, ceilingFor } from "./correction-policy.mjs";
+export const MAX_ROUNDS = MAX_CORRECTIONS;
+/** Compat aliases of the single policy authority (correction-policy.mjs); never a separate value. */
+export const MAX_ROUNDS_CEILING = CORRECTION_CEILING;
+export const MAX_ROUNDS_ROOT_EXCEPTIONS = ROOT_CEILING_EXCEPTIONS;
 export const DEPLOY_SOURCE = "vercel_commit_status";
 export const FORBIDDEN_TARGETS = new Set(["main", "master", "production", "prod", "release"]);
 const SHA_RE = /^[a-f0-9]{40}$/;
@@ -271,7 +271,7 @@ function planCore(i) {
   if (!Number.isInteger(req) || req < 1) return blocked("invalid_req");
   if (!Number.isInteger(round) || round < 1) return blocked("invalid_round");
   const maxRounds = i.maxRounds ?? MAX_ROUNDS;
-  if (!Number.isInteger(maxRounds) || maxRounds < MAX_ROUNDS || maxRounds > (MAX_ROUNDS_ROOT_EXCEPTIONS[req] ?? MAX_ROUNDS_CEILING)) return blocked("invalid_round_limit", { max: maxRounds });
+  if (!Number.isInteger(maxRounds) || maxRounds < MAX_ROUNDS || maxRounds > ceilingFor(req)) return blocked("invalid_round_limit", { max: maxRounds });
   if (round > maxRounds) return blocked("round_cap_exceeded", { round, max: maxRounds });
   if (!pr) return noop("pr_unavailable");
   const bad = validateTarget(i);

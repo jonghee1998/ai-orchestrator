@@ -6,12 +6,8 @@
 // Issue / PR / chain.
 import { isTrustedPm, pmReviseMarkers } from "./core.mjs";
 
-export const MAX_CORRECTIONS = 3; // default for every root
-export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed (except the exact owner-approved exception below)
-// Issue #170: NEW bounded, owner-approved exception (root #146 owner approvals 2026-11-18: correction 6 then exactly one more, 7 of 7, no 8th).
-// It applies ONLY to the exact root listed here; no global raise. Every other root keeps default 3 / ceiling 5.
-export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 12 }); // Issue #182: standing owner authorization for correction 12 on root #146 ONLY (n1..n11 history intact, markers preserved; was 11 in #180); no 13th without PM exact-FAIL + authorization, no global raise
-export const ceilingFor = (root) => ROOT_CEILING_EXCEPTIONS[root] ?? CORRECTION_CEILING;
+import { MAX_CORRECTIONS, CORRECTION_CEILING, ROOT_CEILING_EXCEPTIONS, ceilingFor } from "./correction-policy.mjs";
+export { MAX_CORRECTIONS, CORRECTION_CEILING, ROOT_CEILING_EXCEPTIONS, ceilingFor };
 const LIMIT_ANY = /<!--\s*orch-root-correction-limit:v1\b[^>]*-->/g;
 const LIMIT_RE = /^<!--\s*orch-root-correction-limit:v1\s+root(\d+)\s+max=(\d+)\s*-->$/;
 

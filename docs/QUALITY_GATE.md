@@ -46,7 +46,7 @@
 
 **Trust policy:** only trusted-PM (owner) authored markers count. The PR author is not trusted for failure-class or RCA evidence.
 
-**Limit:** root #146 ceiling is 11 (standing owner authorization for this ordinal only, #180); markers n1..n10 preserved; every other root keeps default 3 / ceiling 5; no 12th without a PM exact-FAIL judgement under the owner's standing authorization (the worker never self-dispatches). The earlier "no 11th / new approval" wording is superseded by that standing approval.
+**Limit:** root #146 ceiling is 13 (standing owner authorization for this ordinal only, #184; single authority correction-policy.mjs); markers n1..n12 preserved; every other root keeps default 3 / ceiling 5; no 14th without a PM exact-FAIL judgement under the owner's standing authorization (the worker never self-dispatches). The earlier "no 11th / new approval" wording is superseded by that standing approval.
 
 **Not claimed:** the default-branch event workflow, branch ruleset and a separate security review are *not* asserted to be operating by this change.
 
@@ -76,4 +76,9 @@ Commit times in the future or older than the source head are rejected. The origi
 commits. Dev-analysis and the repeated-failure RCA use the same value. Residual (unproven): committer dates are author-controlled inside the
 accepted window; there is no server-side push time in this API.
 
-Root #146 bound is 12 for this ordinal only (n1..n11 preserved); all other roots keep default 3 / ceiling 5.
+Root #146 bound is 13 for this ordinal only (n1..n12 preserved; single authority scripts/handoff/correction-policy.mjs, #184); all other roots keep default 3 / ceiling 5.
+
+## Issue #184 — lost-root invalidation and single ceiling authority
+- A missing root marker on an event source is **not** proof of unrelatedness. Former root is recovered only from a directly linked PR's own trusted marker that resolves to a self-marked root; otherwise (none / conflicting / ambiguous) the router refreshes every eligible open PR (`root_marker_lost`, superset). Only an issue that verifiably resolves to a *different* root stays unrelated.
+- The round ceiling lives only in `scripts/handoff/correction-policy.mjs`; resolver, planner and lifecycle all import it (root #146 = 13, others 5, default 3).
+- Not claimed: required checks active, default workflows deployed, security PASS, real GitHub E2E (fake-API tests only).
