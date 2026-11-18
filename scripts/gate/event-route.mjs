@@ -78,6 +78,12 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
       const linkedRoot = linked ? await addRoot(linked, `pr#${n}.linked`) : null;
       const m = rootMarker(evPr);
       if (m === "ambiguous") throw Object.assign(new Error("root_request_ambiguous"), { detail: { pr: n } });
+      // Issue #186: an event PR whose linked-issue reference and/or trusted root marker is ABSENT/invalid (e.g. just edited away) cannot
+      // be attributed from its current body, and the body may have been the sole evidence for its siblings. It is a LOST source, never
+      // "direct PR only". No linked issue => the former root has no independent anchor => superset. Marker absent => recovered only from
+      // other PRs linked to the same issue (below), else superset.
+      if (!linked) lost.push({ source: `pr#${n}.linked`, issue: null, error: "pr_link_missing" });
+      else if (m === null) lost.push({ source: `pr#${n}.marker`, issue: linked, error: "pr_marker_missing" });
       if (Number.isInteger(m)) {
         const mRoot = await addRoot(m, `pr#${n}.marker`);
         // a PR whose own marker disagrees with its linked lineage was retargeted/forged: the OLD root is unknowable => superset
@@ -89,9 +95,10 @@ export async function targetsFromEvent({ name, payload, gh, allowlist }) {
     // Issue #184: recover the FORMER root of every lost source from independently verified history = the PR(s) directly linked to that issue
     // carrying their OWN trusted marker that resolves (self-marked root). No recoverable, agreeing root => conservative superset.
     for (const l of lost) {
+      if (l.issue === null) throw Object.assign(new Error("root_marker_lost"), { detail: { source: l.source, why: "no_linked_issue_for_event_pr" } });
       const hist = new Set();
       for (const p of eligible) {
-        if (reqFromPr(p) !== l.issue) continue;
+        if (reqFromPr(p) !== l.issue || p.number === n) continue;
         const pm = rootMarker(p);
         if (pm === "ambiguous") throw Object.assign(new Error("root_marker_lost"), { detail: { source: l.source, why: "historical_marker_ambiguous", pr: p.number } });
         if (!Number.isInteger(pm)) continue;

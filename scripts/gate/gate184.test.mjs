@@ -92,13 +92,13 @@ test("#184-A7 event trace: handleEvent reports targets and statuses; nothing wri
 test("#184-B1 resolver, planner and lifecycle share ONE policy object (no duplicate constants)", () => {
   assert.equal(rc.ceilingFor, policy.ceilingFor); assert.equal(rc.ROOT_CEILING_EXCEPTIONS, policy.ROOT_CEILING_EXCEPTIONS);
   assert.equal(lc.MAX_ROUNDS_ROOT_EXCEPTIONS, policy.ROOT_CEILING_EXCEPTIONS); assert.equal(lc.MAX_ROUNDS_CEILING, policy.CORRECTION_CEILING);
-  assert.deepEqual({ ...policy.ROOT_CEILING_EXCEPTIONS }, { 146: 13 });
+  assert.deepEqual({ ...policy.ROOT_CEILING_EXCEPTIONS }, { 146: 14 });
 });
 test("#184-B2 every supported bound agrees across resolver and planner; unsupported/low/other-root rejected by both", () => {
   const T = (b) => ({ user: OWNER, created_at: T0, updated_at: T0, body: b });
   const lim = (root, max) => rc.resolveCorrectionLimit([T(`<!-- orch-root-correction-limit:v1 root${root} max=${max} -->`)], root);
   const plan = (req, maxRounds) => lc.planLifecycle({ req, round: 1, maxRounds, config: lc.parseConfig({ allowlist: [BR], expectedBase: "c".repeat(40) }), integrationTarget: BR, pr: null, reviews: [], pmAccepts: [], pmRevises: [], records: [] }).reason;
-  for (const [root, max, ok] of [[146, 3, true], [146, 12, true], [146, 13, true], [146, 14, false], [146, 2, false], [136, 5, true], [136, 6, false], [147, 13, false]]) {
+  for (const [root, max, ok] of [[146, 3, true], [146, 12, true], [146, 13, true], [146, 14, true], [146, 15, false], [146, 2, false], [136, 5, true], [136, 6, false], [147, 14, false]]) {
     const a = !lim(root, max).error, b = plan(root, max) !== "invalid_round_limit";
     assert.equal(a, ok, `resolver ${root}/${max}`); assert.equal(b, ok, `planner ${root}/${max}`);
   }
@@ -117,7 +117,7 @@ test("#184-B3 runLifecycle root146 with n1..n12 + max=13: no invalid_round_limit
   assert.ok(!/correction_limit|n_out_of_range/.test(r.reason ?? ""), JSON.stringify(r));
   assert.notEqual(r.action, "merge"); // no review / security evidence: still not a pass
   // exceeding the authorized bound is rejected
-  const over = { ...limit, body: limit.body.replace("max=13", "max=14") };
+  const over = { ...limit, body: limit.body.replace("max=13", "max=15") };
   const r2 = await runLifecycle({ ...gh, listIssueComments: async (n) => (n === 146 ? [over, ...marks] : []) }, 400, { config: lc.parseConfig({ allowlist: [BR], expectedBase: "c".repeat(40) }), expectedHead: "e".repeat(40) });
   assert.equal(r2.reason, "correction_limit_out_of_range");
 });

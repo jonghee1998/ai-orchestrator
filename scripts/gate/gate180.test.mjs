@@ -36,8 +36,8 @@ test("#180 S1/S3 root-issue, revision-issue and sibling-chain events refresh ALL
   assert.deepEqual(u.targets, [8]);
 });
 test("#180 S2 sibling PR comment / body event fans out to every PR of the root; dispatch stays single", async () => {
-  assert.deepEqual((await targetsFromEvent({ ...ev("issue_comment", 6, true), gh: world(), allowlist: AL })).targets, [5, 6, 7]);
-  assert.deepEqual((await targetsFromEvent({ ...ev("pull_request_target", 7), gh: world(), allowlist: AL })).targets, [5, 6, 7]);
+  assert.deepEqual((await targetsFromEvent({ ...ev("issue_comment", 6, true), gh: world(), allowlist: AL })).targets, [5, 6, 7, 8], "#186 unmarked event PR => superset");
+  assert.deepEqual((await targetsFromEvent({ ...ev("pull_request_target", 7), gh: world(), allowlist: AL })).targets, [5, 6, 7, 8], "#186: unmarked event PR => lost policy => superset");
   assert.deepEqual((await targetsFromEvent({ name: "workflow_dispatch", payload: { inputs: { pr: "6" } }, gh: world(), allowlist: AL })).targets, [6]);
 });
 test("#180 S4 closed / fork / off-allowlist / unrelated-root PRs are never targets; dedupe + sorted", async () => {

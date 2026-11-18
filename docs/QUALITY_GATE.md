@@ -82,3 +82,21 @@ Root #146 bound is 13 for this ordinal only (n1..n12 preserved; single authority
 - A missing root marker on an event source is **not** proof of unrelatedness. Former root is recovered only from a directly linked PR's own trusted marker that resolves to a self-marked root; otherwise (none / conflicting / ambiguous) the router refreshes every eligible open PR (`root_marker_lost`, superset). Only an issue that verifiably resolves to a *different* root stays unrelated.
 - The round ceiling lives only in `scripts/handoff/correction-policy.mjs`; resolver, planner and lifecycle all import it (root #146 = 13, others 5, default 3).
 - Not claimed: required checks active, default workflows deployed, security PASS, real GitHub E2E (fake-API tests only).
+
+## Issue #186 — evidence-event coverage and lost-PR root invalidation
+
+- An event PR (`pull_request_target` or `issue_comment` on a PR) whose linked-issue reference and/or trusted root marker is absent, invalid,
+  ambiguous or mismatched is a LOST source. No link => conservative superset (all eligible open PRs). Marker absent => recovered only from
+  other PRs linked to the same issue carrying their own verified marker, else superset. Never "direct PR only".
+- `quality-gate-events.yml` subscribes `issues: [opened, edited, deleted]` and `issue_comment: [created, edited, deleted]`.
+
+| Evidence | Event | Status |
+|---|---|---|
+| Issue body (root/revision/new trusted-root) | `issues` opened/edited/deleted | covered |
+| Issue / PR comments | `issue_comment` created/edited/deleted | covered |
+| PR body (link, marker, RCA) | `pull_request_target` opened/reopened/synchronize/ready_for_review/edited | covered |
+| PR commits | `pull_request_target` synchronize | covered (event PR only) |
+| PR reviews / review comments | none consumed by any collector (repo grep of `scripts/`) | not evidence |
+| PR closed/merged state | not read as evidence (`state=all` enumeration) | not verdict-relevant |
+| GPT-direct "edited summary" wake | unsupported by GPT subscription | not fabricated |
+| Activation | `issues`/`issue_comment` workflows run only from the default branch | BLOCKED (owner action; no actual-event E2E claimed) |
