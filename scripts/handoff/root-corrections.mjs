@@ -10,7 +10,7 @@ export const MAX_CORRECTIONS = 3; // default for every root
 export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed (except the exact owner-approved exception below)
 // Issue #170: NEW bounded, owner-approved exception (root #146 owner approvals 2026-11-18: correction 6 then exactly one more, 7 of 7, no 8th).
 // It applies ONLY to the exact root listed here; no global raise. Every other root keeps default 3 / ceiling 5.
-export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 8 }); // Issue #172: owner-authorized correction 7/7 for root #146 ONLY; no 8th, no global raise
+export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 9 }); // Issue #176: standing owner authorization for correction 9 on root #146 ONLY (n1..n8 history intact); no 10th without PM exact-FAIL + new authorization, no global raise
 export const ceilingFor = (root) => ROOT_CEILING_EXCEPTIONS[root] ?? CORRECTION_CEILING;
 const LIMIT_ANY = /<!--\s*orch-root-correction-limit:v1\b[^>]*-->/g;
 const LIMIT_RE = /^<!--\s*orch-root-correction-limit:v1\s+root(\d+)\s+max=(\d+)\s*-->$/;
@@ -109,11 +109,28 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
     // bound to the destination PR with the destination head SHA verified identical/descendant (`destination.ancestryOk`). A marker
     // of another PR/chain can never satisfy (b), so duplicates/historical replays cannot lower or re-use a count.
     const own = destination ? byPr.get(destination.pr) : null;
-    const ownProven = !!own && own.n === count && (own.sha === destination.sha || destination.ancestryOk === true);
+    // Issue #176: the proof is about the destination's OWN recorded SHA -> live destination head (see destinationProof), not source ancestry.
+    // A proof that names a different recorded SHA / live head than the ones being judged (forged/stale) is ignored.
+    const proofBinds = !!own && destination.recordedSha === own.sha && destination.liveSha === destination.sha;
+    const ownProven = !!own && own.n === count && (own.sha === destination.sha || (destination.ancestryOk === true && proofBinds));
     const okReq = (r) => r === count + 1 || (ownProven && r === own.n);
     if (!requested.every(okReq)) return { error: "root_correction_request_mismatch", detail: { requested: [...new Set(requested)], expected: ownProven ? [count, count + 1] : count + 1 } };
   }
   return { count, records: [...byN.values()].sort((a, b) => a.n - b.n) };
+}
+
+/**
+ * Issue #176 — DESTINATION proof. `records` are the durable (marker-recorded) correction records of the root; `own` is the one recorded
+ * for destination PR `pr`. The question is: is the live destination head still the recorded execution (same SHA) or a proven descendant of it?
+ * `cmp` is the result of compare(recordedSha, liveHead) already normalized with ancestryFrom ({baseSha, headSha, status}) or null when the
+ * compare was unavailable (API error / removed commit / missing). Source->destination ancestry is a SEPARATE proof and is never used here.
+ * @returns {{recordedSha:string|null, liveSha:string|undefined, ancestryOk:boolean}}
+ */
+export function destinationProof({ records = [], pr, liveSha, cmp = null }) {
+  const own = records.find((r) => r.pr === pr) ?? null;
+  const recordedSha = own?.sha ?? null;
+  const ancestryOk = !!own && SHA.test(liveSha ?? "") && (own.sha === liveSha || (!!cmp && cmp.baseSha === own.sha && cmp.headSha === liveSha && ["ahead", "identical"].includes(cmp.status)));
+  return { recordedSha, liveSha, ancestryOk };
 }
 
 /**

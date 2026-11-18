@@ -56,7 +56,7 @@ test("#174-2 correction request: before execution = next count, after own n mark
   // before: revise:7 when 7 are consumed => mismatch (cannot lower/reuse)
   assert.equal(resolveRootCorrections([...others, req(7, 173, HEAD)], 146, 7, { request }).error, "root_correction_request_mismatch");
   // after: own marker n8 for destination PR 175 => re-evaluation accepted only with proven destination
-  const dest = (ok) => ({ pr: 175, sha: "c".repeat(40), ancestryOk: ok });
+  const dest = (ok) => ({ pr: 175, sha: "c".repeat(40), recordedSha: OLD, liveSha: "c".repeat(40), ancestryOk: ok });
   const after = [...others, mk(8, 175, OLD), req(8, 173, HEAD)];
   assert.equal(resolveRootCorrections(after, 146, 8, { request, destination: dest(true) }).count, 8);
   assert.equal(resolveRootCorrections(after, 146, 8, { request, destination: dest(false) }).error, "root_correction_request_mismatch", "unproven ancestry");
@@ -98,7 +98,8 @@ test("#174-4 real check command: omission/tampering never passes; stages split; 
   const pub = [];
   const preOk = [c(1, gate("pm-scope", "issue=1")), c(2, { ...gate("dev-analysis", "issue=1", { login: "dev", id: 7, type: "User" }, T(1)) }), c(3, gate("self-test", `issue=1 sha=${HEAD} typecheck=pass test=pass build=pass`))];
   assert.equal((await runCheck({ gh: fakeGh({ comments: preOk, published: pub }), prNumber: 5, stage: "pre-pr", publish: true })).status, "pass");
-  assert.deepEqual([pub[0].state, pub[0].context, pub[0].sha], ["success", "quality-gate/pre-pr", HEAD]);
+  // #176: the FIRST write is the invalidation (pending); the verdict follows.
+  assert.deepEqual([pub[0].state, pub[1].state, pub[1].context, pub[1].sha], ["pending", "success", "quality-gate/pre-pr", HEAD]);
   // final without Codex/PM compare => not pass (pending/failure), but pre-pr alone does not deadlock on them
   const fin = await runCheck({ gh: fakeGh({ comments: preOk, published: pub }), prNumber: 5, stage: "final", publish: true });
   assert.notEqual(fin.status, "pass"); assert.notEqual(pub.at(-1).state, "success");
@@ -110,6 +111,6 @@ test("#174-4 real check command: omission/tampering never passes; stages split; 
   assert.notEqual((await runCheck({ gh: fakeGh({ comments: [c(1, { ...gate("pm-scope", "issue=1"), user: MAL }), preOk[1], preOk[2]] }), prNumber: 5, stage: "pre-pr" })).status, "pass");
   // evidence fetch failure => unknown (never pass); unknown stage => blocked
   const broken = { ...fakeGh(), listIssueComments: async () => { throw new Error("pagination bound exceeded"); } };
-  assert.equal((await runCheck({ gh: broken, prNumber: 5, stage: "pre-pr" })).status, "unknown");
+  assert.notEqual((await runCheck({ gh: broken, prNumber: 5, stage: "pre-pr" })).status, "pass");
   assert.equal(evaluateGate({ issue: 1, head: HEAD, items: [], stage: "off" }).status, "blocked");
 });

@@ -3,7 +3,7 @@
 import { linkedIssueNumbers } from "./core.mjs";
 import { planLifecycle, parseConfig, allRecords, MAX_ROUNDS } from "./lifecycle.mjs";
 import { collectRootEvidence, addChainEvidence, deriveChainCorrection } from "./root-evidence.mjs";
-import { resolveRootCorrections, correctionRound, resolveCorrectionLimit } from "./root-corrections.mjs";
+import { resolveRootCorrections, correctionRound, resolveCorrectionLimit, destinationProof } from "./root-corrections.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers, pmRevises, ciFromCheckRuns, deploymentFromCommitStatus, ancestryFrom, tipFrom, reqFromPr, rootMarker, supersedesMarker } from "./lifecycle-evidence.mjs";
 
 const READ_ONLY = ["getPull", "getIssue", "listIssueComments", "listIssues", "listPulls", "getCommit", "getBranch", "compare", "listCheckRuns", "getCombinedStatus"];
@@ -122,8 +122,16 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     if (first.error) return fail(first.error, first.detail);
     const dv = deriveChainCorrection({ chain: ch.chain, chainLinks, records: first.records, commentsByPr });
     if (dv.error) return fail(dv.error, dv.detail);
+    // Issue #176: DESTINATION proof = the destination PR's OWN durable recorded SHA -> live destination head (separate from the
+    // source->destination `ancestry` above). Unavailable compare (removed commit / API error) => unproven => fail closed.
+    const ownRec = first.records.find((r) => r.pr === prNumber);
+    let destCmp = null;
+    if (ownRec && ownRec.sha !== pr.head?.sha && /^[a-f0-9]{40}$/.test(pr.head?.sha ?? "")) {
+      try { destCmp = ancestryFrom(ownRec.sha, pr.head.sha, await gh.compare(ownRec.sha, pr.head.sha)); } catch { destCmp = null; }
+    }
+    const proof = destinationProof({ records: first.records, pr: prNumber, liveSha: pr.head?.sha, cmp: destCmp });
     const resolved = resolveRootCorrections(ev.items, req, maxRounds, { request, derived: dv.derived ? [dv.derived] : [],
-      destination: { pr: prNumber, sha: pr.head?.sha, ancestryOk: !!ancestry && !!request && ancestry.baseSha === request.sha && ancestry.headSha === pr.head?.sha && ["ahead", "identical"].includes(ancestry.status) } });
+      destination: { pr: prNumber, sha: pr.head?.sha, ...proof } });
     const rc = correctionRound({ resolved, prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
     if (rc.error) return fail(rc.error, rc.detail);
     const input = {

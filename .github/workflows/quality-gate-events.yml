@@ -1,0 +1,36 @@
+name: quality-gate-events
+# Issue #176 — EVENT refresh of the quality-gate statuses when evidence is created/edited/deleted in PR comments or the linked Issue.
+# BLOCKED / INERT: GitHub runs `issue_comment` and `issues` workflows ONLY from the DEFAULT branch copy. This file lives on the
+# integration branch, so it does nothing until an owner puts a copy on the default branch (a main change this work is forbidden to make).
+# Safe by construction when activated: it checks out the allowlisted INTEGRATION branch (trusted base code), never a PR head, and the
+# event payload only selects PR numbers; every verdict is re-read from the API by scripts/gate/check.mjs. See docs/QUALITY_GATE.md.
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+  issues:
+    types: [edited]
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  statuses: write
+concurrency:
+  group: quality-gate-events-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.repository == 'jonghee1998/ai-orchestrator'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/issue-92-mobile-v2 # trusted base code; NOT the PR head
+          persist-credentials: false
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node scripts/gate/event-route.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUALITY_GATE_ALLOWLIST: codex/issue-92-mobile-v2

@@ -3,7 +3,7 @@ name: quality-gate
 # Do NOT add a checkout of the PR head or any step that executes PR-supplied code here.
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, edited]  # #176: PR body (receipts live there too) edits refresh the status
   workflow_dispatch:
     inputs:
       pr: { description: "PR number to (re)evaluate", required: true }
@@ -12,6 +12,9 @@ permissions:
   issues: read
   pull-requests: read
   statuses: write
+concurrency:
+  group: quality-gate-${{ github.event.pull_request.number || inputs.pr }} # one writer per PR; every run re-reads live state
+  cancel-in-progress: false
 jobs:
   gate:
     runs-on: ubuntu-latest
