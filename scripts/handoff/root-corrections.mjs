@@ -8,34 +8,48 @@ import { isTrustedPm, pmReviseMarkers } from "./core.mjs";
 
 export const MAX_CORRECTIONS = 3; // default for every root
 export const CORRECTION_CEILING = 5; // hard ceiling no override can exceed (except the exact owner-approved exception below)
-// Issue #170: NEW bounded, owner-approved exception (root #146 owner approval 2026-11-18, correction 6 of 6, no 7th).
+// Issue #170: NEW bounded, owner-approved exception (root #146 owner approvals 2026-11-18: correction 6 then exactly one more, 7 of 7, no 8th).
 // It applies ONLY to the exact root listed here; no global raise. Every other root keeps default 3 / ceiling 5.
-export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 6 });
+export const ROOT_CEILING_EXCEPTIONS = Object.freeze({ 146: 7 }); // Issue #172: owner-authorized correction 7/7 for root #146 ONLY; no 8th, no global raise
 export const ceilingFor = (root) => ROOT_CEILING_EXCEPTIONS[root] ?? CORRECTION_CEILING;
 const LIMIT_ANY = /<!--\s*orch-root-correction-limit:v1\b[^>]*-->/g;
 const LIMIT_RE = /^<!--\s*orch-root-correction-limit:v1\s+root(\d+)\s+max=(\d+)\s*-->$/;
 
 /**
- * Issue #166: explicit, trusted, ROOT-SPECIFIC correction-limit override: `<!-- orch-root-correction-limit:v1 root<R> max=<k> -->`
- * from the trusted PM. Default 3 for everyone else; bounded by CORRECTION_CEILING. Untrusted authors are ignored (=> default);
- * malformed / other-root / out-of-range / conflicting markers fail closed. It is policy evidence only, never merge authority.
- * @returns {{max:number} | {error:string, detail?:object}}
+ * Issue #166/#172: explicit, trusted, ROOT-SPECIFIC correction-limit POLICY HISTORY: `<!-- orch-root-correction-limit:v1 root<R> max=<k> -->`
+ * from the trusted PM. Default 3 for everyone else; each value bounded by ceilingFor(root). Untrusted authors are ignored (=> default).
+ * Authorizations form an ordered, authenticated history: when several exist they must be orderable (every marker-bearing
+ * item has a `created_at`) and NON-DECREASING (max5 then later max7 coexist; the effective limit is the latest value and the
+ * earlier approvals stay in `history`). A decrease, an unorderable disagreement, malformed / other-root / out-of-range
+ * markers fail closed. Policy evidence only, never merge authority. Consumption (resolveRootCorrections) never depends on it.
+ * @returns {{max:number, history:object[]} | {error:string, detail?:object}}
  */
 export function resolveCorrectionLimit(items = [], root) {
-  const found = new Set();
-  for (const it of items) {
-    if (!isTrustedPm(it?.user)) continue;
-    for (const raw of (it.body ?? "").match(LIMIT_ANY) ?? []) {
-      const m = LIMIT_RE.exec(raw);
-      if (!m) return { error: "correction_limit_marker_malformed", detail: { marker: raw.slice(0, 120) } };
-      if (Number(m[1]) !== root) return { error: "correction_limit_other_root", detail: { expected: root, found: Number(m[1]) } };
-      const max = Number(m[2]);
-      if (max < MAX_CORRECTIONS || max > ceilingFor(root)) return { error: "correction_limit_out_of_range", detail: { max } };
-      found.add(max);
-    }
+  const hist = [];
+  items.forEach((it, idx) => {
+    if (!isTrustedPm(it?.user)) return;
+    for (const raw of (it.body ?? "").match(LIMIT_ANY) ?? []) hist.push({ raw, at: it.created_at ?? null, id: it.id ?? null, idx });
+  });
+  const values = [];
+  for (const h of hist) {
+    const m = LIMIT_RE.exec(h.raw);
+    if (!m) return { error: "correction_limit_marker_malformed", detail: { marker: h.raw.slice(0, 120) } };
+    if (Number(m[1]) !== root) return { error: "correction_limit_other_root", detail: { expected: root, found: Number(m[1]) } };
+    const max = Number(m[2]);
+    if (max < MAX_CORRECTIONS || max > ceilingFor(root)) return { error: "correction_limit_out_of_range", detail: { max } };
+    values.push({ max, at: h.at, id: h.id, idx: h.idx });
   }
-  if (found.size > 1) return { error: "correction_limit_conflict", detail: { values: [...found].sort() } };
-  return { max: found.size === 1 ? [...found][0] : MAX_CORRECTIONS };
+  const distinct = [...new Set(values.map((v) => v.max))].sort((a, b) => a - b);
+  if (distinct.length > 1) {
+    if (values.some((v) => !Number.isFinite(Date.parse(v.at ?? "")))) return { error: "correction_limit_conflict", detail: { values: distinct, why: "unorderable" } };
+    const ordered = [...values].sort((x, y) => Date.parse(x.at) - Date.parse(y.at) || String(x.id).localeCompare(String(y.id), undefined, { numeric: true }));
+    for (let i = 1; i < ordered.length; i++) {
+      if (ordered[i].max < ordered[i - 1].max) return { error: "correction_limit_non_monotonic", detail: { from: ordered[i - 1].max, to: ordered[i].max } };
+      if (ordered[i].max !== ordered[i - 1].max && ordered[i].at === ordered[i - 1].at) return { error: "correction_limit_conflict", detail: { values: distinct, why: "same_timestamp" } };
+    }
+    return { max: ordered.at(-1).max, history: ordered.map((v) => ({ max: v.max, at: v.at, id: v.id })) };
+  }
+  return { max: distinct.length === 1 ? distinct[0] : MAX_CORRECTIONS, history: values.map((v) => ({ max: v.max, at: v.at, id: v.id })) };
 }
 const SHA = /^[a-f0-9]{40}$/;
 /** `<!-- orch-root-correction:v1 root<R> n=<k> pr<P> sha=<40hex> -->` : correction #k of root R was executed as PR P at SHA. */
@@ -51,7 +65,7 @@ export const correctionMarker = ({ root, n, pr, sha }) => `<!-- orch-root-correc
  *    under two different n, or gaps in 1..max => error (fail closed, never silently lowered);
  *  - legacy trusted PM `revise:<round>` markers (core.pmReviseMarkers) are a conservative LOWER BOUND only.
  */
-export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTIONS) {
+export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTIONS, { request = null, derived = [] } = {}) {
   const recs = [];
   for (const it of items) {
     if (!isTrustedPm(it?.user)) continue;
@@ -65,6 +79,8 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
       recs.push(r);
     }
   }
+  // Issue #172: records DERIVED (not marker-recorded) by root-evidence.deriveChainCorrection after proof; same conflict/gap/range checks apply.
+  for (const r of derived) { if (r.n < 1 || r.n > ceilingFor(root)) return { error: "root_correction_n_out_of_range", detail: { n: r.n } }; recs.push({ root, n: r.n, pr: r.pr, sha: r.sha }); }
   const byN = new Map();
   const byPr = new Map();
   for (const r of recs) {
@@ -78,10 +94,20 @@ export function resolveRootCorrections(items = [], root, _limit = MAX_CORRECTION
   for (let k = 1; k <= max; k++) if (!byN.has(k)) return { error: "root_correction_gap", detail: { missing: k, max } };
   // Legacy trusted-PM revise rounds are a lower bound regardless of the current limit (default 3 must still see revise:4).
   // A round beyond the hard ceiling is not a valid history => fail closed rather than silently dropping it.
-  const legacyRounds = items.flatMap((it) => pmReviseMarkers(it)).filter((m) => m.sha && SHA.test(m.sha) && m.round >= 1).map((m) => m.round);
+  // Issue #172: `request` = {pr, sha} of the superseded PR whose review FAIL spawned the PR under evaluation. A revise:N marker bound to
+  // exactly that PR+SHA is the REQUEST for the current correction (N must be its own ordinal), not already-consumed history.
+  const marks = items.flatMap((it) => pmReviseMarkers(it)).filter((m) => m.sha && SHA.test(m.sha) && m.round >= 1);
+  const isReq = (m) => request && m.pr === request.pr && m.sha === request.sha;
+  const requested = marks.filter(isReq).map((m) => m.round);
+  const legacyRounds = marks.filter((m) => !isReq(m)).map((m) => m.round);
   if (legacyRounds.some((r) => r > ceilingFor(root))) return { error: "root_correction_legacy_out_of_range", detail: { max: Math.max(...legacyRounds) } };
   const legacy = Math.max(0, ...legacyRounds);
-  return { count: Math.max(max, legacy), records: [...byN.values()].sort((a, b) => a.n - b.n) };
+  const count = Math.max(max, legacy);
+  if (requested.length) {
+    // the request must name exactly the next ordinal after everything already consumed (incl. derived records); otherwise block.
+    if (requested.some((r) => r !== count + 1)) return { error: "root_correction_request_mismatch", detail: { requested: [...new Set(requested)], expected: count + 1 } };
+  }
+  return { count, records: [...byN.values()].sort((a, b) => a.n - b.n) };
 }
 
 /**

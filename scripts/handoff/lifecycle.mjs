@@ -15,8 +15,8 @@ export const STEPS = Object.freeze(["dispatch", "review", "revise", "accept", "c
 export const MAX_ROUNDS = 3;
 /** Hard ceiling for an authorized root-specific override (root-corrections.resolveCorrectionLimit). */
 export const MAX_ROUNDS_CEILING = 5;
-/** Issue #170: the only owner-approved exception (root #146 => 6). Mirrors root-corrections.ROOT_CEILING_EXCEPTIONS. */
-export const MAX_ROUNDS_ROOT_EXCEPTIONS = Object.freeze({ 146: 6 });
+/** Issue #170/#172: the only owner-approved exception (root #146 => 7, no 8th). Mirrors root-corrections.ROOT_CEILING_EXCEPTIONS. */
+export const MAX_ROUNDS_ROOT_EXCEPTIONS = Object.freeze({ 146: 7 });
 export const DEPLOY_SOURCE = "vercel_commit_status";
 export const FORBIDDEN_TARGETS = new Set(["main", "master", "production", "prod", "release"]);
 const SHA_RE = /^[a-f0-9]{40}$/;

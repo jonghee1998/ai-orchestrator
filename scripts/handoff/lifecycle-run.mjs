@@ -2,10 +2,11 @@
 // plans, and returns the plan. Never writes, never enables live mode.
 import { linkedIssueNumbers } from "./core.mjs";
 import { planLifecycle, parseConfig, allRecords, MAX_ROUNDS } from "./lifecycle.mjs";
+import { collectRootEvidence, addChainEvidence, deriveChainCorrection } from "./root-evidence.mjs";
 import { resolveRootCorrections, correctionRound, resolveCorrectionLimit } from "./root-corrections.mjs";
 import { normalizeCodexReviews, pmAcceptMarkers, pmRevises, ciFromCheckRuns, deploymentFromCommitStatus, ancestryFrom, tipFrom, reqFromPr, rootMarker, supersedesMarker } from "./lifecycle-evidence.mjs";
 
-const READ_ONLY = ["getPull", "getIssue", "listIssueComments", "getCommit", "getBranch", "compare", "listCheckRuns", "getCombinedStatus"];
+const READ_ONLY = ["getPull", "getIssue", "listIssueComments", "listIssues", "listPulls", "getCommit", "getBranch", "compare", "listCheckRuns", "getCombinedStatus"];
 export const readOnly = (gh) => Object.fromEntries(READ_ONLY.map((k) => [k, (...a) => gh[k](...a)]));
 
 export function configFromEnv(env = process.env) {
@@ -90,7 +91,11 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
     // Issue #166: root-specific correction limit (default 3, trusted PM marker may raise to <=5) from root issue + root comments.
     const rootIssue = await gh.getIssue(req);
     const rootComments = await gh.listIssueComments(req);
-    const lim = resolveCorrectionLimit([{ ...rootIssue, kind: "issue" }, ...rootComments], req);
+    const prComments = await gh.listIssueComments(prNumber);
+    // Issue #172: ROOT-WIDE evidence (all root-marked issues/PRs of every chain, bodies AND comments), not just the current chain.
+    const base = await collectRootEvidence(gh, req, { rootIssue, rootComments, pr, prComments });
+    if (base.error) return fail(base.error, base.detail);
+    const lim = resolveCorrectionLimit(base.items, req);
     if (lim.error) return fail(lim.error, lim.detail);
     const maxRounds = lim.max;
     const ch = await resolveChain(gh, pr, req, maxRounds);
@@ -103,15 +108,22 @@ export async function runLifecycle(ghFull, prNumber, { config, expectedHead, log
       return { newer, older, ancestry: ancestryFrom(older.head?.sha, newer.head?.sha, await gh.compare(older.head?.sha, newer.head?.sha)) };
     }));
     const ancestry = chainLinks[0]?.ancestry;
-    // Durable records: root issue + EVERY PR of the verified chain (bounded), merged by comment id.
-    const prComments = await gh.listIssueComments(prNumber);
-    const oldComments = (await Promise.all(ch.chain.slice(1).map((p) => gh.listIssueComments(p.number)))).flat();
-    const comments = mergeById(rootComments, oldComments, prComments);
+    const ev = await addChainEvidence(gh, base, ch.chain);
+    // Durable records: every PR comment of the verified chain (bounded), merged by comment id (legacy shape used by the planner).
+    const commentsByPr = { [prNumber]: prComments };
+    for (const p of ch.chain.slice(1)) commentsByPr[p.number] = await gh.listIssueComments(p.number);
+    const comments = mergeById(rootComments, ...ch.chain.slice(1).map((p) => commentsByPr[p.number]), prComments);
     const reviews = normalizeCodexReviews(comments);
     // Expected head: explicit (event/dispatch) else the exact SHA of the trusted Codex verdict being acted on.
     const head = expectedHead ?? reviews.filter((r) => !r.ambiguous).at(-1)?.commit_sha;
-    // Issue #161: durable ROOT-level correction counter (spans separate chains of the same root; never lowered).
-    const rc = correctionRound({ resolved: resolveRootCorrections([{ ...rootIssue, kind: "issue" }, ...comments], req, maxRounds), prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
+    // Issue #161/#172: durable ROOT-level correction counter (spans separate chains of the same root; never lowered).
+    const request = superseded?.head?.sha ? { pr: superseded.number, sha: superseded.head.sha } : null;
+    const first = resolveRootCorrections(ev.items, req, maxRounds, { request: null });
+    if (first.error) return fail(first.error, first.detail);
+    const dv = deriveChainCorrection({ chain: ch.chain, chainLinks, records: first.records, commentsByPr });
+    if (dv.error) return fail(dv.error, dv.detail);
+    const resolved = resolveRootCorrections(ev.items, req, maxRounds, { request, derived: dv.derived ? [dv.derived] : [] });
+    const rc = correctionRound({ resolved, prNumber, chainDepth: depth, floor: roundFor(comments, req, depth, maxRounds), limit: maxRounds });
     if (rc.error) return fail(rc.error, rc.detail);
     const input = {
       req, round: rc.round, maxRounds, config: cfg, integrationTarget: pr.base?.ref, pr, expectedHead: head, reviews, superseded, ancestry, chainLinks,
