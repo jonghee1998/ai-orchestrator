@@ -112,7 +112,7 @@ test("different dispatch same branch cannot refire after ambiguous outcome",asyn
   await s.transact(d=>{
     const previous=d.records[scope.dispatchId];
     d.records["next"]={...previous,dispatchId:"next"};
-    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",assignment:{...d.collaborations!.uuid.assignment}} as Collaboration;
+    d.collaborations!.next={...d.collaborations!.uuid,id:"next",stage:"claude",dispatchId:"next",assignment:{...d.collaborations!.uuid.assignment}} as Collaboration;
     d.records["next"].collaboration={...previous.collaboration!,workflowId:"next"};
   });
   await denied(reserveRoutineFire(s,{...scope,dispatchId:"next",workflowId:"next"},AT),"prior_fire_not_reconciled");
@@ -134,7 +134,7 @@ test("orphaned prior Routine fire reservation cannot be skipped for another disp
         collaboration:{workflowId:"next",cycle:1,step:"claude",repo:"other/repository",
           baseBranch:"claude/src",baseSha:SHA,targetSha:SHA,workBranch:"claude/different",
           instructions:"approved work\nPM feedback: "}};
-      d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",
+      d.collaborations!.next={...d.collaborations!.uuid,id:"next",stage:"claude",dispatchId:"next",
         assignment:{...d.collaborations!.uuid.assignment,repo:"other/repository",
           workBranch:"claude/different"}} as Collaboration;
     });
