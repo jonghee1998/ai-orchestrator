@@ -2,7 +2,7 @@
 // Official documentation: https://platform.claude.com/docs/en/api/claude-code/routines-fire
 // Not the paid Claude Platform model API; runs count against Claude Code subscription.
 const FIRE_URL = /^\/v1\/claude_code\/routines\/(trig_[A-Za-z0-9_-]{8,128})\/fire$/;
-const SESSION_URL = /^https:\/\/claude\.ai\/code\/[A-Za-z0-9_/-]+$/;
+const SESSION_URL = /^https:\/\/claude\.ai\/code\/(session_[A-Za-z0-9_-]{8,128})$/;
 
 export function validateRoutineConfig(config) {
   if (!config || typeof config !== "object") return "missing_config";
@@ -58,7 +58,8 @@ export async function fireRoutine({ config, context, request = fetch }) {
       typeof result.claude_code_session_id !== "string" ||
       !/^session_[A-Za-z0-9_-]{8,128}$/.test(result.claude_code_session_id) ||
       typeof result.claude_code_session_url !== "string" ||
-      !SESSION_URL.test(result.claude_code_session_url)) {
+      !SESSION_URL.test(result.claude_code_session_url) ||
+      result.claude_code_session_url !== `https://claude.ai/code/${result.claude_code_session_id}`) {
     return { ok: false, reason: "response_mismatch_DO_NOT_RETRY" };
   }
   // HTTP 200 confirms a session was CREATED, not that it checked out the authorized
