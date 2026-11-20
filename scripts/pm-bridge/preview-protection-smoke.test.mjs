@@ -11,9 +11,9 @@ test("only bare HTTPS Vercel origins accepted", () => {
     assert.throws(() => validatePreviewUrl(url));
   }
 });
-test("deny/recognized Vercel auth redirect is protected; public and ambiguous fail closed", () => {
-  assert.equal(classifyProtection(401, null).ok, true);
-  assert.equal(classifyProtection(403, null).ok, true);
+test("only recognized Vercel auth redirect is proof; denied/public/ambiguous fail closed", () => {
+  assert.equal(classifyProtection(401, null).ok, false);
+  assert.equal(classifyProtection(403, null).ok, false);
   assert.equal(classifyProtection(302, "https://vercel.com/login").ok, true);
   for (const [status, loc] of [[200,null],[500,null],[302,"https://evil.com/login"],
     [302,"https://vercel.com/other"],[302,null]]) {
