@@ -21,7 +21,7 @@ test("runner checks signed response identity/freshness and strips model keys/con
   assert.throws(() => verifyResponse(secret, "other", raw, hmac(secret, `${at}.${eventId}.${raw}`)));
   assert.throws(() => verifyResponse(secret, eventId, raw, "a".repeat(64)));
   assert.throws(() => verifyResponse(secret, eventId, JSON.stringify({ at: "2000-01-01", eventId }), ""));
-  assert.deepEqual(childEnvironment({ PATH: "/bin", GH_TOKEN: "github", GATE_SECRET: "s", RUN_CALLBACK_SECRET_CODEX: "s", CONTROL_ADMIN_TOKEN: "s", DATABASE_URL: "s", OPENAI_API_KEY: "s", ANTHROPIC_API_KEY: "s" }), { PATH: "/bin", GH_TOKEN: "github" });
+  assert.deepEqual(childEnvironment({ PATH: "/bin", GH_TOKEN: "github", GATE_SECRET: "s", RUN_CALLBACK_SECRET_CODEX: "s", CONTROL_ADMIN_TOKEN: "s", DATABASE_URL: "s", OPENAI_API_KEY: "s", ANTHROPIC_API_KEY: "s", ROUTINE_FIRE_TOKEN: "routine-secret", ROUTINE_FIRE_URL: "https://api.anthropic.com/trig", VERCEL_AUTOMATION_BYPASS_SECRET: "bypass-secret", CLAUDE_CODE_OAUTH_TOKEN: "cli-oauth-token" }), { PATH: "/bin", GH_TOKEN: "github", CLAUDE_CODE_OAUTH_TOKEN: "cli-oauth-token" });
 });
 test("runner executes a claimed subscription CLI and real child test commands, persists result and replays completion without rerunning", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "worker-")), cwd = path.join(root, "repo"), bin = path.join(root, "bin");
