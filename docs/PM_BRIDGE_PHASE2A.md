@@ -4,6 +4,7 @@
 
 ## What this adds
 - An inert `submitAssignment()` function with exact HTTPS/preview-host allowlist, admin-token presence check, and exact issue/PR/branch/SHA scope validation.
+- The exact UTF-8 SHA-256 digest of the approved instruction text is now bound to the issue/PR/base SHA/branch tuple; any changed instructions or altered server-returned assignment are rejected. This digest is an integrity condition only, NOT proof that an owner actually approved.
 - A single `POST /api/collaboration` request when explicitly invoked from future trusted code, no retries on ambiguous failures, and a strict workflow-response check.
 - Test cases for invalid URLs, absent secrets, wrong task, forged event-as-approval, timeout and mismatch. Included in existing CI.
 - The response always reports `agentStarted:false`; accepted workflow is NOT proof of provider START.
