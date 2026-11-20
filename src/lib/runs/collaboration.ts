@@ -105,6 +105,29 @@ function unquiescedWriters(d: StoreData, repo: string, workBranch: string, excep
   return Object.values(d.records).filter(r => r.collaboration?.step === "claude" && branchKey(r.collaboration.repo, r.collaboration.workBranch) === key &&
     r.dispatchId !== except && !!r.runId && !provablyQuiescent(r));
 }
+/**
+ * A cloud Routine can be in-flight with NO claimed runId while POST /fire
+ * has already created a writer. This durable reservation is a cross-channel
+ * writer fence, not permission or completion evidence.
+ * Called only inside the same atomic RunStore transaction as claim.
+ */
+function guardRoutineFireReservations(d: StoreData, r: DispatchRecord, origin: RunOrigin) {
+  if (!r.collaboration || r.collaboration.step !== "claude") return;
+  const target = branchKey(r.collaboration.repo, r.collaboration.workBranch);
+  for (const prior of Object.values(d.routineFires ?? {})) {
+    const old = d.records[prior.dispatchId];
+    if (!old?.collaboration ||
+        old.collaboration.workflowId !== prior.workflowId ||
+        old.collaboration.targetSha !== prior.targetSha ||
+        old.issueNumber !== prior.issueNumber)
+      conflict("prior_fire_record_unverifiable");
+    if (branchKey(old.collaboration.repo, old.collaboration.workBranch) !== target) continue;
+    // The provider's own cloud session is the only legitimate claimer of its
+    // reserved dispatch. A parallel HMAC runner must not execute it as well.
+    if (prior.dispatchId !== r.dispatchId || origin !== "session")
+      conflict("prior_routine_fire_may_be_writing");
+  }
+}
 /** Workflows persisted before #41 may be stuck in claude/codex with a terminal step; derive blocked for them. */
 function effectiveStage(d: StoreData, w: Collaboration): { stage: Collaboration["stage"]; reason?: BlockedReason } {
   const r = w.dispatchId ? d.records[w.dispatchId] : undefined;
@@ -169,6 +192,7 @@ export async function claimCollaboration(store: RunStore, id: string, agent: str
     // Enforced here (not only in decide) so no recovery path (revise, refresh -> review -> revise) can bypass it.
     // #57: keyed by (repo, workBranch) across all workflows/channels — a new workflow is not a way around it.
     if (r.collaboration.step === "claude" && unquiescedWriters(d, r.collaboration.repo, r.collaboration.workBranch, id).length) conflict("prior_execution_not_quiesced");
+    guardRoutineFireReservations(d, r, origin);
     // #57 (PR56 P2): only the HMAC runner is an "agent-callback"; a session claim is an authenticated receipt only.
     d.records[id] = { ...r, status: "running", runId, runOrigin: origin, ackAt: at, startedAt: at, lastHeartbeatAt: at,
       source: origin === "session" ? "session-self-report" : "agent-callback" };
