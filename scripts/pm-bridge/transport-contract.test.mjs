@@ -47,7 +47,7 @@ test("one POST only, response is an accepted workflow, never START",async()=>{
   assert.deepEqual(JSON.parse(options.body),{action:"assign",assignment:a});
   return {status:200,json:async()=>({workflow:{id:"verified-workflow",stage:"claude",dispatchId:"dispatch",
    assignment:a},submission:{ok:true,record:{dispatchId:"dispatch",agent:"claude-sonnet",issueNumber:201,
-   collaboration:{workflowId:"verified-workflow",targetSha:sha},
+   collaboration:{workflowId:"verified-workflow",step:"claude",repo:a.repo,baseBranch:a.baseBranch,baseSha:sha,workBranch:a.workBranch,targetSha:sha},
    submitAuthorizedAt:"2026-11-20T00:00:00.000Z",submission:"accepted",status:"dispatched"}}})};
  };
  const res=await submitAssignment({config,assignment:a,approved,request});
@@ -69,7 +69,7 @@ test("ambiguous timeout or response mismatch never triggers automatic retry",asy
 test("HTTP 200 with Sonnet OFF, unknown ACK or mismatched dispatch cannot wake Claude",async()=>{
  const workflow={id:"verified-workflow",stage:"claude",dispatchId:"dispatch",assignment:a};
  const record={dispatchId:"dispatch",agent:"claude-sonnet",issueNumber:201,
-   collaboration:{workflowId:"verified-workflow",targetSha:sha},
+   collaboration:{workflowId:"verified-workflow",step:"claude",repo:a.repo,baseBranch:a.baseBranch,baseSha:sha,workBranch:a.workBranch,targetSha:sha},
    submitAuthorizedAt:"2026-11-20T00:00:00.000Z",submission:"accepted",status:"dispatched"};
  for(const sub of [
   {ok:false,stage:"gate",reason:"agent_disabled"},
@@ -80,7 +80,13 @@ test("HTTP 200 with Sonnet OFF, unknown ACK or mismatched dispatch cannot wake C
   {ok:true,record:{...record,status:"running",runId:"claimed-session-12345"}},
   {ok:true,record:{...record,status:"running"}},
   {ok:true,record:{...record,status:"dispatched",runId:"claimed-session-12345"}},
-  {ok:true,record:{...record,collaboration:{...record.collaboration,targetSha:"f".repeat(40)}}}
+  {ok:true,record:{...record,collaboration:{...record.collaboration,targetSha:"f".repeat(40)}}},
+  {ok:true,record:{...record,held:"agent_off"}},
+  {ok:true,record:{...record,collaboration:{...record.collaboration,repo:"attacker/repo"}}},
+  {ok:true,record:{...record,collaboration:{...record.collaboration,baseBranch:"another/base"}}},
+  {ok:true,record:{...record,collaboration:{...record.collaboration,baseSha:"f".repeat(40)}}},
+  {ok:true,record:{...record,collaboration:{...record.collaboration,workBranch:"claude/another"}}},
+  {ok:true,record:{...record,collaboration:{...record.collaboration,step:"codex"}}}
  ]) {
   let calls=0;
   const request=async()=>{calls++;return {status:200,json:async()=>({workflow,submission:sub})};};
