@@ -168,3 +168,21 @@ test("record mismatch never becomes retry authorization",async()=>{
   await s.transact(d=>{d.records[scope.dispatchId].issueNumber=999;});
   assert.equal((await inspectRoutineFireRecovery(s,scope.dispatchId)).reason,"record_missing_or_mismatch");
 });
+
+test("forged session cleanup or quiescence NEVER releases a same-branch writer",async()=>{
+  const s=await setup();
+  await s.transact(d=>{
+    const prior=d.records[scope.dispatchId];
+    d.records["prior"]={
+      ...prior,dispatchId:"prior",status:"succeeded",
+      runId:"session_12345678",runOrigin:"session",
+      execution:{exitCode:0,headSha:SHA,summary:"untrusted session",tests:[],
+        cleanup:{processGroupsEmpty:true,groups:0}},
+      quiescence:{at:AT,runId:"session_12345678",reason:"lease_revoked",signal:null},
+      collaboration:{...prior.collaboration!,workflowId:"prior-workflow"}
+    };
+  });
+  await denied(reserveRoutineFire(s,scope,AT),"writer_not_quiescent");
+  await s.transact(d=>{d.records["prior"].runOrigin="runner";});
+  assert.equal((await reserveRoutineFire(s,scope,AT)).reserved,true);
+});
