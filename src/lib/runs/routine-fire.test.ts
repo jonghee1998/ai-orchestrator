@@ -19,7 +19,7 @@ async function setup(enabled = true): Promise<MemoryRunStore> {
     d.control.agents["claude-sonnet"] = enabled;
     d.control.claudeProvider = enabled;
     d.collaborations = {
-      uuid: { id:"uuid", stage:"claude", dispatchId:scope.dispatchId,
+      uuid: { id:"uuid", stage:"claude", cycle:1, feedback:"", dispatchId:scope.dispatchId,
         assignment:{repo:"jonghee1998/ai-orchestrator",issueNumber:201,
           baseBranch:"claude/src",baseSha:SHA,sourcePr:193,
           workBranch:"claude/work",claudeAgent:"claude-sonnet",
@@ -31,7 +31,7 @@ async function setup(enabled = true): Promise<MemoryRunStore> {
       collaboration: {
         workflowId:"uuid",cycle:1,step:"claude",repo:"jonghee1998/ai-orchestrator",
         baseBranch:"claude/src",baseSha:SHA,targetSha:SHA,
-        workBranch:"claude/work",instructions:"approved work"
+        workBranch:"claude/work",instructions:"approved work\nPM feedback: "
       }
     } as DispatchRecord;
   });
@@ -64,6 +64,25 @@ test("OFF gate, missing submit authorization, stale target SHA or wrong source a
     await s.transact(d=>{mutate(d.records[scope.dispatchId]);});
     await denied(reserveRoutineFire(s,scope,AT),"dispatch_not_authorized_or_ready");
   }
+});
+test("real queue template used, owner digest binds ORIGINAL assignment, not expanded prompt",async()=>{
+ const s=await setup();
+ const d=await s.read();
+ assert.equal(d.records[scope.dispatchId].collaboration!.instructions,
+   d.collaborations!.uuid.assignment.instructions+"\\nPM feedback: ");
+ assert.equal((await reserveRoutineFire(s,scope,AT)).reserved,true);
+});
+test("later cycles and forged feedback are not authorized by first-cycle owner digest",async()=>{
+ for(const mutate of [
+   (d:any)=>{d.collaborations.uuid.cycle=2;d.records[scope.dispatchId].collaboration.cycle=2;},
+   (d:any)=>{d.collaborations.uuid.feedback="fix now";d.records[scope.dispatchId].collaboration.instructions="approved work\\nPM feedback: fix now";},
+   (d:any)=>{d.records[scope.dispatchId].collaboration.instructions="approved work";},
+   (d:any)=>{d.records[scope.dispatchId].collaboration.targetSha="a".repeat(40);}
+ ]){
+   const s=await setup();
+   await s.transact(d=>mutate(d));
+   await denied(reserveRoutineFire(s,scope,AT),"dispatch_not_authorized_or_ready");
+ }
 });
 test("approval digest matches persisted instructions and workflow assignment boundaries",async()=>{
   const arbitrary=await setup();
@@ -114,7 +133,7 @@ test("orphaned prior Routine fire reservation cannot be skipped for another disp
       d.records["next"]={...(previous ?? {}),dispatchId:"next",issueNumber:201,agent:"claude-sonnet",status:"dispatched",submission:"accepted",submitAuthorizedAt:AT,
         collaboration:{workflowId:"next",cycle:1,step:"claude",repo:"other/repository",
           baseBranch:"claude/src",baseSha:SHA,targetSha:SHA,workBranch:"claude/different",
-          instructions:"approved work"}};
+          instructions:"approved work\nPM feedback: "}};
       d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",
         assignment:{...d.collaborations!.uuid.assignment,repo:"other/repository",
           workBranch:"claude/different"}} as Collaboration;
