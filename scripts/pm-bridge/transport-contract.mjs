@@ -1,5 +1,7 @@
+import {createHash} from "node:crypto";
 // Phase 2A: inert HTTP client and contract checks. NOT wired to any workflow/route.
 const SHA=/^[a-f0-9]{40}$/;
+const instructionDigest = value => createHash("sha256").update(value,"utf8").digest("hex");
 const HOST=/^[a-z0-9][a-z0-9.-]*\.vercel\.app$/;
 export function validateTransportConfig(config){
  if(!config || typeof config!=="object") return "missing_config";
@@ -26,7 +28,9 @@ export function validateAssignmentForTransport(a, approved){
  // Bound to a separately authorized, exact issue+PR+sha tuple. Never trust event marker alone.
  if(a.issueNumber!==approved.issueNumber||a.sourcePr!==approved.sourcePr||
     a.baseSha!==approved.baseSha||a.baseBranch!==approved.baseBranch||
-    a.workBranch!==approved.workBranch)return "scope_mismatch";
+    a.workBranch!==approved.workBranch ||
+    typeof approved.instructionsSha256!=="string" || !SHA.test(approved.instructionsSha256) ||
+    instructionDigest(a.instructions)!==approved.instructionsSha256)return "scope_mismatch";
  return null;
 }
 // Do not call unless an independent, authenticated owner-scope proof has already been
@@ -52,6 +56,8 @@ export async function submitAssignment({config,assignment,approved,request=fetch
     w.assignment?.sourcePr!==assignment.sourcePr||w.assignment?.baseSha!==assignment.baseSha||
     w.assignment?.baseBranch!==assignment.baseBranch||w.assignment?.workBranch!==assignment.workBranch||
     w.assignment?.claudeAgent!==assignment.claudeAgent ||
+    w.assignment?.instructions!==assignment.instructions ||
+    w.assignment?.reviewCompletedPr!==assignment.reviewCompletedPr ||
     !["claude","blocked"].includes(w.stage))
    return {ok:false,reason:"response_mismatch_DO_NOT_RETRY"};
  // This confirms API accepted the workflow, NOT that agent actually STARTed.
