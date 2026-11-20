@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {validateTransportConfig,validateAssignmentForTransport,submitAssignment} from "./transport-contract.mjs";
@@ -5,7 +6,8 @@ const sha="88bd2c4c791fda4afaa7ab0b4ce9b25b96be464e";
 const a={repo:"jonghee1998/ai-orchestrator",issueNumber:201,sourcePr:193,
  baseSha:sha,baseBranch:"claude/determined-carson-s55tbd",workBranch:"claude/phase-b-oracle-201",
  claudeAgent:"claude-sonnet",reviewCompletedPr:false,instructions:"Phase B pure oracle only; no Phase C"};
-const approved={phase:"bridge-phase2",source:"owner-scoped-approval",allowed:true,issueNumber:201,sourcePr:193,
+const digest=createHash("sha256").update(a.instructions,"utf8").digest("hex");
+const approved={instructionsSha256:digest,phase:"bridge-phase2",source:"owner-scoped-approval",allowed:true,issueNumber:201,sourcePr:193,
  baseSha:sha,baseBranch:a.baseBranch,workBranch:a.workBranch};
 const config={origin:"https://controlled-preview.vercel.app",expectedHost:"controlled-preview.vercel.app",
  adminToken:"example-not-a-real-secret-1234"};
@@ -25,6 +27,8 @@ test("scope must be a trusted, exact tuple, not event content",()=>{
  assert.equal(validateAssignmentForTransport({...a,issueNumber:202},approved),"scope_mismatch");
  assert.equal(validateAssignmentForTransport({...a,baseSha:"f".repeat(40)},approved),"scope_mismatch");
  assert.equal(validateAssignmentForTransport({...a,reviewCompletedPr:true},approved),"invalid_assignment");
+ assert.equal(validateAssignmentForTransport({...a,instructions:"Delete all records"},approved),"scope_mismatch");
+ assert.equal(validateAssignmentForTransport(a,{...approved,instructionsSha256:"f".repeat(40)}),"scope_mismatch");
  assert.equal(validateAssignmentForTransport({...a,instructions:""},approved),"invalid_assignment");
 });
 test("no request at all if scope or auth absent",async()=>{
@@ -55,5 +59,7 @@ test("ambiguous timeout or response mismatch never triggers automatic retry",asy
  assert.equal((await submitAssignment({config,assignment:a,approved,request:timeout})).reason,"transport_unknown_DO_NOT_RETRY");
  assert.equal(calls,1);
  const incorrect=async()=>({status:200,json:async()=>({workflow:{id:"x",stage:"claude",assignment:{...a,baseSha:"f".repeat(40)}}})});
+ const alteredInstructions=async()=>({status:200,json:async()=>({workflow:{id:"x",stage:"claude",assignment:{...a,instructions:"forged"}}})});
+ assert.equal((await submitAssignment({config,assignment:a,approved,request:alteredInstructions})).reason,"response_mismatch_DO_NOT_RETRY");
  assert.equal((await submitAssignment({config,assignment:a,approved,request:incorrect})).reason,"response_mismatch_DO_NOT_RETRY");
 });
