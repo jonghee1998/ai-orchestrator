@@ -114,3 +114,46 @@ export async function noteRoutineFireOutcome(store: RunStore, dispatchId: string
     return structuredClone(record);
   });
 }
+
+/**
+ * Read-only status for operators investigating a prior fire that fences future
+ * work on the same physical branch. Diagnostic information is NOT release
+ * authorization and must never be used as an automatic /fire retry signal.
+ */
+export async function inspectRoutineFireRecovery(store: RunStore, dispatchId: string):
+  Promise<{ canAutoRefire: false; reason: string; nextActor: "pm" | "runner"; detail: string }> {
+  const d = await store.read();
+  const fire = d.routineFires?.[dispatchId];
+  if (!fire) return {
+    canAutoRefire: false, reason: "reservation_missing_or_unknown",
+    nextActor: "pm", detail: "Reconcile durable dispatch and provider history; do not fire"
+  };
+  const rec = d.records[dispatchId];
+  if (!rec?.collaboration || rec.collaboration.workflowId !== fire.workflowId ||
+      rec.collaboration.targetSha !== fire.targetSha || rec.issueNumber !== fire.issueNumber)
+    return {
+      canAutoRefire: false, reason: "record_missing_or_mismatch",
+      nextActor: "pm", detail: "Verify original dispatch record before any recovery"
+    };
+  if (fire.state === "outcome_unknown" || fire.state === "reserved")
+    return {
+      canAutoRefire: false, reason: "fire_outcome_unconfirmed",
+      nextActor: "pm", detail: "Investigate possible provider session; never repeat ambiguous POST"
+    };
+  if (!rec.runId) return {
+    canAutoRefire: false, reason: "session_created_not_claimed",
+    nextActor: "pm", detail: "Verify session and signed claim; HTTP receipt alone is not START"
+  };
+  if (rec.runOrigin === "session") return {
+    canAutoRefire: false, reason: "session_quiescence_unverifiable",
+    nextActor: "pm", detail: "Cloud session finish/self-report cannot prove the writer has stopped"
+  };
+  if (!provablyQuiescent(rec)) return {
+    canAutoRefire: false, reason: "runner_not_quiescent",
+    nextActor: "runner", detail: "Obtain authentic signed cleanup or quiescence proof"
+  };
+  return {
+    canAutoRefire: false, reason: "runner_quiescence_proven_but_reservation_still_held",
+    nextActor: "pm", detail: "Proven stop does not authorize another provider POST; inspect prior fire and dispatch scope"
+  };
+}
