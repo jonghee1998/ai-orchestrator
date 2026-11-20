@@ -110,7 +110,7 @@ test("orphaned prior Routine fire reservation cannot be skipped for another disp
     await reserveRoutineFire(s,scope,AT);
     await s.transact(d=>{
       mutate(d,scope.dispatchId);
-      const previous=d.records[scope.dispatchId] ?? d.records[scope.dispatchId] === undefined && d.records[scope.dispatchId];
+      const previous=d.records[scope.dispatchId];
       d.records["next"]={...(previous ?? {}),dispatchId:"next",issueNumber:201,agent:"claude-sonnet",status:"dispatched",submission:"accepted",submitAuthorizedAt:AT,
         collaboration:{workflowId:"next",cycle:1,step:"claude",repo:"other/repository",
           baseBranch:"claude/src",baseSha:SHA,targetSha:SHA,workBranch:"claude/different",
