@@ -1,5 +1,15 @@
 # AGENTS
 
+> **2026-11-21 변경**: 작업 진행은 오케스트레이터 엔진이 담당합니다. 역할·운영 규칙의 기준 문서는
+> [docs/ORCH_MANUAL.md](./docs/ORCH_MANUAL.md)이며, 아래 어댑터·라벨 규약(`agent:*`, `status:*`)은 이전 방식의 기록입니다.
+>
+> | 역할 | 담당 |
+> |---|---|
+> | PM | Claude |
+> | 구현 | Claude Sonnet / Opus (스텝별 자동 선택) |
+> | 독립 검수 | Codex 기본, 불가·OFF 시 Claude Opus 대체 |
+> | 승인 | 사용자 |
+
 AI Orchestrator가 관리하는 에이전트들의 역할, 연동 규약, 협업 원칙을 정의한다.
 
 ## 역할 분담
