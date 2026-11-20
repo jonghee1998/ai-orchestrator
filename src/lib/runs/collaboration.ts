@@ -85,6 +85,10 @@ export function blockTerminalStep(d: StoreData, r: DispatchRecord, at: string, r
  * confirmed those groups empty. A legacy result without cleanup proof, or a cleanup-failure report, does not count.
  */
 export function provablyQuiescent(r: DispatchRecord): boolean {
+  // A cloud Routine session has no trustworthy process-group ownership proof.
+  // This origin check is essential even for stale/malformed persisted records:
+  // a forged cleanup/quiescence field must never turn a session into a safe writer.
+  if (r.runOrigin === "session") return false;
   if (!r.runId) return isTerminal(r.status);
   return r.execution?.cleanup?.processGroupsEmpty === true || r.quiescence?.runId === r.runId;
 }
