@@ -23,6 +23,14 @@ The Claude Code Routine `POST .../v1/claude_code/routines/{trig_id}/fire` uses a
 - **Known limits**: the incoming approval digest is not authenticated authority; this code does not independently verify GitHub live HEAD/source or authorize the user. Also, a safe terminal transition for a previous Routine session that may still be writing is not yet established, so a same-branch next fire may remain intentionally BLOCKED. Do not interpret this as a complete automatic revise loop.
 - Neither reservation nor firing is invoked by an active workflow/route.
 
+## Decision: two different execution models (do NOT reuse credentials)
+| Mode | Trigger credential | Completion / cleanup proof | Current feasibility |
+|---|---|---|---|
+| Claude web Routine | `ROUTINE_FIRE_TOKEN` and `ROUTINE_FIRE_URL` | Session receipt only; no proven process cleanup, so same-branch automatic revise remains fenced | Owner reported GitHub Secrets registered; real value/ingress not verified |
+| Existing supervised CLI `subscription-worker.mjs` | Separately authenticated Claude CLI (e.g. **`CLAUDE_CODE_OAUTH_TOKEN`** for approved subscription use) **plus** dedicated orchestrator `GATE_SECRET`, durable checkout/host and callback | HMAC-signed runner, supervised process group and cleanup/quiescence proof can support repeated revision | No OAuth credential or suitable runner host independently confirmed; do NOT claim ready |
+
+Anthropic official setup: https://github.com/anthropics/claude-code-action/blob/main/docs/setup.md (OAuth for subscription is **not** the Routine trigger token). The supervised worker now strips Routine trigger and Vercel bypass credentials from its child environment, while preserving a separately configured CLI OAuth token; that OAuth credential is still sensitive and must only be installed on an authorized trusted executor. Do not convert Routine secrets into CLI auth, buy model API usage, or enable default-branch workflows without owner consent. A new OAuth credential/runner authorization is a distinct decision, not automatically implied by the existing Routine token setup.
+
 ## Prerequisites BEFORE any live integration
 1. Read and reconcile Issue #146/#194/#201 and latest PR #193 head, root ledger n1–n16, approved Phase B scope, PR #196 manuals.
 2. Authenticate owner instructions independently (GitHub comments and the `approved` plain object are NOT authorization), dedupe by root and exact assignment, and record an atomic **pre-fire reservation**; otherwise multiple API calls can create multiple Claude sessions.
