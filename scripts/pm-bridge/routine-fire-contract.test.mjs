@@ -66,3 +66,13 @@ test("unknown and usage-limit outcomes do NOT cause retries or overage", async (
   const unavailable = async()=>({status:503});
   assert.equal((await fireRoutine({config,context,request:unavailable})).reason,"fire_rejected_or_unknown_DO_NOT_RETRY");
 });
+
+test("reject mismatched session URL even on trusted Claude host", async () => {
+  const request = async () => ({status:200,json:async()=>({
+    type:"routine_fire",claude_code_session_id:"session_01HJKLMNOPQRSTUVWXYZ",
+    claude_code_session_url:"https://claude.ai/code/session_01OTHERSESSIONXYZ"
+  })});
+  const result = await fireRoutine({config,context,request});
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "response_mismatch_DO_NOT_RETRY");
+});
