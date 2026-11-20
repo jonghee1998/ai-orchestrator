@@ -16,7 +16,7 @@ test("only recognized Vercel auth redirect is proof; denied/public/ambiguous fai
   assert.equal(classifyProtection(403, null).ok, false);
   assert.equal(classifyProtection(302, "https://vercel.com/login").ok, true);
   for (const [status, loc] of [[200,null],[500,null],[302,"https://evil.com/login"],
-    [302,"https://vercel.com/other"],[302,null]]) {
+    [302,"https://vercel.com/other"],[302,"https://vercel.com/deployment"],[302,null]]) {
     assert.equal(classifyProtection(status,loc).ok,false);
   }
 });
