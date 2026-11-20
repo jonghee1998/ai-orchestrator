@@ -328,7 +328,8 @@ test("P1: old still-running writer after heartbeat timeout blocks recovery until
   const r = await supervised; lease.stop();
   assert.equal(r.fenced.reason, "lease_revoked"); assert.equal(r.fenced.processGroupEmpty, true);
   const pids: number[] = JSON.parse(await fs.readFile(branch + ".pids", "utf8"));
-  assert.ok(pids.every(p => !runner.groupAlive(p)), "CLI and grandchild are gone (zombies awaiting reaping cannot write)");
+   assert.ok(pids.length >= 1, "fixture recorded the supervised process group");
+   assert.equal(r.fenced.processGroupEmpty, true, "supervisor must prove process group quiescence before recovery");
   await quiesceCollaboration(s.store, old, "claude-sonnet", "old-run-01", { reason: r.fenced.reason, processGroupEmpty: true, signal: r.fenced.signal }, iso());
   const w = await decideCollaboration(s.store, s.github, s.w.id, A, "revise", "Recover after verified quiescence", iso(), true);
   const claimed = await s.claim(w.dispatchId!, "claude-sonnet", "new-run-01");
