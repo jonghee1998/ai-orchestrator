@@ -49,6 +49,7 @@ export async function reserveRoutineFire(
         w.assignment.baseBranch !== rec.collaboration.baseBranch ||
         w.assignment.baseSha !== rec.collaboration.baseSha ||
         w.assignment.workBranch !== rec.collaboration.workBranch ||
+        w.assignment.instructions !== rec.collaboration.instructions ||
         createHash("sha256").update(rec.collaboration.instructions, "utf8").digest("hex") !== scope.approvalDigest ||
         rec.issueNumber !== scope.issueNumber || rec.runId ||
         !rec.submitAuthorizedAt || rec.submission !== "accepted" ||
@@ -73,7 +74,14 @@ export async function reserveRoutineFire(
     // The session may have started despite a lost HTTP reply. Never fire twice.
     for (const prior of Object.values(d.routineFires ?? {})) {
       const previous = d.records[prior.dispatchId];
-      if (previous?.collaboration?.repo.toLowerCase() === rec.collaboration.repo.toLowerCase() &&
+      // Without a trustworthy prior record, its physical writer branch is unknown.
+      // Never silently discard a durable fire reservation with possible /fire side effects.
+      if (!previous?.collaboration ||
+          previous.collaboration.workflowId !== prior.workflowId ||
+          previous.collaboration.targetSha !== prior.targetSha ||
+          previous.issueNumber !== prior.issueNumber)
+        throw new RoutineFireConflict("prior_fire_record_unverifiable");
+      if (previous.collaboration.repo.toLowerCase() === rec.collaboration.repo.toLowerCase() &&
           previous.collaboration.workBranch.toLowerCase() === rec.collaboration.workBranch.toLowerCase())
         throw new RoutineFireConflict("prior_fire_not_reconciled");
     }
