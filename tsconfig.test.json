@@ -15,7 +15,7 @@
     "src/lib/runs/*.ts", "src/lib/runs/*.test.ts", "src/lib/control/*.ts",
     "src/components/progress/viewModel.ts", "src/components/progress/viewModel.test.ts", "src/components/progress/contract.test.ts",
     "src/lib/readiness.ts", "src/lib/readiness.test.ts", "src/lib/refresh/*.ts", "src/lib/time/*.ts",
-    "src/lib/demo/*.ts", "src/lib/session/*.ts", "src/lib/workflow/*.ts", "src/lib/workspace/*.ts"
+    "src/lib/demo/*.ts", "src/lib/session/*.ts", "src/lib/workflow/*.ts", "src/lib/workspace/*.ts", "src/lib/orch/*.ts"
   ],
   "exclude": []
 }
