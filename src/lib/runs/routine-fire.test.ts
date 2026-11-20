@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { MemoryRunStore, type RunStore } from "./store";
 import { reserveRoutineFire, noteRoutineFireOutcome, inspectRoutineFireRecovery, RoutineFireConflict, type FireScope } from "./routine-fire";
 import type { DispatchRecord } from "./run-tracking";
-import type { Collaboration } from "./collaboration";
+import { claimCollaboration, CollaborationConflict, type Collaboration } from "./collaboration";
 
 const AT = "2026-11-20T10:00:00.000Z";
 const SHA = "8".repeat(40);
@@ -227,4 +227,61 @@ test("forged session cleanup or quiescence NEVER releases a same-branch writer",
   await denied(reserveRoutineFire(s,scope,AT),"writer_not_quiescent");
   await s.transact(d=>{d.records["prior"].runOrigin="runner";});
   assert.equal((await reserveRoutineFire(s,scope,AT)).reserved,true);
+});
+
+test("cross-channel: Routine reservation denies parallel HMAC runner on same dispatch",async()=>{
+  const s=await setup(); await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{d.collaborations!.uuid.history=[];});
+  await assert.rejects(claimCollaboration(s,scope.dispatchId,"claude-sonnet","runner-12345678",AT),
+    (e:unknown)=>e instanceof CollaborationConflict && e.message==="prior_routine_fire_may_be_writing");
+  const state=await s.read();
+  assert.equal(state.records[scope.dispatchId].runId,undefined);
+});
+test("cross-channel: reserved session alone can claim its exact task SHA",async()=>{
+  const s=await setup(); await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{d.collaborations!.uuid.history=[];});
+  await assert.rejects(claimCollaboration(s,scope.dispatchId,"claude-sonnet","session-12345678",AT,
+    {origin:"session",targetSha:"f".repeat(40)}),
+    (e:unknown)=>e instanceof CollaborationConflict && e.message==="stale_target_sha");
+  const claim=await claimCollaboration(s,scope.dispatchId,"claude-sonnet","session-12345678",AT,
+    {origin:"session",targetSha:SHA});
+  assert.equal(claim.runOrigin,"session");
+  assert.equal(claim.runId,"session-12345678");
+});
+test("cross-channel: another dispatch on reserved branch is rejected before previous claim",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{
+    const prior=d.records[scope.dispatchId];
+    d.records["next"]={...prior,dispatchId:"next",
+      collaboration:{...prior.collaboration!,workflowId:"next"}};
+    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",history:[],
+      assignment:{...d.collaborations!.uuid.assignment}} as Collaboration;
+  });
+  await assert.rejects(claimCollaboration(s,"next","claude-sonnet","runner-12345678",AT),
+    (e:unknown)=>e instanceof CollaborationConflict && e.message==="prior_routine_fire_may_be_writing");
+});
+test("cross-channel: unrelated verified branch can claim while another branch reserved",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{
+    const prior=d.records[scope.dispatchId];
+    d.records["next"]={...prior,dispatchId:"next",
+      collaboration:{...prior.collaboration!,workflowId:"next",workBranch:"claude/separate"}};
+    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",history:[],
+      assignment:{...d.collaborations!.uuid.assignment,workBranch:"claude/separate"}} as Collaboration;
+  });
+  const claim=await claimCollaboration(s,"next","claude-sonnet","runner-12345678",AT);
+  assert.equal(claim.runOrigin,"runner");
+});
+test("cross-channel: orphaned reservation denies even unrelated branch claim",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{
+    const prior=d.records[scope.dispatchId];
+    d.records["next"]={...prior,dispatchId:"next",
+      collaboration:{...prior.collaboration!,workflowId:"next",workBranch:"claude/separate"}};
+    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",history:[],
+      assignment:{...d.collaborations!.uuid.assignment,workBranch:"claude/separate"}} as Collaboration;
+    delete d.records[scope.dispatchId];
+  });
+  await assert.rejects(claimCollaboration(s,"next","claude-sonnet","runner-12345678",AT),
+    (e:unknown)=>e instanceof CollaborationConflict && e.message==="prior_fire_record_unverifiable");
 });
