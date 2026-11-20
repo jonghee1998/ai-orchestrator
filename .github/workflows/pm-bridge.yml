@@ -6,9 +6,8 @@ on:
   issue_comment:
     types: [created]
 permissions: {}
-concurrency:
-  group: pm-actions-bridge-${{ github.event.issue.number }}
-  cancel-in-progress: false
+# No issue-level concurrency: GitHub replaces pending runs even when cancel-in-progress=false.
+# Read-only runs are independent; each comment event must get its own chance to verify.
 jobs:
   plan:
     if: github.repository == 'jonghee1998/ai-orchestrator' && github.event.issue.pull_request == null
