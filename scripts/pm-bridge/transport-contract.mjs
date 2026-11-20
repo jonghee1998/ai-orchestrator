@@ -71,7 +71,13 @@ export async function submitAssignment({config,assignment,approved,request=fetch
     record.dispatchId!==w.dispatchId||record.agent!=="claude-sonnet"||
     record.issueNumber!==assignment.issueNumber||
     record.collaboration?.workflowId!==w.id||
+    record.collaboration?.step!=="claude"||
+    record.collaboration?.repo!==assignment.repo||
+    record.collaboration?.baseBranch!==assignment.baseBranch||
+    record.collaboration?.baseSha!==assignment.baseSha||
+    record.collaboration?.workBranch!==assignment.workBranch||
     record.collaboration?.targetSha!==assignment.baseSha||
+    record.held||
     !record.submitAuthorizedAt||!Number.isFinite(Date.parse(record.submitAuthorizedAt))||
     record.submission!=="accepted"||
     record.status!=="dispatched"||record.runId)
