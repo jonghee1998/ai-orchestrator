@@ -9,7 +9,7 @@ export function validatePreviewUrl(raw) {
   return u.href;
 }
 export function classifyProtection(status, location) {
-  if (status === 401 || status === 403) return { ok: true, basis: "access_denied" };
+  if (status === 401 || status === 403) return { ok: false, reason: "access_denied_origin_unverified" };
   if ([301, 302, 303, 307, 308].includes(status)) {
     let u;
     try { u = new URL(location); } catch { return { ok: false, reason: "unknown_redirect" }; }
