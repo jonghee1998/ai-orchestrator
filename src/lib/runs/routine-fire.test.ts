@@ -99,6 +99,48 @@ test("different dispatch same branch cannot refire after ambiguous outcome",asyn
   await denied(reserveRoutineFire(s,{...scope,dispatchId:"next",workflowId:"next"},AT),"prior_fire_not_reconciled");
   assert.equal((await reserveRoutineFire(s,scope,AT)).reserved,false);
 });
+test("orphaned prior Routine fire reservation cannot be skipped for another dispatch",async()=>{
+  for(const mutate of [
+    (d:any,id:string)=>{delete d.records[id];},
+    (d:any,id:string)=>{d.records[id].collaboration.workflowId="wrong-workflow";},
+    (d:any,id:string)=>{d.records[id].collaboration.targetSha="9".repeat(40);},
+    (d:any,id:string)=>{d.records[id].issueNumber=999;}
+  ]){
+    const s=await setup();
+    await reserveRoutineFire(s,scope,AT);
+    await s.transact(d=>{
+      mutate(d,scope.dispatchId);
+      const previous=d.records[scope.dispatchId] ?? d.records[scope.dispatchId] === undefined && d.records[scope.dispatchId];
+      d.records["next"]={...(previous ?? {}),dispatchId:"next",issueNumber:201,agent:"claude-sonnet",status:"dispatched",submission:"accepted",submitAuthorizedAt:AT,
+        collaboration:{workflowId:"next",cycle:1,step:"claude",repo:"other/repository",
+          baseBranch:"claude/src",baseSha:SHA,targetSha:SHA,workBranch:"claude/different",
+          instructions:"approved work"}};
+      d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",
+        assignment:{...d.collaborations!.uuid.assignment,repo:"other/repository",
+          workBranch:"claude/different"}} as Collaboration;
+    });
+    await denied(reserveRoutineFire(s,{...scope,dispatchId:"next",workflowId:"next"},AT),
+      "prior_fire_record_unverifiable");
+  }
+});
+test("assignment instruction drift denies fire even when dispatch digest is unchanged",async()=>{
+  const s=await setup();
+  await s.transact(d=>{d.collaborations!.uuid.assignment.instructions="different workflow instruction";});
+  await denied(reserveRoutineFire(s,scope,AT),"dispatch_not_authorized_or_ready");
+});
+test("valid prior fire on another verified branch does not globally block new dispatch",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{
+    const previous=d.records[scope.dispatchId];
+    d.records["next"]={...previous,dispatchId:"next",issueNumber:201,
+      collaboration:{...previous.collaboration!,workflowId:"next",repo:"other/repository",
+        workBranch:"claude/different"}};
+    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",
+      assignment:{...d.collaborations!.uuid.assignment,repo:"other/repository",
+        workBranch:"claude/different"}} as Collaboration;
+  });
+  assert.equal((await reserveRoutineFire(s,{...scope,dispatchId:"next",workflowId:"next"},AT)).reserved,true);
+});
 test("receipt is observational only, replay identical receipt allowed, mismatch blocked",async()=>{
   const s=await setup();await reserveRoutineFire(s,scope,AT);
   const receipt={state:"session_created" as const,sessionId:"session_01HJKLMNOPQRSTUVWXYZ",
