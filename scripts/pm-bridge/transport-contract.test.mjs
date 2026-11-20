@@ -46,7 +46,9 @@ test("one POST only, response is an accepted workflow, never START",async()=>{
   assert.equal(options.headers["x-admin-token"],config.adminToken);
   assert.deepEqual(JSON.parse(options.body),{action:"assign",assignment:a});
   return {status:200,json:async()=>({workflow:{id:"verified-workflow",stage:"claude",dispatchId:"dispatch",
-   assignment:a},submission:{outcome:"accepted"}})};
+   assignment:a},submission:{ok:true,record:{dispatchId:"dispatch",agent:"claude-sonnet",issueNumber:201,
+   collaboration:{workflowId:"verified-workflow",targetSha:sha},
+   submitAuthorizedAt:"2026-11-20T00:00:00.000Z",submission:"accepted",status:"dispatched"}}})};
  };
  const res=await submitAssignment({config,assignment:a,approved,request});
  assert.deepEqual(res,{ok:true,workflowId:"verified-workflow",dispatchId:"dispatch",stage:"claude",
@@ -62,4 +64,27 @@ test("ambiguous timeout or response mismatch never triggers automatic retry",asy
  const alteredInstructions=async()=>({status:200,json:async()=>({workflow:{id:"x",stage:"claude",assignment:{...a,instructions:"forged"}}})});
  assert.equal((await submitAssignment({config,assignment:a,approved,request:alteredInstructions})).reason,"response_mismatch_DO_NOT_RETRY");
  assert.equal((await submitAssignment({config,assignment:a,approved,request:incorrect})).reason,"response_mismatch_DO_NOT_RETRY");
+});
+
+test("HTTP 200 with Sonnet OFF, unknown ACK or mismatched dispatch cannot wake Claude",async()=>{
+ const workflow={id:"verified-workflow",stage:"claude",dispatchId:"dispatch",assignment:a};
+ const record={dispatchId:"dispatch",agent:"claude-sonnet",issueNumber:201,
+   collaboration:{workflowId:"verified-workflow",targetSha:sha},
+   submitAuthorizedAt:"2026-11-20T00:00:00.000Z",submission:"accepted",status:"dispatched"};
+ for(const sub of [
+  {ok:false,stage:"gate",reason:"agent_disabled"},
+  {ok:true,record:{...record,submission:"unknown"}},
+  {ok:true,record:{...record,dispatchId:"other"}},
+  {ok:true,record:{...record,submitAuthorizedAt:undefined}},
+  {ok:true,record:{...record,agent:"claude-opus"}},
+  {ok:true,record:{...record,collaboration:{...record.collaboration,targetSha:"f".repeat(40)}}}
+ ]) {
+  let calls=0;
+  const request=async()=>{calls++;return {status:200,json:async()=>({workflow,submission:sub})};};
+  const result=await submitAssignment({config,assignment:a,approved,request});
+  assert.equal(result.ok,false);
+  assert.equal(result.reason,"assignment_not_dispatched_DO_NOT_RETRY");
+  assert.equal(result.agentStarted,false);
+  assert.equal(calls,1);
+ }
 });
