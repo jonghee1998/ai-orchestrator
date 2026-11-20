@@ -61,7 +61,24 @@ export async function submitAssignment({config,assignment,approved,request=fetch
     w.assignment?.reviewCompletedPr!==assignment.reviewCompletedPr ||
     !["claude","blocked"].includes(w.stage))
    return {ok:false,reason:"response_mismatch_DO_NOT_RETRY"};
- // This confirms API accepted the workflow, NOT that agent actually STARTed.
- return {ok:true,workflowId:w.id,dispatchId:w.dispatchId??null,stage:w.stage,
-   submissionOutcome:json.submission?.outcome??null,agentStarted:false};
+ // Workflow persistence and a 200 HTTP response are NOT dispatch authorization.
+ // The existing server can return 200 with submission.ok=false (Sonnet OFF),
+ // or submission.ok=true with record.submission="unknown" (GitHub ACK lost).
+ // Neither may wake Claude; never auto-retry because the assignment may exist.
+ const sub=json?.submission, record=sub?.record;
+ if(w.stage!=="claude"||sub?.ok!==true||!record||
+    typeof w.dispatchId!=="string"||!w.dispatchId||
+    record.dispatchId!==w.dispatchId||record.agent!=="claude-sonnet"||
+    record.issueNumber!==assignment.issueNumber||
+    record.collaboration?.workflowId!==w.id||
+    record.collaboration?.targetSha!==assignment.baseSha||
+    !record.submitAuthorizedAt||!Number.isFinite(Date.parse(record.submitAuthorizedAt))||
+    record.submission!=="accepted"||
+    !["dispatched","running"].includes(record.status))
+   return {ok:false,reason:"assignment_not_dispatched_DO_NOT_RETRY",workflowId:w.id,
+     dispatchId:w.dispatchId??null,agentStarted:false};
+ // Only a genuinely accepted, authorized and record-bound dispatch is ready.
+ // This is still NOT an agent START / claim / completion certificate.
+ return {ok:true,workflowId:w.id,dispatchId:w.dispatchId,stage:w.stage,
+   submissionOutcome:"accepted",agentStarted:false};
 }
