@@ -77,6 +77,9 @@ test("HTTP 200 with Sonnet OFF, unknown ACK or mismatched dispatch cannot wake C
   {ok:true,record:{...record,dispatchId:"other"}},
   {ok:true,record:{...record,submitAuthorizedAt:undefined}},
   {ok:true,record:{...record,agent:"claude-opus"}},
+  {ok:true,record:{...record,status:"running",runId:"claimed-session-12345"}},
+  {ok:true,record:{...record,status:"running"}},
+  {ok:true,record:{...record,status:"dispatched",runId:"claimed-session-12345"}},
   {ok:true,record:{...record,collaboration:{...record.collaboration,targetSha:"f".repeat(40)}}}
  ]) {
   let calls=0;
