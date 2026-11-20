@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { MemoryRunStore, type RunStore } from "./store";
 import { reserveRoutineFire, noteRoutineFireOutcome, inspectRoutineFireRecovery, RoutineFireConflict, type FireScope } from "./routine-fire";
 import type { DispatchRecord } from "./run-tracking";
-import { claimCollaboration, CollaborationConflict, type Collaboration } from "./collaboration";
+import { assignCollaboration, claimCollaboration, CollaborationConflict, type Assignment, type Collaboration } from "./collaboration";
+import type { CollaborationGitHub } from "./collaboration-github";
+import { submitQueued, type DispatchAdapter } from "./dispatcher";
 
 const AT = "2026-11-20T10:00:00.000Z";
 const SHA = "8".repeat(40);
@@ -41,6 +43,69 @@ async function denied(action: Promise<unknown>, reason: string) {
   await assert.rejects(action, (e: unknown) =>
     e instanceof RoutineFireConflict && e.message === reason);
 }
+test("integrated real assign→queued prompt→accepted submit→first Routine reserve",async()=>{
+  const store=new MemoryRunStore();
+  await store.transact(d=>{
+    d.control.agents["claude-sonnet"]=true;
+    d.control.claudeProvider=true;
+  });
+  const assignment:Assignment={
+    repo:"jonghee1998/ai-orchestrator",issueNumber:201,sourcePr:193,
+    baseBranch:"claude/src",baseSha:SHA,workBranch:"claude/integration-test",
+    claudeAgent:"claude-sonnet",reviewCompletedPr:false,instructions:"approved work"
+  };
+  const gh:CollaborationGitHub={
+    branch:async()=>SHA,
+    pull:async()=>({number:193,repo:assignment.repo,headBranch:assignment.baseBranch,
+      headSha:SHA,baseBranch:"integration",url:"https://github.com/jonghee1998/ai-orchestrator/pull/193",open:true}),
+    descendsFrom:async()=>true
+  };
+  let submits=0;
+  const adapter:DispatchAdapter={supports:agent=>agent==="claude-sonnet",
+    submit:async()=>{submits++;return {outcome:"accepted"};}};
+  const workflow=await assignCollaboration(store,gh,assignment,AT);
+  const dispatchId=workflow.dispatchId!;
+  const before=(await store.read()).records[dispatchId];
+  assert.equal(before.collaboration!.instructions,"approved work\\nPM feedback: ");
+  assert.equal(before.status,"queued");
+  const delivered=await submitQueued(store,adapter,dispatchId,AT);
+  assert.equal(delivered.ok,true);
+  assert.equal(submits,1);
+  const fireScope:FireScope={
+    dispatchId,workflowId:workflow.id,issueNumber:201,targetSha:SHA,approvalDigest:D
+  };
+  await denied(reserveRoutineFire(store,{...fireScope,approvalDigest:"f".repeat(64)},AT),
+    "dispatch_not_authorized_or_ready");
+  assert.equal((await reserveRoutineFire(store,fireScope,AT)).reserved,true);
+  assert.equal((await reserveRoutineFire(store,fireScope,AT)).reserved,false);
+  await assert.rejects(claimCollaboration(store,dispatchId,"claude-sonnet","runner-12345678",AT),
+    (e:unknown)=>e instanceof CollaborationConflict&&e.message==="prior_routine_fire_may_be_writing");
+  assert.equal(submits,1);
+});
+test("integrated baseline mismatch and OFF hold prevent a Routine fire",async()=>{
+  const assignment:Assignment={
+    repo:"jonghee1998/ai-orchestrator",issueNumber:201,sourcePr:193,
+    baseBranch:"claude/src",baseSha:SHA,workBranch:"claude/integration-off",
+    claudeAgent:"claude-sonnet",reviewCompletedPr:false,instructions:"approved work"
+  };
+  const gh:CollaborationGitHub={
+    branch:async()=>SHA,
+    pull:async()=>({number:193,repo:assignment.repo,headBranch:assignment.baseBranch,
+      headSha:SHA,baseBranch:"integration",url:"https://github.com/jonghee1998/ai-orchestrator/pull/193",open:true}),
+    descendsFrom:async()=>true
+  };
+  const blocked=await setup(false);
+  await assert.rejects(assignCollaboration(blocked,{...gh,branch:async()=> "f".repeat(40)},assignment,AT),
+    (e:unknown)=>e instanceof CollaborationConflict && e.message==="baseline_mismatch");
+  const w=await assignCollaboration(blocked,gh,assignment,AT);
+  let calls=0;
+  const adapter:DispatchAdapter={supports:()=>true,submit:async()=>{calls++;return {outcome:"accepted"};}};
+  assert.equal((await submitQueued(blocked,adapter,w.dispatchId!,AT)).ok,false);
+  assert.equal(calls,0);
+  await denied(reserveRoutineFire(blocked,{
+    dispatchId:w.dispatchId!,workflowId:w.id,issueNumber:201,targetSha:SHA,approvalDigest:D
+  },AT),"dispatch_not_authorized_or_ready");
+});
 test("reserve once, durable on duplicate and concurrent attempts; no automatic second fire",async()=>{
   const s=await setup();
   const attempts=await Promise.all([reserveRoutineFire(s,scope,AT),reserveRoutineFire(s,scope,AT)]);
