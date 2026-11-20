@@ -164,8 +164,66 @@ export function configuredRepos(env: Readonly<Record<string, string | undefined>
   return [...new Set(raw.split(",").map((s) => s.trim()).filter((s) => /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_][\w.-]*$/.test(s) && !s.includes("..")))];
 }
 
+// ---------------------------------------------------------------- usage (orch:usage Issue, written by usage.yml)
+
+export interface UsageWindow { pct: number | null; resetsAt: string | null }
+export interface UsageView {
+  updatedAt: string | null;
+  claude: { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null } | null;
+  claudeCheckedAt: string | null;
+  claudeError: string | null;
+  codex: {
+    fiveHour: UsageWindow | null;
+    weekly: UsageWindow | null;
+    checkedAt: string | null;
+    error: string | null;
+    needsLogin: boolean;
+    limited: boolean;
+    lastReviewAt: string | null;
+  };
+}
+
+const USAGE_RE = /<!-- orch-usage:v1 ([\s\S]*?) -->/;
+const window = (v: unknown): UsageWindow | null => {
+  const o = obj(v);
+  if (!o) return null;
+  const p = num(o.pct);
+  return { pct: p !== null && p >= 0 && p <= 1000 ? p : null, resetsAt: str(o.resetsAt) };
+};
+
+/** Parse the usage snapshot marker. Unknown shapes → null fields, never invented numbers. */
+export function parseUsage(body: string | null | undefined): UsageView | null {
+  const j = parseJson(USAGE_RE.exec(body ?? "")?.[1]);
+  if (!j || j.v !== 1) return null;
+  const c = obj(j.claude);
+  const x = obj(j.codex) ?? {};
+  const q = obj(x.quota);
+  return {
+    updatedAt: str(j.updatedAt),
+    claude: c ? { fiveHour: window(c.fiveHour), sevenDay: window(c.sevenDay) } : null,
+    claudeCheckedAt: str(j.claudeCheckedAt),
+    claudeError: str(j.claudeError),
+    codex: {
+      fiveHour: q ? window(q.fiveHour) : null,
+      weekly: q ? window(q.weekly) : null,
+      checkedAt: str(x.quotaCheckedAt),
+      error: str(x.quotaError),
+      needsLogin: x.needsLogin === true,
+      limited: x.limited === true,
+      lastReviewAt: str(x.lastReviewAt),
+    },
+  };
+}
+
+/** Usage is account-wide: pick the freshest snapshot across repos. */
+export function latestUsage(views: { usage?: UsageView | null }[]): UsageView | null {
+  return views.map((v) => v.usage ?? null).filter((u): u is UsageView => !!u)
+    .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0] ?? null;
+}
+
 export interface RepoView {
   repo: string;
+  usage?: UsageView | null;
   switches: Switches | null;
   switchesError: string | null;
   runs: OrchRun[];

@@ -97,3 +97,21 @@ test("github I/O: reads runs+switches per repo, partial failure stays explicit; 
     "POST /repos/o/r/actions/workflows/orchestrator.yml/dispatches",
   ]);
 });
+
+import { latestUsage, parseUsage } from "./model";
+test("usage snapshot: parsed from marker, invalid numbers dropped, freshest repo wins", () => {
+  const snap = (updatedAt: string, extra: object = {}) => `표\n<!-- orch-usage:v1 ${JSON.stringify({ v: 1, updatedAt,
+    claude: { fiveHour: { pct: 23, resetsAt: "2026-11-21T00:00:00.000Z" }, sevenDay: { pct: "x", resetsAt: null } },
+    claudeCheckedAt: updatedAt, claudeError: null,
+    codex: { limited: true, lastReviewAt: null, quota: { fiveHour: { pct: 0, resetsAt: "2026-11-21T03:14:00.000Z" }, weekly: { pct: 100, resetsAt: "2026-11-24T00:52:30.000Z" } }, quotaCheckedAt: updatedAt, quotaError: null, needsLogin: false },
+    ...extra })} -->`;
+  const u = parseUsage(snap("2026-11-20T22:14:00Z"))!;
+  assert.equal(u.claude!.fiveHour!.pct, 23);
+  assert.equal(u.claude!.sevenDay!.pct, null, "non-number never shown as a value");
+  assert.deepEqual([u.codex.weekly!.pct, u.codex.limited, u.codex.needsLogin], [100, true, false]);
+  assert.equal(parseUsage("no marker"), null);
+  assert.equal(parseUsage(snap("x", { v: 2 })), null);
+  const noQuota = parseUsage(snap("2026-11-20T22:00:00Z", { codex: { needsLogin: true } }))!;
+  assert.deepEqual([noQuota.codex.weekly, noQuota.codex.needsLogin], [null, true]);
+  assert.equal(latestUsage([{ usage: noQuota }, { usage: u }, {}])!.updatedAt, "2026-11-20T22:14:00Z");
+});

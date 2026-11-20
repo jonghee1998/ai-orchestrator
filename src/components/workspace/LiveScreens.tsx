@@ -5,7 +5,7 @@ import { Card, PageTitle } from "@/components/ui";
 import { formatKst } from "@/lib/time/kst";
 import { useWorkspaceModel } from "./useWorkspace";
 import { Account } from "./Account";
-import { OrchDecisionsPanel, OrchRunsPanel, OrchSwitchesPanel } from "@/components/orch/OrchPanels";
+import { OrchDecisionsPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel } from "@/components/orch/OrchPanels";
 import { matchRouteId } from "@/lib/workspace/route";
 import { PART_LABEL, type BriefingItem, type ModelProject, type ModelTask, type PartState, type WorkspaceModelV1 } from "@/lib/workspace/model";
 
@@ -71,7 +71,7 @@ export function LiveProjectsScreen({ projectId, taskId }: { projectId?: string; 
 export function LiveAgentsScreen({ agentId }: { agentId?: string }) {
   const m = useWorkspaceModel();
   const list = agentId ? m.agents.filter(a => a.key === agentId) : m.agents;
-  return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="ON/OFF와 배정·증거·상태" />{!agentId && <OrchSwitchesPanel />}<SourceBanner m={m} />
+  return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="ON/OFF와 배정·증거·상태" />{!agentId && <><OrchUsagePanel /><OrchSwitchesPanel /></>}<SourceBanner m={m} />
     {agentId && <Link href="/agents" className="inline-flex min-h-11 items-center text-accent">← AI 팀</Link>}
     {agentId && !list.length && <Card><p>에이전트 정보를 찾지 못했습니다.</p></Card>}
     {list.map(a => <Card key={a.key}><div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">{a.name}</h2><p className="text-sm text-text-muted">{a.role}</p></div>

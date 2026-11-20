@@ -6,7 +6,7 @@ import { Card } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKst } from "@/lib/time/kst";
-import { FLAG_KEYS, type FlagKey, type OrchRun, type RepoView } from "@/lib/orch/model";
+import { FLAG_KEYS, latestUsage, type FlagKey, type OrchRun, type RepoView, type UsageWindow } from "@/lib/orch/model";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
 
@@ -155,5 +155,49 @@ function WindowEditor({ repo, value, disabled, onSave }: { repo: string; value: 
         <button disabled={disabled || w.trim() === value} onClick={() => onSave(w.trim())} className="min-h-11 rounded-xl border border-border px-3 text-sm disabled:opacity-50">저장</button>
       </div>
     </div>
+  );
+}
+
+function Bar({ label, w }: { label: string; w: UsageWindow | null }) {
+  const p = w?.pct ?? null;
+  const left = p === null ? null : Math.max(0, Math.round((100 - p) * 10) / 10);
+  const color = p === null ? "bg-slate-600" : p >= 90 ? "bg-red-400" : p >= 70 ? "bg-yellow-400" : "bg-blue-400";
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between text-sm">
+        <span>{label}</span>
+        <span className="font-semibold">{p === null ? "확인 불가" : `${p}% 사용 · ${left}% 남음`}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-700"><div className={`h-full ${color}`} style={{ width: `${Math.min(100, p ?? 0)}%` }} /></div>
+      <p className="text-[11px] text-text-faint">리셋 {w?.resetsAt ? formatKst(w.resetsAt) : "확인 불가"}</p>
+    </div>
+  );
+}
+
+/** AI 팀 탭: 구독 사용량 (계정 전체 기준, orch:usage 스냅샷). */
+export function OrchUsagePanel() {
+  const { state } = useOrch();
+  if (state.kind !== "ok") return <section aria-label="AI 사용량" className="space-y-2"><h2 className="text-lg font-semibold">AI 사용량</h2><Card><StateNote kind={state.kind} /></Card></section>;
+  const u = latestUsage(state.data.repos);
+  return (
+    <section aria-label="AI 사용량" className="space-y-2" data-testid="orch-usage">
+      <h2 className="text-lg font-semibold">AI 사용량</h2>
+      {!u ? <Card><p className="text-sm text-text-muted">아직 사용량 기록이 없습니다. 엔진의 usage 작업이 처음 돌면 표시됩니다.</p></Card> : <>
+        <Card className="space-y-3">
+          <p className="font-semibold">Claude <span className="text-xs font-normal text-text-muted">구독 전체 · 직접 대화 포함</span></p>
+          {u.claude ? <><Bar label="5시간" w={u.claude.fiveHour} /><Bar label="7일" w={u.claude.sevenDay} /></> : <p className="text-sm text-text-muted">확인 불가{u.claudeError ? ` · ${u.claudeError}` : ""}</p>}
+          <p className="text-[11px] text-text-faint">확인 {formatKst(u.claudeCheckedAt, "없음")}{u.claude && u.claudeError ? ` · 이번 확인: ${u.claudeError}` : ""}</p>
+        </Card>
+        <Card className="space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-semibold">Codex</p>
+            {u.codex.limited && <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-xs text-yellow-200">한도 소진 · Opus 대체 검수</span>}
+          </div>
+          {u.codex.fiveHour || u.codex.weekly ? <><Bar label="5시간" w={u.codex.fiveHour} /><Bar label="주간" w={u.codex.weekly} /></> : <p className="text-sm text-text-muted">사용률 확인 불가</p>}
+          {u.codex.needsLogin && <p className="rounded-lg border border-warn/50 bg-warn/10 p-2 text-xs text-yellow-100">🔑 폰 로그인 필요 — GitHub Actions → codex-login → Run workflow 후 표시되는 코드로 승인</p>}
+          <p className="text-[11px] text-text-faint">확인 {formatKst(u.codex.checkedAt, "없음")}{u.codex.error && !u.codex.needsLogin ? ` · 이번 조회: ${u.codex.error}` : ""}</p>
+        </Card>
+      </>}
+    </section>
   );
 }

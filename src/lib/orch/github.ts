@@ -3,7 +3,7 @@
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch)
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read, Variables read/write, Actions read/write).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
-import { parseRun, sortRuns, switchesFromVars, type OrchRun, type RepoView } from "./model";
+import { parseRun, parseUsage, sortRuns, switchesFromVars, type OrchRun, type RepoView, type UsageView } from "./model";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Fetch = typeof fetch;
@@ -51,11 +51,17 @@ async function readVars(f: Fetch, token: string, repo: string) {
   return switchesFromVars(j.variables ?? []);
 }
 
+async function readUsageIssue(f: Fetch, token: string, repo: string): Promise<UsageView | null> {
+  const list = (await call(f, token, "GET", `/repos/${repo}/issues?labels=orch:usage&state=open&per_page=1`)) as { body?: string }[];
+  return parseUsage(list?.[0]?.body);
+}
+
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw] = await Promise.allSettled([readRuns(f, token, repo), readVars(f, token, repo)]);
+  const [runs, sw, usage] = await Promise.allSettled([readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo)]);
   return {
     repo,
+    usage: usage.status === "fulfilled" ? usage.value : null,
     runs: runs.status === "fulfilled" ? runs.value : [],
     runsError: runs.status === "rejected" ? describe(runs.reason) : null,
     switches: sw.status === "fulfilled" ? sw.value : null,
