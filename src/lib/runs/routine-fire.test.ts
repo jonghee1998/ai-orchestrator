@@ -154,7 +154,7 @@ test("valid prior fire on another verified branch does not globally block new di
     d.records["next"]={...previous,dispatchId:"next",issueNumber:201,
       collaboration:{...previous.collaboration!,workflowId:"next",repo:"other/repository",
         workBranch:"claude/different"}};
-    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",
+    d.collaborations!.next={...d.collaborations!.uuid,id:"next",stage:"claude",dispatchId:"next",
       assignment:{...d.collaborations!.uuid.assignment,repo:"other/repository",
         workBranch:"claude/different"}} as Collaboration;
   });
