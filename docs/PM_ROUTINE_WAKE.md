@@ -12,6 +12,17 @@ The Claude Code Routine `POST .../v1/claude_code/routines/{trig_id}/fire` uses a
 - A 200 response only proves session creation, NOT authorized provider START, correct checkout SHA, application claim/lease, quiescence or completed code.
 - No GitHub Actions/Next route/worker imports or calls this module. No actual API requests, credentials, controls, deployment or workflow activation have been added.
 
+## Credential setup checkpoint (syntax ONLY; inert)
+- Owner reports `ROUTINE_FIRE_TOKEN` and `ROUTINE_FIRE_URL` entered into GitHub Actions Secrets. **No read API is available in the current GitHub connector to independently list those Secret names**; do not assert they are present.
+- `npm run routine:preflight` uses those two environment variables and performs **local presence/format validation only**: no HTTP request to Anthropic, no token/URL echo, no session creation. Passing this check does NOT prove token authenticity, current subscription allowance, or correct Routine configuration.
+- Do **NOT** run PR code with real Actions Secrets or inject them into `pull_request` CI. An explicitly approved, trusted default-branch workflow with least-privilege permission is needed before any real secret-backed check. Existing PR CI only tests synthetic fixtures.
+
+## One-shot reservation implementation (not activated)
+- Optional `StoreData.routineFires` persists `dispatchId` reservations in existing atomic `RunStore.transact`, with guard checks for Sonnet ON, accepted and authorized assignment, target SHA, and same-branch writer collisions. Unknown outcomes are retained and cannot be blindly retried.
+- `routine-fire.test.ts` covers concurrent reservations, OFF, stale source, timed-out writers, unknown outcome, and receipt handling.
+- **Known limits**: the incoming approval digest is not authenticated authority; this code does not independently verify GitHub live HEAD/source or authorize the user. Also, a safe terminal transition for a previous Routine session that may still be writing is not yet established, so a same-branch next fire may remain intentionally BLOCKED. Do not interpret this as a complete automatic revise loop.
+- Neither reservation nor firing is invoked by an active workflow/route.
+
 ## Prerequisites BEFORE any live integration
 1. Read and reconcile Issue #146/#194/#201 and latest PR #193 head, root ledger n1–n16, approved Phase B scope, PR #196 manuals.
 2. Authenticate owner instructions independently (GitHub comments and the `approved` plain object are NOT authorization), dedupe by root and exact assignment, and record an atomic **pre-fire reservation**; otherwise multiple API calls can create multiple Claude sessions.
