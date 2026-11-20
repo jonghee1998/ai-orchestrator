@@ -6,7 +6,22 @@ import type { DispatchRecord } from "./run-tracking";
 import type { Collaboration } from "./collaboration";
 import { defaultControl, type AuditEntry, type ControlState } from "../control/model";
 
+export interface RoutineFireReservation {
+  /** Unique collaboration dispatch; one reservation survives provider timeout/unknown outcomes. */
+  dispatchId: string;
+  workflowId: string;
+  issueNumber: number;
+  targetSha: string;
+  approvalDigest: string;
+  reservedAt: string;
+  /** POST result never upgrades this to proof of agent START. */
+  state: "reserved" | "session_created" | "outcome_unknown";
+  sessionId?: string;
+  sessionUrl?: string;
+}
 export interface StoreData {
+  /** Optional for old snapshots; shares existing atomic transaction and PG lock. */
+  routineFires?: Record<string, RoutineFireReservation>;
   /** Optional for snapshots created before Issue #36. Shares the dispatch transaction/PG lock. */
   collaborations?: Record<string, Collaboration>;
   records: Record<string, DispatchRecord>;
