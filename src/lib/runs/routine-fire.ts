@@ -49,8 +49,14 @@ export async function reserveRoutineFire(
         w.assignment.baseBranch !== rec.collaboration.baseBranch ||
         w.assignment.baseSha !== rec.collaboration.baseSha ||
         w.assignment.workBranch !== rec.collaboration.workBranch ||
-        w.assignment.instructions !== rec.collaboration.instructions ||
-        createHash("sha256").update(rec.collaboration.instructions, "utf8").digest("hex") !== scope.approvalDigest ||
+        // Real queue() appends PM feedback to the dispatch prompt. The approved
+        // fingerprint belongs to the unexpanded owner-approved assignment.
+        // Cloud Routine is initial-cycle only until external stop can be proven.
+        w.cycle !== 1 || rec.collaboration.cycle !== 1 ||
+        w.feedback !== "" ||
+        rec.collaboration.targetSha !== w.assignment.baseSha ||
+        rec.collaboration.instructions !== `${w.assignment.instructions}\nPM feedback: ${w.feedback}` ||
+        createHash("sha256").update(w.assignment.instructions, "utf8").digest("hex") !== scope.approvalDigest ||
         rec.issueNumber !== scope.issueNumber || rec.runId ||
         !rec.submitAuthorizedAt || rec.submission !== "accepted" ||
         rec.status !== "dispatched" || rec.held)
