@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MemoryRunStore, type RunStore } from "./store";
@@ -7,7 +8,7 @@ import type { Collaboration } from "./collaboration";
 
 const AT = "2026-11-20T10:00:00.000Z";
 const SHA = "8".repeat(40);
-const D = "a".repeat(64);
+const D = createHash("sha256").update("approved work", "utf8").digest("hex");
 const scope: FireScope = {
   dispatchId: "w-uuid-1-claude", workflowId: "uuid", issueNumber: 201,
   targetSha: SHA, approvalDigest: D
@@ -18,7 +19,11 @@ async function setup(enabled = true): Promise<MemoryRunStore> {
     d.control.agents["claude-sonnet"] = enabled;
     d.control.claudeProvider = enabled;
     d.collaborations = {
-      uuid: { id:"uuid", stage:"claude", dispatchId:scope.dispatchId } as Collaboration
+      uuid: { id:"uuid", stage:"claude", dispatchId:scope.dispatchId,
+        assignment:{repo:"jonghee1998/ai-orchestrator",issueNumber:201,
+          baseBranch:"claude/src",baseSha:SHA,sourcePr:193,
+          workBranch:"claude/work",claudeAgent:"claude-sonnet",
+          instructions:"approved work",reviewCompletedPr:false} } as Collaboration
     };
     d.records[scope.dispatchId] = {
       dispatchId:scope.dispatchId, issueNumber:201, agent:"claude-sonnet",
@@ -59,6 +64,19 @@ test("OFF gate, missing submit authorization, stale target SHA or wrong source a
     await s.transact(d=>{mutate(d.records[scope.dispatchId]);});
     await denied(reserveRoutineFire(s,scope,AT),"dispatch_not_authorized_or_ready");
   }
+});
+test("approval digest matches persisted instructions and workflow assignment boundaries",async()=>{
+  const arbitrary=await setup();
+  await denied(reserveRoutineFire(arbitrary,{...scope,approvalDigest:"a".repeat(64)},AT),"dispatch_not_authorized_or_ready");
+  const edited=await setup();
+  await edited.transact(d=>{d.records[scope.dispatchId].collaboration!.instructions="changed after approval";});
+  await denied(reserveRoutineFire(edited,scope,AT),"dispatch_not_authorized_or_ready");
+  const wrongIssue=await setup();
+  await wrongIssue.transact(d=>{d.collaborations!.uuid.assignment.issueNumber=194;});
+  await denied(reserveRoutineFire(wrongIssue,scope,AT),"dispatch_not_authorized_or_ready");
+  const wrongBranch=await setup();
+  await wrongBranch.transact(d=>{d.collaborations!.uuid.assignment.workBranch="claude/other";});
+  await denied(reserveRoutineFire(wrongBranch,scope,AT),"dispatch_not_authorized_or_ready");
 });
 test("other claimed branch writer remains unsafe despite timeout status",async()=>{
   const s=await setup();
