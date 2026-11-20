@@ -1,0 +1,74 @@
+# State machine: decides the next step from GitHub state and writes it back to the run Issue.
+# Runs only default-branch code (issues / issue_comment / workflow_run / schedule / workflow_dispatch).
+name: orchestrator
+
+on:
+  issues:
+    types: [labeled, closed]
+  issue_comment:
+    types: [created, edited]          # Codex edits its single summary comment when a review completes
+  workflow_run:
+    workflows: [ci, claude-work, claude-review]
+    types: [completed]
+  schedule:
+    - cron: "*/20 * * * *"            # watchdog: missed events, Codex nudge, idle timeout, final merge
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "평가할 PR 번호 (비우면 전체 watchdog)"
+        required: false
+        type: string
+
+permissions: {}
+
+jobs:
+  advance:
+    # Job-level (not workflow-level) so that skipped runs never enter the queue and displace a pending writer.
+    # One queue per PR / run Issue, so events for different runs never displace each other.
+    # (GitHub keeps only one pending run per group; within a group the newest event wins, which is
+    # safe because every run re-reads live GitHub state.)
+    concurrency:
+      group: orch-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number || inputs.pr || github.event_name }}
+      cancel-in-progress: false
+    if: >-
+      (github.event_name == 'issues' && (
+        github.event.label.name == 'orch:go' ||
+        github.event.label.name == 'orch:cancel' ||
+        (github.event.action == 'closed' && contains(github.event.issue.labels.*.name, 'orch:run')))) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        github.event.comment.user.login == 'chatgpt-codex-connector[bot]') ||
+      (github.event_name == 'workflow_run' && (
+        github.event.workflow.name == 'claude-work' ||
+        github.event.workflow.name == 'claude-review' ||
+        startsWith(github.event.workflow_run.head_branch, 'orch/run-'))) ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+      actions: write        # dispatch claude-work (GITHUB_TOKEN may trigger workflow_dispatch)
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          sparse-checkout: scripts/orch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/orch/main.mjs event
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          READ_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          INPUT_PR: ${{ inputs.pr }}
+          # ON/OFF switches (repository variables; unset = default)
+          ORCH_SONNET: ${{ vars.ORCH_SONNET }}
+          ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_CODEX: ${{ vars.ORCH_CODEX }}
+          ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
+          ORCH_WINDOW: ${{ vars.ORCH_WINDOW }}
