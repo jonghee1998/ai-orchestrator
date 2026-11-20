@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MemoryRunStore, type RunStore } from "./store";
-import { reserveRoutineFire, noteRoutineFireOutcome, RoutineFireConflict, type FireScope } from "./routine-fire";
+import { reserveRoutineFire, noteRoutineFireOutcome, inspectRoutineFireRecovery, RoutineFireConflict, type FireScope } from "./routine-fire";
 import type { DispatchRecord } from "./run-tracking";
 import type { Collaboration } from "./collaboration";
 
@@ -113,4 +113,58 @@ test("reservation does not survive missing workflow or changed owner root",async
   const s=await setup();
   await s.transact(d=>{delete d.collaborations!.uuid;});
   await denied(reserveRoutineFire(s,scope,AT),"dispatch_not_authorized_or_ready");
+});
+
+test("read-only recovery: missing, reserved and ambiguous outcomes remain fenced",async()=>{
+  const s=await setup();
+  const missing=await inspectRoutineFireRecovery(s,scope.dispatchId);
+  assert.equal(missing.reason,"reservation_missing_or_unknown");
+  assert.equal(missing.canAutoRefire,false);
+  await reserveRoutineFire(s,scope,AT);
+  assert.equal((await inspectRoutineFireRecovery(s,scope.dispatchId)).reason,"fire_outcome_unconfirmed");
+  await noteRoutineFireOutcome(s,scope.dispatchId,{state:"outcome_unknown"});
+  assert.equal((await inspectRoutineFireRecovery(s,scope.dispatchId)).canAutoRefire,false);
+});
+test("session created, unclaimed, or self-reported finished never proves quiescence",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await noteRoutineFireOutcome(s,scope.dispatchId,{
+    state:"session_created",sessionId:"session_01HJKLMNOPQRSTUVWXYZ",
+    sessionUrl:"https://claude.ai/code/session_01HJKLMNOPQRSTUVWXYZ"
+  });
+  assert.equal((await inspectRoutineFireRecovery(s,scope.dispatchId)).reason,"session_created_not_claimed");
+  await s.transact(d=>{
+    const r=d.records[scope.dispatchId];
+    r.runId="session_01HJKLMNOPQRSTUVWXYZ";r.runOrigin="session";
+    r.status="succeeded";
+    r.execution={exitCode:0,summary:"self report",headSha:SHA,tests:[],
+      attestation:"external_session_self_report"};
+  });
+  const result=await inspectRoutineFireRecovery(s,scope.dispatchId);
+  assert.equal(result.reason,"session_quiescence_unverifiable");
+  assert.equal(result.canAutoRefire,false);
+});
+test("runner cleanup shows proof but cannot authorize fresh provider fire",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await noteRoutineFireOutcome(s,scope.dispatchId,{
+    state:"session_created",sessionId:"session_01HJKLMNOPQRSTUVWXYZ",
+    sessionUrl:"https://claude.ai/code/session_01HJKLMNOPQRSTUVWXYZ"
+  });
+  await s.transact(d=>{
+    const r=d.records[scope.dispatchId];r.runId="runner-12345678";r.runOrigin="runner";
+    r.status="timeout";
+  });
+  assert.equal((await inspectRoutineFireRecovery(s,scope.dispatchId)).reason,"runner_not_quiescent");
+  await s.transact(d=>{
+    d.records[scope.dispatchId].quiescence={at:AT,runId:"runner-12345678",
+      reason:"lease_revoked",signal:"SIGKILL"};
+  });
+  const proof=await inspectRoutineFireRecovery(s,scope.dispatchId);
+  assert.equal(proof.reason,"runner_quiescence_proven_but_reservation_still_held");
+  assert.equal(proof.nextActor,"pm");
+  assert.equal(proof.canAutoRefire,false);
+});
+test("record mismatch never becomes retry authorization",async()=>{
+  const s=await setup();await reserveRoutineFire(s,scope,AT);
+  await s.transact(d=>{d.records[scope.dispatchId].issueNumber=999;});
+  assert.equal((await inspectRoutineFireRecovery(s,scope.dispatchId)).reason,"record_missing_or_mismatch");
 });
