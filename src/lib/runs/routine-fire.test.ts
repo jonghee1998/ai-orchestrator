@@ -93,7 +93,7 @@ test("different dispatch same branch cannot refire after ambiguous outcome",asyn
   await s.transact(d=>{
     const previous=d.records[scope.dispatchId];
     d.records["next"]={...previous,dispatchId:"next"};
-    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next"} as Collaboration;
+    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",assignment:{...d.collaborations!.uuid.assignment}} as Collaboration;
     d.records["next"].collaboration={...previous.collaboration!,workflowId:"next"};
   });
   await denied(reserveRoutineFire(s,{...scope,dispatchId:"next",workflowId:"next"},AT),"prior_fire_not_reconciled");
