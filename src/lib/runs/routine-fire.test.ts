@@ -69,13 +69,13 @@ test("real queue template used, owner digest binds ORIGINAL assignment, not expa
  const s=await setup();
  const d=await s.read();
  assert.equal(d.records[scope.dispatchId].collaboration!.instructions,
-   d.collaborations!.uuid.assignment.instructions+"\\nPM feedback: ");
+   d.collaborations!.uuid.assignment.instructions+"\nPM feedback: ");
  assert.equal((await reserveRoutineFire(s,scope,AT)).reserved,true);
 });
 test("later cycles and forged feedback are not authorized by first-cycle owner digest",async()=>{
  for(const mutate of [
    (d:any)=>{d.collaborations.uuid.cycle=2;d.records[scope.dispatchId].collaboration.cycle=2;},
-   (d:any)=>{d.collaborations.uuid.feedback="fix now";d.records[scope.dispatchId].collaboration.instructions="approved work\\nPM feedback: fix now";},
+   (d:any)=>{d.collaborations.uuid.feedback="fix now";d.records[scope.dispatchId].collaboration.instructions="approved work\nPM feedback: fix now";},
    (d:any)=>{d.records[scope.dispatchId].collaboration.instructions="approved work";},
    (d:any)=>{d.records[scope.dispatchId].collaboration.targetSha="a".repeat(40);}
  ]){
