@@ -254,7 +254,7 @@ test("cross-channel: another dispatch on reserved branch is rejected before prev
     const prior=d.records[scope.dispatchId];
     d.records["next"]={...prior,dispatchId:"next",
       collaboration:{...prior.collaboration!,workflowId:"next"}};
-    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",history:[],
+    d.collaborations!.next={...d.collaborations!.uuid,id:"next",stage:"claude",dispatchId:"next",history:[],
       assignment:{...d.collaborations!.uuid.assignment}} as Collaboration;
   });
   await assert.rejects(claimCollaboration(s,"next","claude-sonnet","runner-12345678",AT),
@@ -266,7 +266,7 @@ test("cross-channel: unrelated verified branch can claim while another branch re
     const prior=d.records[scope.dispatchId];
     d.records["next"]={...prior,dispatchId:"next",
       collaboration:{...prior.collaboration!,workflowId:"next",workBranch:"claude/separate"}};
-    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",history:[],
+    d.collaborations!.next={...d.collaborations!.uuid,id:"next",stage:"claude",dispatchId:"next",history:[],
       assignment:{...d.collaborations!.uuid.assignment,workBranch:"claude/separate"}} as Collaboration;
   });
   const claim=await claimCollaboration(s,"next","claude-sonnet","runner-12345678",AT);
@@ -278,7 +278,7 @@ test("cross-channel: orphaned reservation denies even unrelated branch claim",as
     const prior=d.records[scope.dispatchId];
     d.records["next"]={...prior,dispatchId:"next",
       collaboration:{...prior.collaboration!,workflowId:"next",workBranch:"claude/separate"}};
-    d.collaborations!.next={id:"next",stage:"claude",dispatchId:"next",history:[],
+    d.collaborations!.next={...d.collaborations!.uuid,id:"next",stage:"claude",dispatchId:"next",history:[],
       assignment:{...d.collaborations!.uuid.assignment,workBranch:"claude/separate"}} as Collaboration;
     delete d.records[scope.dispatchId];
   });
