@@ -18,7 +18,7 @@ export function verifyResponse(secret, eventId, text, signature) {
 export function childEnvironment(env) {
   const copy = { ...env };
   for (const key of Object.keys(copy)) {
-    if (/^(GATE_SECRET|ORCH_URL|CONTROL_.*|RUN_CALLBACK_SECRET_.*|DATABASE_.*|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|OPENAI_API_KEY|OPENAI_BASE_URL|CODEX_API_KEY)$/.test(key)) delete copy[key];
+    if (/^(GATE_SECRET|ORCH_URL|CONTROL_.*|RUN_CALLBACK_SECRET_.*|DATABASE_.*|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|OPENAI_API_KEY|OPENAI_BASE_URL|CODEX_API_KEY|ROUTINE_FIRE_TOKEN|ROUTINE_FIRE_URL|VERCEL_AUTOMATION_BYPASS_SECRET)$/.test(key)) delete copy[key];
   }
   return copy;
 }
