@@ -66,7 +66,7 @@ test("integrated real assign→queued prompt→accepted submit→first Routine r
   const workflow=await assignCollaboration(store,gh,assignment,AT);
   const dispatchId=workflow.dispatchId!;
   const before=(await store.read()).records[dispatchId];
-  assert.equal(before.collaboration!.instructions,"approved work\\nPM feedback: ");
+  assert.equal(before.collaboration!.instructions,"approved work\nPM feedback: ");
   assert.equal(before.status,"queued");
   const delivered=await submitQueued(store,adapter,dispatchId,AT);
   assert.equal(delivered.ok,true);
@@ -94,7 +94,8 @@ test("integrated baseline mismatch and OFF hold prevent a Routine fire",async()=
       headSha:SHA,baseBranch:"integration",url:"https://github.com/jonghee1998/ai-orchestrator/pull/193",open:true}),
     descendsFrom:async()=>true
   };
-  const blocked=await setup(false);
+  const blocked=new MemoryRunStore();
+  await blocked.transact(d=>{d.control.agents["claude-sonnet"]=false;d.control.claudeProvider=false;});
   await assert.rejects(assignCollaboration(blocked,{...gh,branch:async()=> "f".repeat(40)},assignment,AT),
     (e:unknown)=>e instanceof CollaborationConflict && e.message==="baseline_mismatch");
   const w=await assignCollaboration(blocked,gh,assignment,AT);
