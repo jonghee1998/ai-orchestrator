@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Isolated storage contract: not called by any route/workflow. No external Routine POST here.
 // Caller authentication, owner-approved scope, and latest GitHub HEAD evidence MUST be
 // independently checked before reserving. Reservation is NOT itself task authorization.
@@ -39,10 +40,16 @@ export async function reserveRoutineFire(
 
     const rec = d.records[scope.dispatchId];
     const w = d.collaborations?.[scope.workflowId];
-    if (!rec?.collaboration || !w || rec.collaboration.workflowId !== scope.workflowId ||
+    if (!rec?.collaboration || !w || !w.assignment || rec.collaboration.workflowId !== scope.workflowId ||
         w.dispatchId !== scope.dispatchId || w.stage !== "claude" ||
         rec.collaboration.step !== "claude" || rec.agent !== "claude-sonnet" ||
         rec.collaboration.targetSha !== scope.targetSha ||
+        w.assignment.repo.toLowerCase() !== rec.collaboration.repo.toLowerCase() ||
+        w.assignment.issueNumber !== rec.issueNumber ||
+        w.assignment.baseBranch !== rec.collaboration.baseBranch ||
+        w.assignment.baseSha !== rec.collaboration.baseSha ||
+        w.assignment.workBranch !== rec.collaboration.workBranch ||
+        createHash("sha256").update(rec.collaboration.instructions, "utf8").digest("hex") !== scope.approvalDigest ||
         rec.issueNumber !== scope.issueNumber || rec.runId ||
         !rec.submitAuthorizedAt || rec.submission !== "accepted" ||
         rec.status !== "dispatched" || rec.held)
