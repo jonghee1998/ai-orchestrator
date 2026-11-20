@@ -1,0 +1,35 @@
+# Phase 1 only: owner-authored issue comment -> LIVE evidence read -> dry-run verdict.
+# No Github writes, no Vercel API, no model invocation.
+# This event-driven workflow cannot run until owner-approved merge to main.
+name: pm-actions-bridge-dry-run
+on:
+  issue_comment:
+    types: [created]
+permissions: {}
+concurrency:
+  group: pm-actions-bridge-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  plan:
+    if: github.repository == 'jonghee1998/ai-orchestrator' && github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/pm-bridge
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Pure validator tests
+        run: node --test scripts/pm-bridge/core.test.mjs
+      - name: Read-only evidence planner
+        run: node scripts/pm-bridge/main.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
