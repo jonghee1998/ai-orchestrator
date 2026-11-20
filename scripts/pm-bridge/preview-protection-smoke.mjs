@@ -15,7 +15,7 @@ export function classifyProtection(status, location) {
     try { u = new URL(location); } catch { return { ok: false, reason: "unknown_redirect" }; }
     if (u.protocol === "https:" &&
         (u.hostname === "vercel.com" || u.hostname.endsWith(".vercel.com")) &&
-        /(?:^|\\/)(?:auth|login|sso)(?:\\/|$)/i.test(u.pathname))
+        u.pathname.split("/").some(segment => ["auth", "login", "sso"].includes(segment.toLowerCase())))
       return { ok: true, basis: "vercel_auth_redirect" };
     return { ok: false, reason: "unverified_redirect" };
   }
