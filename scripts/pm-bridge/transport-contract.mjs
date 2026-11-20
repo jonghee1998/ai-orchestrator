@@ -1,6 +1,7 @@
 import {createHash} from "node:crypto";
 // Phase 2A: inert HTTP client and contract checks. NOT wired to any workflow/route.
 const SHA=/^[a-f0-9]{40}$/;
+const SHA256=/^[a-f0-9]{64}$/;
 const instructionDigest = value => createHash("sha256").update(value,"utf8").digest("hex");
 const HOST=/^[a-z0-9][a-z0-9.-]*\.vercel\.app$/;
 export function validateTransportConfig(config){
@@ -29,7 +30,7 @@ export function validateAssignmentForTransport(a, approved){
  if(a.issueNumber!==approved.issueNumber||a.sourcePr!==approved.sourcePr||
     a.baseSha!==approved.baseSha||a.baseBranch!==approved.baseBranch||
     a.workBranch!==approved.workBranch ||
-    typeof approved.instructionsSha256!=="string" || !SHA.test(approved.instructionsSha256) ||
+    typeof approved.instructionsSha256!=="string" || !SHA256.test(approved.instructionsSha256) ||
     instructionDigest(a.instructions)!==approved.instructionsSha256)return "scope_mismatch";
  return null;
 }
