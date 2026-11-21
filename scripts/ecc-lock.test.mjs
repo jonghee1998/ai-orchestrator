@@ -36,7 +36,7 @@ export function verifyLock(lockData, baseDir) {
 test('lock 메타데이터', () => {
   assert.equal(lock.package, 'ecc-universal');
   assert.equal(lock.version, '2.2.3');
-  assert.equal(lock.sourceCommit, '4adeee6');
+  assert.equal(lock.sourceCommit, 'c05b2d6');
   assert.equal(lock.files.length, 4);
   for (const f of lock.files) assert.match(f.sha256, /^[0-9a-f]{64}$/);
 });

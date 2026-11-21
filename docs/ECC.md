@@ -2,7 +2,7 @@
 
 ## 도입 버전
 
-- 패키지: `ecc-universal@2.2.3` (GitHub `affaan-m/ECC@4adeee6`, MIT)
+- 패키지: `ecc-universal@2.2.3` (GitHub `affaan-m/ECC` 태그 `v2.2.3` = `c05b2d6`, MIT)
 - 파일 원문을 수정 없이 복사했고, 버전·해시는 `ecc/ecc.lock.json`에 고정합니다 (`scripts/ecc-lock.test.mjs`가 검증).
 
 ## 들어간 파일

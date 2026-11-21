@@ -1,7 +1,7 @@
 {
   "package": "ecc-universal",
   "version": "2.2.3",
-  "sourceCommit": "4adeee6",
+  "sourceCommit": "c05b2d6",
   "files": [
     {
       "source": "skills/verification-loop/SKILL.md",
