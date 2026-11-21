@@ -122,6 +122,14 @@ try {
       if (await page.getByText("알파공정 3단계 확인항목").isVisible()) problems.push("[projects] 대기 스텝의 할 일이 기본 상태에서 보임");
       if (await page.getByText("끝난 시험 작업").isVisible()) problems.push("[projects] 끝난 작업이 기본 상태에서 보임");
       if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
+      // 새로고침 버튼: 보이고, 누르면(GET 만 발생) '방금 갱신' 시각이 나와야 함
+      const refreshBtn = page.getByRole("button", { name: "↻ 새로고침" });
+      if (!(await refreshBtn.isVisible())) problems.push("[projects] '↻ 새로고침' 버튼이 보이지 않음");
+      else {
+        await refreshBtn.click();
+        try { await page.getByText("방금 갱신", { exact: false }).first().waitFor({ state: "visible", timeout: 10000 }); }
+        catch { problems.push("[projects] 새로고침을 눌러도 '방금 갱신' 이 안 보임"); }
+      }
     }
     for (const text of t.forbid) if (await page.getByText(text, { exact: false }).count()) problems.push(`[${t.name}] '${text}' 가 보임`);
     const active = await page.getByRole("navigation", { name: "주 메뉴" }).locator('[aria-current="page"]').allInnerTexts();

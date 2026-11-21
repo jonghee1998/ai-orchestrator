@@ -1,11 +1,12 @@
 "use client";
 // Orchestrator engine panels for the live mobile tabs (프로젝트 / AI 팀 / PM 브리핑).
 // Data: GET /api/orch. Switch changes: POST /api/orch (admin session + CSRF) → GitHub repository variables.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Card } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
-import { formatKst } from "@/lib/time/kst";
+import { formatKst, formatKstTime } from "@/lib/time/kst";
+import { refreshSucceeded } from "@/lib/orch/refresh";
 import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RunStep, type UsageWindow } from "@/lib/orch/model";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
@@ -110,10 +111,30 @@ function RunDetails({ r }: { r: OrchRun }) {
 
 /** 프로젝트 탭: 저장소(프로젝트) → 작업 → 스텝 → 세부 할 일, 모두 접고 펼 수 있음. */
 export function OrchRunsPanel() {
-  const { state } = useOrch();
+  const { state, reload, error } = useOrch();
+  const latest = useRef({ state, error }); latest.current = { state, error };
+  const [busy, setBusy] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [failed, setFailed] = useState(false);
+  async function refresh() {
+    setBusy(true);
+    try {
+      await reload();
+      await new Promise((r) => setTimeout(r, 0)); // 상태 반영(렌더) 뒤 latest 를 읽기 위해 한 틱 양보
+      const ok = refreshSucceeded(latest.current);
+      setFailed(!ok);
+      if (ok) setUpdatedAt(Date.now());
+    } catch { setFailed(true); }
+    finally { setBusy(false); }
+  }
   return (
     <section aria-label="자동 진행 작업" className="space-y-2" data-testid="orch-runs">
-      <h2 className="text-sm font-semibold text-text-muted">자동 진행 작업</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-text-muted">자동 진행 작업</h2>
+        <button type="button" onClick={refresh} disabled={busy} data-testid="orch-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "불러오는 중…" : "↻ 새로고침"}</button>
+      </div>
+      {updatedAt !== null && <p className="text-[11px] text-text-faint" data-testid="orch-refreshed">방금 갱신 {formatKstTime(updatedAt)}</p>}
+      {failed && <p role="status" className="text-xs text-red-200">새로고침 실패 · 잠시 후 다시</p>}
       {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => {
         const active = v.runs.filter((r) => !isEnded(r));
         const ended = v.runs.filter(isEnded);
