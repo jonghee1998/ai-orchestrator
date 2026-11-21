@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Card, PageTitle } from "@/components/ui";
 import { CURRENT_VERSION, PATCH_NOTES } from "@/lib/patchnotes";
+import { formatKstDate } from "@/lib/time/kst";
 import { Account } from "./Account";
 import { OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel } from "@/components/orch/OrchPanels";
 
@@ -25,7 +26,7 @@ export function LivePatchNotesScreen() {
         <Card key={n.version}>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
             <span className="font-semibold text-accent">v{n.version}</span>
-            <span className="text-text-faint">{n.date}</span>
+            <span className="text-text-faint">{formatKstDate(n.date)}</span>
             {n.pr !== undefined && (
               <a href={`https://github.com/jonghee1998/ai-orchestrator/pull/${n.pr}`} target="_blank" rel="noreferrer" className="text-accent">PR #{n.pr}</a>
             )}
