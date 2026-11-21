@@ -88,6 +88,8 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
   - 새 외부 패키지·의존성 잠금 파일 변경, 변경 파일 40개 초과
 - 배포는 하지 않습니다. 배포는 사용자가 결정합니다.
 
+**최종 PR이 main과 충돌할 때:** 그사이 다른 작업이 main에 반영되면 최종 PR이 충돌해 CI가 돌지 않습니다. 엔진이 이를 감지해 `final-sync` 워크플로로 main을 합칩니다. 충돌이 패치노트(`src/lib/patchnotes.ts`)뿐이면 양쪽 항목을 모두 남기고 버전 순으로 자동 정리한 뒤 CI를 다시 봅니다. 그 밖의 충돌은 "중단"으로 알리니, 충돌을 풀고 `orch:go`를 다시 붙여 주세요.
+
 ## 6. 멈췄을 때
 
 | 하고 싶은 것 | 방법 |
