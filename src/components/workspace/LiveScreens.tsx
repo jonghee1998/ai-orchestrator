@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Card, PageTitle } from "@/components/ui";
 import { CURRENT_VERSION, PATCH_NOTES } from "@/lib/patchnotes";
 import { Account } from "./Account";
-import { OrchDecisionsPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel } from "@/components/orch/OrchPanels";
+import { OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel } from "@/components/orch/OrchPanels";
 
 export function LiveProjectsScreen({ projectId }: { projectId?: string; taskId?: string }) {
   if (projectId) return <div className="space-y-4"><Link href="/projects" className="inline-flex min-h-11 items-center text-accent">← 프로젝트</Link><Card><p>프로젝트 상세는 자동 진행 작업으로 통합되었습니다</p></Card><Account /></div>;
@@ -15,7 +15,7 @@ export function LiveAgentsScreen({ agentId }: { agentId?: string }) {
   return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="AI 사용량과 ON/OFF" /><OrchUsagePanel /><OrchSwitchesPanel /><Account /></div>;
 }
 export function LiveBriefingScreen() {
-  return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계" /><OrchDecisionsPanel /></div>;
+  return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계" /><OrchPlansPanel /><OrchDecisionsPanel /></div>;
 }
 export function LivePatchNotesScreen() {
   return (

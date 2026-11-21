@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { configuredRepos, parseRun, sortRuns, switchChange, switchesFromVars } from "./model";
+import { approveMessage, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
 import { readRepo, writeSwitch } from "./github";
 
 const planBlock = (steps = 2) => "```json\n" + JSON.stringify({
@@ -223,4 +223,23 @@ test("parseRun: prose mention of the state marker in the plan context does not b
   const body = "설명: <!-- orch-state:v1 --> 마커를 읽는다\n\n```json\n" + JSON.stringify({ goal: "g", steps: [{ id: 1, title: "t", task: "x", done_when: ["d"] }] }) + "\n```\n<!-- orch-state:v1 " + JSON.stringify({ v: 1, status: "implementing", step: 1 }) + " -->";
   const r = parseRun("o/r", { number: 1, title: "[plan] g", html_url: "u", body });
   assert.equal(r?.status, "implementing");
+});
+
+test("planReviewBadge: none / OK / REVISE / ERROR / stale", () => {
+  const rv = (verdict: "OK" | "REVISE" | "ERROR", stale = false, round = 2) => ({ round, verdict, reviewer: "codex", at: null, hash: "h", stale });
+  assert.deepEqual(planReviewBadge(null), { text: "감사 전", tone: "muted", revise: false });
+  assert.deepEqual(planReviewBadge(rv("OK")), { text: "✅ 감사 OK 2/3", tone: "ok", revise: false });
+  assert.deepEqual(planReviewBadge(rv("REVISE", false, 1)), { text: "✏️ 수정 필요 1/3", tone: "warn", revise: true });
+  assert.deepEqual(planReviewBadge(rv("ERROR")), { text: "⚠️ 감사 실패", tone: "danger", revise: false });
+  for (const v of ["OK", "REVISE", "ERROR"] as const) assert.equal(planReviewBadge(rv(v, true)).text, "감사 후 수정됨 · 재감사 대기");
+});
+
+test("approveMessage: success, plan_changed and errors", () => {
+  assert.equal(approveMessage(200, { ok: true }).ok, true);
+  assert.deepEqual(approveMessage(409, { error: "plan_changed" }), { ok: false, text: "계획이 바뀌었습니다. 새로고침 후 다시 확인하세요" });
+  assert.match(approveMessage(409, { error: "not_pending" }).text, /승인 대기 계획이 아닙니다/);
+  assert.match(approveMessage(503, { error: "write_unconfigured" }).text, /ORCH_GITHUB_TOKEN/);
+  assert.match(approveMessage(401, { error: "unauthorized" }).text, /관리자 로그인/);
+  assert.equal(approveMessage(502, { error: "github_error", detail: "권한 없음 또는 저장소 없음" }).text, "승인 실패 · 권한 없음 또는 저장소 없음");
+  assert.equal(approveMessage(500, null).ok, false);
 });

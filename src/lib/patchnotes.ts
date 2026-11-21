@@ -5,6 +5,7 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "1.13.0", date: "2026-11-21", title: "상황판에서 계획 승인", items: ["PM 브리핑 탭에 '승인 대기 계획' 목록: 목표·스텝 수·계획 감사 결과(OK·수정 필요·감사 실패·감사 후 수정됨)와 계획 링크", "관리자는 '승인'을 두 번 눌러 orch:go 라벨을 붙임 (서버가 계획이 그대로인지 다시 확인)", "계획이 바뀌었으면 승인하지 않고 새로고침 안내"] },
   { version: "1.12.0", date: "2026-11-21", pr: 244, title: "프로젝트 탭 정리", items: ["프로젝트·끝난 작업 묶음·작업·스텝을 각각 접고 펼 수 있음 (진행 중·확인 필요 작업은 기본 펼침)", "작업 줄에 '스텝 M/N 통과'·'지금 K번'과 진행 막대, 스텝을 펼치면 세부 할 일이 ✅/⬜로 표시"] },
   { version: "1.11.1", date: "2026-11-21", pr: 241, title: "작업 시작 직후 멈춤 수정", items: ["계획 설명에 상태 표시 문구가 들어 있어도 엔진·상황판이 진짜 상태 기록만 읽음", "구현 시작 직후 Issue 상태가 늦게 읽히면 몇 초 기다렸다 다시 읽음", "그래도 결과 없이 끝난 구현은 순찰이 한 번 더 맡김 (예전엔 75분 뒤 중단)"] },
   { version: "1.11.0", date: "2026-11-21", pr: 238, title: "구조 탭", items: ["하단에 '구조' 탭 추가: 오케스트레이터 아키텍처 그림과 단계별 흐름", "역할(PM·Sonnet·Opus·Codex·Actions)과 보조 도구(ECC·Impeccable·claudex·Playwright)가 어디에 붙어 어떻게 쓰이는지 정리"] },
