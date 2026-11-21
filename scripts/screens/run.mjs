@@ -93,7 +93,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목"], forbid: ["설정되지 않았습니다"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목", "반영 승인 대기"], forbid: ["설정되지 않았습니다"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
@@ -122,6 +122,14 @@ try {
       if (await page.getByText("알파공정 3단계 확인항목").isVisible()) problems.push("[projects] 대기 스텝의 할 일이 기본 상태에서 보임");
       if (await page.getByText("끝난 시험 작업").isVisible()) problems.push("[projects] 끝난 작업이 기본 상태에서 보임");
       if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
+      // 새로고침 버튼: 보이고, 누르면(GET 만 발생) '방금 갱신' 시각이 나와야 함
+      const refreshBtn = page.getByRole("button", { name: "↻ 새로고침" });
+      if (!(await refreshBtn.isVisible())) problems.push("[projects] '↻ 새로고침' 버튼이 보이지 않음");
+      else {
+        await refreshBtn.click();
+        try { await page.getByText("방금 갱신", { exact: false }).first().waitFor({ state: "visible", timeout: 10000 }); }
+        catch { problems.push("[projects] 새로고침을 눌러도 '방금 갱신' 이 안 보임"); }
+      }
     }
     for (const text of t.forbid) if (await page.getByText(text, { exact: false }).count()) problems.push(`[${t.name}] '${text}' 가 보임`);
     const active = await page.getByRole("navigation", { name: "주 메뉴" }).locator('[aria-current="page"]').allInnerTexts();
