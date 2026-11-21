@@ -5,6 +5,7 @@ import { Card, PageTitle } from "@/components/ui";
 import { CURRENT_VERSION, PATCH_NOTES } from "@/lib/patchnotes";
 import { formatKstDate } from "@/lib/time/kst";
 import { Account } from "./Account";
+import { OrchIdeasPanel } from "@/components/orch/IdeasPanel";
 import { OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel } from "@/components/orch/OrchPanels";
 
 export function LiveProjectsScreen({ projectId }: { projectId?: string; taskId?: string }) {
@@ -16,7 +17,7 @@ export function LiveAgentsScreen({ agentId }: { agentId?: string }) {
   return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="AI 사용량과 ON/OFF" /><OrchUsagePanel /><OrchSwitchesPanel /><Account /></div>;
 }
 export function LiveBriefingScreen() {
-  return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계" /><OrchPlansPanel /><OrchDecisionsPanel /></div>;
+  return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계" /><OrchPlansPanel /><OrchIdeasPanel /><OrchDecisionsPanel /></div>;
 }
 export function LivePatchNotesScreen() {
   return (

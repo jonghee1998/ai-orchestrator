@@ -365,3 +365,20 @@ export function sortRuns(runs: OrchRun[]): OrchRun[] {
   const rank = (r: OrchRun) => (r.needsUser ? 0 : ["done", "cancelled"].includes(r.status) ? 2 : 1);
   return [...runs].sort((a, b) => rank(a) - rank(b) || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
 }
+
+/** Idea filter chips: '전체' (null) + one per repo (ORCH_REPOS order), each with its idea count. Zero-count repos keep their chip. */
+export function ideaFilterChips(repos: { repo: string; ideas: Idea[] }[]): { repo: string | null; count: number }[] {
+  const all = repos.reduce((n, v) => n + v.ideas.length, 0);
+  return [{ repo: null, count: all }, ...repos.map((v) => ({ repo: v.repo, count: v.ideas.length }))];
+}
+
+/** Ideas to show for the chosen repo (null = all), newest first. Does not mutate the input. */
+export function filterIdeas(repos: { repo: string; ideas: Idea[] }[], repo: string | null): Idea[] {
+  const list = repos.filter((v) => repo === null || v.repo === repo).flatMap((v) => v.ideas);
+  return [...list].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+}
+
+/** Repo preselected in the register form: the filtered one, else the first repo. */
+export function defaultIdeaRepo(repos: { repo: string }[], filter: string | null): string {
+  return filter !== null && repos.some((v) => v.repo === filter) ? filter : (repos[0]?.repo ?? "");
+}

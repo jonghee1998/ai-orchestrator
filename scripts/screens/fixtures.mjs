@@ -2,6 +2,7 @@
 // 토큰·개인정보 없음. 저장소 이름도 가짜(example/orch-screens).
 import { parsePlan } from "../orch/core.mjs";
 import { planHash } from "../orch/plan-review.mjs";
+import { ideaHash } from "../orch/idea-review.mjs";
 
 export const REPO = "example/orch-screens";
 const OWNER = { login: "example" }; // REPO owner — the engine and the dashboard only accept owner-authored plans
@@ -37,6 +38,15 @@ export function githubFixtures(now) {
   // 라벨 없이 조회(state=open, per_page=30)하면 실행 중 Issue(orch:run)도 함께 온다 — 화면은 승인 대기 계획만 골라야 함
   const openUnlabeled = [pending, ...runsOpen.map((i) => ({ ...i, labels: [{ name: "orch:run" }] }))];
 
+  // 아이디어함: 소유자가 쓴 '[idea]' Issue(라벨 없음). 의견 완료 1개(Actions 봇 마커, 실제 hash) + 수집 중 1개(댓글 없음).
+  const ideaDone = issue(21, "[idea] 상황판 채팅", "폰에서 바로 물어보고 싶음", { created_at: iso(90) });
+  const op = (recommend, steps) => ({ value: "high", effort: "M", risk: "low", steps, recommend, reasons: "자주 쓰는 흐름이라 효과가 큼" });
+  const ideaMarker = { hash: ideaHash(ideaDone.title, ideaDone.body), recommend: "now", summary: "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", agree: "폰에서 쓰는 가치가 큼", disagree: "규모 추정이 다름", claude: op("now", 3), codex: op("later", 4), codexPending: false };
+  const ideaJson = JSON.stringify(ideaMarker).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/\n/g, "\\n");
+  comments[21] = [{ id: 2101, user: ACTIONS_BOT, created_at: iso(80), body: `### 💡 종합 의견: 지금 하자\n\n<!-- orch-idea:v1 ${ideaJson} -->` }];
+  const ideaCollecting = issue(22, "[idea] 알림 모아보기", "중요한 알림만 한곳에서 보고 싶음", { created_at: iso(5) });
+  const allIssues = [ideaCollecting, ideaDone, ...runsOpen, ...runsDone, pending]; // state=all, 라벨 없음 (readIdeas)
+
   const usage = {
     v: 1, updatedAt: iso(5), claudeCheckedAt: iso(5), claudeError: null,
     claude: { status: "allowed", fiveHour: { pct: 42, resetsAt: iso(-120) }, sevenDay: { pct: 30, resetsAt: iso(-3000) } },
@@ -56,6 +66,7 @@ export function githubFixtures(now) {
       if (label === "orch:done") return { status: 200, body: runsDone };
       if (label === "orch:usage") return { status: 200, body: [usageIssue] };
       if (label === null && q.get("state") === "open" && q.get("per_page") === "30") return { status: 200, body: openUnlabeled };
+      if (label === null && q.get("state") === "all") return { status: 200, body: allIssues };
       return { status: 200, body: [] };
     }
     const cm = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(p);
