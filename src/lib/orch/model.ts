@@ -13,7 +13,7 @@ export const STATUS_LABEL: Record<OrchStatus, string> = {
   fixing: "수정 중",
   blocked: "중단 · 판단 필요",
   finalizing: "최종 확인 중",
-  awaiting_merge: "머지 승인 대기",
+  awaiting_merge: "반영 승인 대기",
   done: "완료",
   cancelled: "취소",
 };
@@ -110,9 +110,9 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
   const next =
     status === "waiting" ? "계획 확인 후 orch:go 라벨을 붙이면 시작"
     : status === "blocked" ? "사유 확인 후 orch:go(재개) 또는 orch:cancel"
-    : status === "awaiting_merge" ? `최종 PR #${finalPr ?? "?"} 완공 보고서 확인 후 머지`
+    : status === "awaiting_merge" ? `완공 보고서 확인 후 반영 (최종 PR #${finalPr ?? "?"})`
     : held ? "스위치가 켜지면 자동으로 이어감"
-    : status === "finalizing" ? "최종 CI 통과 시 자동 머지"
+    : status === "finalizing" ? "최종 CI 통과 시 자동 반영"
     : status === "done" || status === "cancelled" ? "없음"
     : "자동 진행 중";
   return {
