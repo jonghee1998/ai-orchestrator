@@ -163,6 +163,62 @@ test("manual usage refresh: dispatches unless a run started within 2 minutes", a
   assert.equal(await requestUsageRun("o/r", {}, now, undefined, fake("2026-11-21T03:50:00Z")), "unavailable");
 });
 
+// ---- steps (list, state, checks)
+const stepsOf = (n: number, state: object | null, steps = 3) => {
+  const body = `${planBlock(steps)}${state ? `\n<!-- orch-state:v1 ${JSON.stringify({ v: 1, ...state })} -->` : ""}`;
+  return parseRun("o/r", { number: n, html_url: "u", title: "t", body })!;
+};
+const states = (r: { steps: { state: string }[] }) => r.steps.map((s) => s.state);
+
+test("parseRun steps: in progress → passed / current / pending", () => {
+  const r = stepsOf(20, { status: "implementing", step: 2, passed: { 1: true } });
+  assert.deepEqual(states(r), ["passed", "current", "pending"]);
+  assert.equal(r.passed, 1);
+  assert.deepEqual(r.steps[0], { id: 1, title: "s1", state: "passed", checks: [{ text: "x", done: true }] });
+  assert.deepEqual(r.steps[1].checks, [{ text: "x", done: false }]);
+});
+
+test("parseRun steps: blocked keeps the stopped step current", () => {
+  assert.deepEqual(states(stepsOf(21, { status: "blocked", step: 2, passed: { 1: 5 }, reason: "r" })), ["passed", "current", "pending"]);
+});
+
+test("parseRun steps: done / awaiting_merge / finalizing → all passed, checks done", () => {
+  for (const status of ["done", "awaiting_merge", "finalizing"]) {
+    const r = stepsOf(22, { status, step: 3 });
+    assert.deepEqual(states(r), ["passed", "passed", "passed"]);
+    assert.equal(r.passed, 3);
+    assert.ok(r.steps.every((s) => s.checks.every((c) => c.done)));
+  }
+});
+
+test("parseRun steps: waiting / cancelled → no current", () => {
+  assert.deepEqual(states(stepsOf(23, null)), ["pending", "pending", "pending"]);
+  assert.deepEqual(states(stepsOf(24, { status: "waiting", step: 1 })), ["pending", "pending", "pending"]);
+  assert.deepEqual(states(stepsOf(25, { status: "cancelled", step: 2, passed: { 1: 3 } })), ["passed", "pending", "pending"]);
+});
+
+test("parseRun steps: string key with PR number value", () => {
+  const r = stepsOf(26, { status: "reviewing", step: 3, passed: { "1": 41, "2": 42 } });
+  assert.deepEqual(states(r), ["passed", "passed", "current"]);
+  assert.equal(r.passed, 2);
+  assert.deepEqual(states(stepsOf(27, { status: "implementing", step: 1, passed: {} })), ["current", "pending", "pending"]);
+});
+
+test("parseRun steps: malformed input does not throw", () => {
+  const plan = {
+    goal: "g",
+    steps: [null, "x", 7, { id: 1.5, title: "frac" }, { id: "2", title: "str" },
+      { id: 3, title: "ok", done_when: "not array" },
+      { id: 4, title: "t".repeat(300), done_when: [1, null, "a".repeat(300), "  ", "good"] }],
+  };
+  const body = "```json\n" + JSON.stringify(plan) + "\n```";
+  const r = parseRun("o/r", { number: 30, html_url: "u", title: "t", body })!;
+  assert.deepEqual(r.steps.map((s) => s.id), [3, 4]);
+  assert.deepEqual(r.steps[0].checks, []);
+  assert.equal(r.steps[1].title.length, 200);
+  assert.deepEqual(r.steps[1].checks.map((c) => c.text.length), [200, 4]);
+});
+
 test("parseRun: prose mention of the state marker in the plan context does not break state (run #239)", () => {
   const body = "설명: <!-- orch-state:v1 --> 마커를 읽는다\n\n```json\n" + JSON.stringify({ goal: "g", steps: [{ id: 1, title: "t", task: "x", done_when: ["d"] }] }) + "\n```\n<!-- orch-state:v1 " + JSON.stringify({ v: 1, status: "implementing", step: 1 }) + " -->";
   const r = parseRun("o/r", { number: 1, title: "[plan] g", html_url: "u", body });
