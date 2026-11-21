@@ -86,6 +86,20 @@ export function sameOrigin(h: Headers, env: Env): boolean {
   } catch { return false; }
 }
 
+/**
+ * Legacy `{token}` script clients (curl, cron helpers) send neither Origin nor Sec-Fetch-Site, so the strict
+ * check above rejects them. Host-only compatibility is allowed for that token exchange ONLY, because:
+ *  - CSRF needs a browser; browsers attach Origin to every cross-origin POST (and Sec-Fetch-Site on all
+ *    current engines), so a request with neither header is not a cross-site browser request;
+ *  - the body must carry a valid CONTROL_*_TOKEN, which a cross-site attacker cannot know, and the cookie
+ *    is SameSite=Strict and bound to the caller, not to a victim browser;
+ *  - any Origin or Sec-Fetch-Site that is present must still prove same-origin (cross-origin stays 403),
+ *    and password login, logout/DELETE and cookie-authenticated mutations never use this path.
+ */
+export function legacyHostOnly(h: Headers): boolean {
+  return !h.get("origin") && !h.get("sec-fetch-site") && !!h.get("host");
+}
+
 /** Cookie-authenticated changes need a session-bound CSRF token and same-origin evidence. */
 export function checkCsrf(h: Headers, s: Session, env: Env): boolean {
   if (!sameOrigin(h, env)) return false;

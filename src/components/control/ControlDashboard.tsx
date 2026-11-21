@@ -28,7 +28,7 @@ const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Son
 const PRESET_LABEL: Record<string, string> = { "gpt-only": "GPT만", "claude-only": "Claude만", "all-enabled": "전체 켜기", "all-paused": "전체 일시정지" };
 const t = (s: string | null) => formatKst(s);
 
-export default function ControlDashboard() {
+export default function ControlDashboard({ embedded = false, readOnly = false }: { embedded?: boolean; readOnly?: boolean }) {
   const [s, setS] = useState<State>({ kind: "loading" });
   const sess = useSession();
   const token = sess.status === "authed" ? SESSION_MARK : "";
@@ -58,6 +58,7 @@ export default function ControlDashboard() {
   useRegisterRefresh("/api/dashboard", load);
 
   async function send(body: Record<string, unknown>) {
+    if (readOnly) return;
     setBusy(true); setMsg(null);
     try {
       const r = await fetch("/api/control", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify(body) });
@@ -69,14 +70,12 @@ export default function ControlDashboard() {
 
   return (
     <div>
-      <PageTitle title="에이전트 제어" subtitle="서버 측 dispatch 게이트 · 실제 상태만 표시" />
-      <div className="mb-3"><ScopeNotice /></div>
-      <div className="mb-3"><LoginCard /></div>
+      {!embedded && <><PageTitle title="배정 설정" subtitle="새 작업 배정 정책과 저장된 상태" /><div className="mb-3"><ScopeNotice /></div><div className="mb-3"><LoginCard /></div></>}
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">실행 저장소가 설정되지 않았습니다 (RUN_STORE_PATH). 연결되지 않은 상태이며 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p><button className="mt-2 rounded-lg border border-border px-3 py-2 text-xs" onClick={load}>다시 시도</button></Card>}
       {s.kind === "ok" && staleErr && <p role="status" className="mb-2 text-xs text-warn">최신 갱신 실패 — 마지막 정상 데이터를 표시 중입니다.</p>}
-      {s.kind === "ok" && <Body snap={s.snap} send={send} busy={busy} msg={msg} reload={load} />}
+      {s.kind === "ok" && <Body snap={s.snap} send={send} busy={busy || readOnly} msg={msg} reload={load} />}
     </div>
   );
 }
@@ -92,14 +91,14 @@ function Body({ snap, send, busy, msg, reload }: { snap: Snap; send: (b: Record<
   const btn = "min-h-11 rounded-lg border border-border px-3 text-sm disabled:opacity-50";
   return (
     <div className="space-y-4">
-      <p className="text-xs text-text-faint">마지막 갱신 {t(snap.lastUpdate)} · 설정 v{v} · 프리셋 {PRESET_LABEL[c.preset] ?? c.preset}</p>
+      <p className="text-xs text-text-faint">마지막 갱신 {t(snap.lastUpdate)} · 설정 v{v} · 배정 방식 {PRESET_LABEL[c.preset] ?? c.preset}</p>
 
       <Card>
         <p className="text-xs text-text-muted">변경은 관리자 세션(서버 검증 쿠키 + CSRF)으로만 허용됩니다.</p>
         {msg && <p role="status" className="mt-2 text-xs">{msg}</p>}
       </Card>
 
-      <section aria-label="프리셋"><h2 className="mb-2 text-sm font-semibold">프리셋</h2>
+      <section aria-label="배정 방식"><h2 className="mb-2 text-sm font-semibold">배정 방식</h2>
         <div className="grid grid-cols-2 gap-2">
           {snap.presets.map((p) => <button key={p} disabled={busy} className={`${btn} ${c.preset === p ? "border-accent text-accent" : ""}`} onClick={() => send({ action: "preset", name: p })}>{PRESET_LABEL[p] ?? p}</button>)}
         </div>
@@ -116,18 +115,18 @@ function Body({ snap, send, busy, msg, reload }: { snap: Snap; send: (b: Record<
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium">{NAMES[a.key]}</p>
-                  <p className="text-xs text-text-muted">{a.effective ? "dispatch 허용" : `차단: ${a.blockedReason}`}</p>
+                  <p className="text-xs text-text-muted">{a.effective ? "새 작업 배정 가능" : `차단: ${a.blockedReason}`}</p>
                 </div>
                 <button disabled={busy} className={btn} aria-pressed={a.enabled} aria-label={`${NAMES[a.key]} 토글`} onClick={() => send({ action: "set_agent", agent: a.key, enabled: !a.enabled, expectedVersion: v })}>{a.enabled ? "ON" : "OFF"}</button>
               </div>
               <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-text-muted">
-                <dt>최근 ACK</dt><dd>{t(a.lastAck)}</dd>
+                <dt>작업 수신 확인</dt><dd>{t(a.lastAck)}</dd>
                 <dt>최근 실행</dt><dd>{t(a.lastRun)}</dd>
-                <dt>최근 heartbeat</dt><dd>{t(a.lastHeartbeat)}</dd>
+                <dt>최근 응답</dt><dd>{t(a.lastHeartbeat)}</dd>
                 <dt>상태</dt><dd>{a.lastStatus ?? "기록 없음"}</dd>
-                <dt>실행/대기/보류</dt><dd>{a.running}/{a.queued}/{a.held}</dd>
+                <dt>진행 중/시작 대기/보류</dt><dd>{a.running}/{a.queued}/{a.held}</dd>
                 <dt>orchestrator 호출</dt><dd>{a.orchestratorDispatches} (차단 {a.suppressedByGate})</dd>
-                <dt>제공사 사용량/비용</dt><dd>unknown (텔레메트리 미연결)</dd>
+                <dt>제공사 사용량/비용</dt><dd>확인되지 않음 (사용량 측정 미연결)</dd>
                 <dt>취소</dt><dd>{a.cancelSupported ? "지원" : "미지원 (drain)"}</dd>
               </dl>
             </Card>

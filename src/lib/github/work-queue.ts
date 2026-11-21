@@ -1,4 +1,5 @@
 export const QUEUE_AGENTS = ["claude", "opus", "codex"] as const;
+const AGENT_ALIASES: Record<string, string> = { "claude-sonnet": "claude", "claude-opus": "opus" };
 export type QueueAgent = (typeof QUEUE_AGENTS)[number] | "unknown";
 
 export const QUEUE_STATUSES = [
@@ -17,11 +18,18 @@ export interface GitHubIssue {
   body: string | null;
   html_url: string;
   state?: string;
+  state_reason?: string | null;
   labels: Array<string | { name?: string | null }>;
   pull_request?: unknown;
+  milestone?: { number: number; title: string; description?: string | null } | null;
 }
 
 export interface WorkQueueTask {
+  project?: { id: string; name: string; goal?: string };
+  issueState?: "open" | "closed";
+  /** GitHub close reason; absent when not provided by the source (treated as unverified, never as accepted). */
+  stateReason?: "completed" | "not_planned" | "duplicate" | "unknown";
+  description?: string;
   id: string;
   title: string;
   agent: QueueAgent;
@@ -81,13 +89,22 @@ export function normalizeIssues(issues: GitHubIssue[]): WorkQueueTask[] {
     .sort((left, right) => left.number - right.number)
     .map((issue) => {
       const labels = labelNames(issue);
-      const agent = oneNamespacedLabel(labels, "agent:", QUEUE_AGENTS);
+      // Issue #119: `agent:claude-sonnet` / `agent:claude-opus` are aliases of the canonical queue agents.
+      const rawAgent = oneNamespacedLabel(labels, "agent:", [...QUEUE_AGENTS, ...Object.keys(AGENT_ALIASES)]);
+      const agent = rawAgent ? AGENT_ALIASES[rawAgent] ?? rawAgent : undefined;
       // A closed issue is completed work regardless of a stale status label.
       const status =
         issue.state === "closed"
           ? "done"
           : oneNamespacedLabel(labels, "status:", QUEUE_STATUSES);
+      const projects = labels.filter((x) => x.startsWith("project:") && x.slice(8).trim());
+      const project = projects.length === 1 ? { id: `label:${projects[0].slice(8)}`, name: projects[0].slice(8) }
+        : projects.length === 0 && issue.milestone ? { id: `milestone:${issue.milestone.number}`, name: issue.milestone.title, goal: issue.milestone.description ?? undefined } : undefined;
       return {
+        ...(project ? { project } : {}),
+        ...(issue.state === "open" || issue.state === "closed" ? { issueState: issue.state } : {}),
+        ...(issue.state === "closed" && issue.state_reason ? { stateReason: (["completed", "not_planned", "duplicate"].includes(issue.state_reason) ? issue.state_reason : "unknown") as "completed" | "not_planned" | "duplicate" | "unknown" } : {}),
+        ...(issue.body ? { description: issue.body } : {}),
         id: String(issue.number),
         title: issue.title,
         agent: (agent ?? "unknown") as QueueAgent,

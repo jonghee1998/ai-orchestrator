@@ -75,3 +75,13 @@ test("dispatch planning and idempotency hints are deterministic", () => {
   assert.deepEqual(planDispatch(tasks), planDispatch([...tasks]));
   assert.equal(planDispatch(tasks)[0].idempotencyKey, "github-issue:7:agent:codex");
 });
+
+test("agent aliases claude-sonnet/claude-opus map to canonical queue agents; real project ids keep label:/milestone: form (#119)", () => {
+  const tasks = normalizeIssues([
+    issue(1, ["agent:claude-sonnet", "status:ready", "project:알파 프로젝트"]),
+    issue(2, ["agent:claude-opus", "status:ready"]),
+    { ...issue(3, ["agent:codex", "status:ready"]), milestone: { number: 7, title: "M7", description: null } } as GitHubIssue,
+  ]);
+  assert.deepEqual(tasks.map(t => t.agent), ["claude", "opus", "codex"]);
+  assert.deepEqual(tasks.map(t => t.project?.id), ["label:알파 프로젝트", undefined, "milestone:7"]);
+});

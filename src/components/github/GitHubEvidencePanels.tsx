@@ -51,6 +51,7 @@ export function GitHubProgressPanel({ ev }: { ev: Ev }) {
     <section aria-label="GitHub 진행 증거">
       <Head r={r} title="GitHub 진행 현황" stale={ev.error} />
       <p className="mb-2 text-xs">이슈 {atLeast(g.total, cov.issuesTruncated)}개 (열림 {atLeast(g.open, cov.issuesTruncated)}){cov.issuesTruncated ? " · 조회 범위 내 집계" : ""} · 완료는 이슈 닫힘/PR 병합 기준(라벨만으로 완료 처리 안 함)</p>
+      {g.pmSelfReportOnly > 0 && <p className="mb-2 text-xs text-warn">PM 자체 수락 표식만 있는 PR {atLeast(g.pmSelfReportOnly, cov.issuesTruncated)}건 — 공식 리뷰(비작성자 승인) 아님, 자기보고 증거</p>}
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {(Object.keys(GITHUB_STAGE_LABEL) as GitHubStage[]).map((s) => (
           <div key={s} className={`rounded-xl px-3 py-2 text-center ${STAGE_TONE[s] ?? "bg-bg-raised text-text-muted"}`}><div className="text-lg font-semibold">{atLeast(g.stages[s], cov.issuesTruncated)}</div><div className="text-[11px]">{GITHUB_STAGE_LABEL[s]}</div></div>
