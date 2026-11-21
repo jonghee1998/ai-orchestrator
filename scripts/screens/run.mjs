@@ -96,6 +96,7 @@ try {
     { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중"], forbid: ["설정되지 않았습니다"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업"], forbid: [] },
+    { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
     { name: "patch-notes", path: "/patch-notes", nav: "패치노트", expect: [`v${CURRENT_VERSION}`, "오케스트레이터 엔진"], forbid: [] },
   ];
   const navLabels = (await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
@@ -135,7 +136,7 @@ try {
   proxy.close(); ghServer.close();
 }
 
-const report = [`## 결과 화면 테스트 (Playwright)`, "", problems.length ? `❌ 실패 ${problems.length}건` : `✅ 통과 · 탭 4개 × 폭 ${WIDTHS.join("/")}px`, "",
+const report = [`## 결과 화면 테스트 (Playwright)`, "", problems.length ? `❌ 실패 ${problems.length}건` : `✅ 통과 · 탭 5개 × 폭 ${WIDTHS.join("/")}px`, "",
   ...problems.map((p) => `- ${p}`), problems.length ? "" : "", `스크린샷 ${shots.length}장: ${path.relative(ROOT, OUT) || "."}/`].join("\n");
 console.log(report);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");

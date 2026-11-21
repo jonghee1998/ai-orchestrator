@@ -8,6 +8,7 @@ const items = [
   { href: "/agents", label: "AI 팀", icon: "◉" },
   { href: "/briefing", label: "PM 브리핑", icon: "◆" },
   { href: "/patch-notes", label: "패치노트", icon: "✎" },
+  { href: "/architecture", label: "구조", icon: "⌘" },
 ];
 
 export function BottomNav() {
