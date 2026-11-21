@@ -1,2 +1,2 @@
-import { HomeScreen } from "@/components/workspace/WorkspaceScreens";
-export default function Page() { return <HomeScreen />; }
+import { LiveProjectsScreen } from "@/components/workspace/LiveScreens";
+export default function Page() { return <LiveProjectsScreen />; }

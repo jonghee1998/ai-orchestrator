@@ -1,5 +1,5 @@
-import { ProjectsScreen } from "@/components/workspace/WorkspaceScreens";
+import { LiveProjectsScreen } from "@/components/workspace/LiveScreens";
 export default async function Page({ params }: { params: Promise<{ projectId: string; taskId: string }> }) {
   const { projectId, taskId } = await params;
-  return <ProjectsScreen projectId={projectId} taskId={taskId} />;
+  return <LiveProjectsScreen projectId={projectId} taskId={taskId} />;
 }
