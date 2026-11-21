@@ -6,7 +6,7 @@ import { Card } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKst } from "@/lib/time/kst";
-import { FLAG_KEYS, latestUsage, type FlagKey, type OrchRun, type RepoView, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RunStep, type UsageWindow } from "@/lib/orch/model";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
 
@@ -141,6 +141,77 @@ export function OrchRunsPanel() {
           </Card>
         );
       })}
+    </section>
+  );
+}
+
+const BADGE_TONE: Record<PlanBadgeTone, string> = {
+  ok: "bg-ok/15 text-green-200",
+  warn: "bg-warn/20 text-yellow-100",
+  danger: "bg-danger/15 text-red-200",
+  muted: "bg-current/10 text-text-muted",
+};
+
+function PlanCard({ p, canApprove, busy, armed, onArm, onApprove }: { p: PendingPlan; canApprove: boolean; busy: boolean; armed: boolean; onArm(): void; onApprove(): void }) {
+  const badge = planReviewBadge(p.review);
+  return (
+    <div className="rounded-xl border border-border p-3" data-testid={`orch-plan-${short(p.repo)}-${p.number}`}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 break-words font-medium">{p.goal}</p>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${BADGE_TONE[badge.tone]}`}>{badge.text}</span>
+      </div>
+      <p className="mt-1 text-xs text-text-muted">{short(p.repo)} #{p.number} · 스텝 {p.steps}개</p>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {canApprove && (
+          <button type="button" disabled={busy} onClick={armed ? onApprove : onArm}
+            className={`min-h-11 rounded-lg px-3 text-sm font-semibold disabled:opacity-50 ${armed ? "bg-warn/20 text-yellow-100" : "border border-border"}`}>
+            {busy ? "승인 중…" : armed ? "정말 시작할까요? 승인" : "승인"}
+          </button>
+        )}
+        {canApprove && badge.revise && <span className="text-xs text-yellow-100">감사에서 수정 필요 상태입니다</span>}
+        <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-xs underline">계획 보기</a>
+      </div>
+    </div>
+  );
+}
+
+/** PM 브리핑 탭: orch:go 전의 '[plan]' Issue와 계획 감사 결과. 관리자는 2단계 탭으로 승인(orch:go). */
+export function OrchPlansPanel() {
+  const { state, reload } = useOrch();
+  const session = useSession();
+  const [armed, setArmed] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (state.kind !== "ok") return null; // OrchDecisionsPanel shows the loading / error note
+  const plans = state.data.repos.flatMap((v) => v.plans ?? []);
+  const errors = state.data.repos.filter((v) => v.plansError);
+  const canApprove = session.role === "admin" && state.data.canWrite;
+
+  async function approve(p: PendingPlan) {
+    const key = `${p.repo}#${p.number}`;
+    setBusy(key); setMsg(null);
+    try {
+      const r = await fetch("/api/orch", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify({ action: "approve", repo: p.repo, issue: p.number, hash: p.hash }) });
+      const res = approveMessage(r.status, await r.json().catch(() => null));
+      setMsg(res.text);
+      if (res.ok) await reload();
+    } catch { setMsg("승인 실패 · 네트워크 오류"); }
+    finally { setBusy(null); setArmed(null); }
+  }
+
+  const status = msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>;
+  const errorLines = errors.map((v) => <p key={v.repo} className="text-xs text-red-200">{short(v.repo)} 계획 불러오기 실패 · {v.plansError}</p>);
+  if (!plans.length) return <div className="space-y-2" data-testid="orch-plans">{status}{errorLines}<p className="text-sm text-text-faint">승인 대기 계획 없음</p></div>;
+  return (
+    <section aria-label="승인 대기 계획" className="space-y-2" data-testid="orch-plans">
+      <h2 className="text-sm font-semibold text-text-muted">승인 대기 계획 · {plans.length}</h2>
+      {status}
+      {errorLines}
+      {plans.map((p) => {
+        const key = `${p.repo}#${p.number}`;
+        return <PlanCard key={key} p={p} canApprove={canApprove} busy={busy !== null} armed={armed === key} onArm={() => { setArmed(key); setMsg(null); }} onApprove={() => approve(p)} />;
+      })}
+      {!canApprove && <p className="text-xs text-text-faint">{session.role !== "admin" ? "관리자 로그인에서만 승인할 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 승인할 수 없습니다."}</p>}
     </section>
   );
 }

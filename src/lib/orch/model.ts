@@ -266,8 +266,56 @@ export function usageStale(u: UsageView | null | undefined, nowMs: number, maxAg
 
 export type UsageRefresh = "fresh" | "requested" | "running" | "unavailable";
 
+/** A '[plan]' Issue waiting for the owner's orch:go, with the latest plan-review (audit) result. Built in plans.ts (server). */
+export interface PendingPlan {
+  repo: string;
+  number: number;
+  url: string;
+  goal: string;
+  steps: number;
+  /** Same as scripts/orch/plan-review.mjs planHash of the normalized plan. */
+  hash: string;
+  review: {
+    round: number;
+    verdict: "OK" | "REVISE" | "ERROR";
+    reviewer: string;
+    at: string | null;
+    hash: string;
+    /** The plan changed after this review (marker hash ≠ current hash). */
+    stale: boolean;
+  } | null;
+}
+
+/** Plan-review rounds per plan (scripts/orch/plan-review.mjs MAX_ROUNDS). */
+export const PLAN_REVIEW_ROUNDS = 3;
+
+export type PlanBadgeTone = "ok" | "warn" | "danger" | "muted";
+
+/** Audit badge for a pending plan card. A review of an older plan version is shown as stale, whatever its verdict. */
+export function planReviewBadge(review: PendingPlan["review"]): { text: string; tone: PlanBadgeTone; revise: boolean } {
+  if (!review) return { text: "감사 전", tone: "muted", revise: false };
+  if (review.stale) return { text: "감사 후 수정됨 · 재감사 대기", tone: "muted", revise: false };
+  const r = `${review.round}/${PLAN_REVIEW_ROUNDS}`;
+  if (review.verdict === "OK") return { text: `✅ 감사 OK ${r}`, tone: "ok", revise: false };
+  if (review.verdict === "REVISE") return { text: `✏️ 수정 필요 ${r}`, tone: "warn", revise: true };
+  return { text: "⚠️ 감사 실패", tone: "danger", revise: false };
+}
+
+/** Result line after POST { action: 'approve' } (status + JSON body from /api/orch). */
+export function approveMessage(status: number, body: { ok?: boolean; error?: string; detail?: string } | null): { ok: boolean; text: string } {
+  if (status === 200 && body?.ok) return { ok: true, text: "승인함 · orch:go 라벨을 붙였습니다. 엔진이 곧 시작합니다." };
+  const e = body?.error;
+  if (e === "plan_changed") return { ok: false, text: "계획이 바뀌었습니다. 새로고침 후 다시 확인하세요" };
+  if (e === "not_pending") return { ok: false, text: "승인 실패 · 이미 승인됐거나 승인 대기 계획이 아닙니다. 새로고침 후 확인하세요" };
+  if (e === "write_unconfigured") return { ok: false, text: "승인 실패 · 서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없습니다" };
+  if (e === "unauthorized" || status === 401 || status === 403) return { ok: false, text: "승인 실패 · 관리자 로그인이 필요합니다" };
+  return { ok: false, text: `승인 실패 · ${body?.detail ?? e ?? status}` };
+}
+
 export interface RepoView {
   repo: string;
+  plans: PendingPlan[];
+  plansError: string | null;
   usage?: UsageView | null;
   usageRefresh?: UsageRefresh;
   switches: Switches | null;
