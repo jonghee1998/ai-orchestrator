@@ -5,7 +5,7 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
-  { version: "1.7.1", date: "2026-11-21", pr: 0, title: "사용량 자동 최신화", items: ["상황판을 열 때 사용량이 1시간 넘게 지났으면 바로 새로 확인 요청 (GitHub 예약 실행 누락 대비)", "확인 중이면 AI 팀 탭에 안내 표시"] },
+  { version: "1.7.1", date: "2026-11-21", pr: 234, title: "사용량 자동 최신화", items: ["상황판을 열 때 사용량이 1시간 넘게 지났으면 바로 새로 확인 요청 (GitHub 예약 실행 누락 대비)", "확인 중이면 AI 팀 탭에 안내 표시"] },
   { version: "1.7.0", date: "2026-11-21", pr: 232, title: "ECC 2·3단계: 검수·계획 에이전트", items: ["Codex 대신 Opus가 검수할 때 code·security·typescript·react 검수 에이전트를 보조로 사용", "검수는 main의 설정만 사용해 구현자가 검수 지시를 바꿀 수 없음", "검수 댓글에 쓴 에이전트, 스텝 PR·수정 댓글에 구현 모델(승격 사유 포함) 표기", "PM 계획 작성용 planner·architect 에이전트"] },
   { version: "1.6.0", date: "2026-11-21", pr: 233, title: "패치노트 탭", items: ["하단에 '패치노트' 탭 추가", "버전·날짜·PR 번호와 핵심 변경을 최신순으로 표시"] },
   { version: "1.5.0", date: "2026-11-21", pr: 229, title: "데모·시뮬레이션 삭제", items: ["개발용 데모 모드·시뮬레이션·테스트 모드 기능 삭제", "상단 공통 머리글 제거, 실데이터 화면만 남김"] },
