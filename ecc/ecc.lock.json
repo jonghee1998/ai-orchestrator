@@ -22,6 +22,36 @@
       "source": "agents/react-build-resolver.md",
       "dest": ".claude/agents/react-build-resolver.md",
       "sha256": "a29dec6de18ac3d7b65c746f8133c1f14de5886592fa340c5c2a62fe7c4584e0"
+    },
+    {
+      "source": "agents/code-reviewer.md",
+      "dest": ".claude/agents/code-reviewer.md",
+      "sha256": "9dd23be23d65f18126e10f7680fc1eb2576ec54a427d076ff2f870bd0bafd5d2"
+    },
+    {
+      "source": "agents/security-reviewer.md",
+      "dest": ".claude/agents/security-reviewer.md",
+      "sha256": "813e4062bed5f42ab25dd02a0070f682058ffe9508198fcfdbb2c31296f93b7b"
+    },
+    {
+      "source": "agents/typescript-reviewer.md",
+      "dest": ".claude/agents/typescript-reviewer.md",
+      "sha256": "6b012db1a9039870c4f040975144a0d4e3592510d6332e2d260f02859ec66da1"
+    },
+    {
+      "source": "agents/react-reviewer.md",
+      "dest": ".claude/agents/react-reviewer.md",
+      "sha256": "17d0286b4f101e27b818cad026a6bfc1f9fd3e7f9b52c8414e6ea2a05481995a"
+    },
+    {
+      "source": "agents/planner.md",
+      "dest": ".claude/agents/planner.md",
+      "sha256": "63aba865206bac9cb5887542fb01b97656e7701faff98e091aa77057ba9860bc"
+    },
+    {
+      "source": "agents/architect.md",
+      "dest": ".claude/agents/architect.md",
+      "sha256": "6b8e1e8bd274995f3949691731f4334820c061d3054eaea3be2ce163386d1f24"
     }
   ]
 }

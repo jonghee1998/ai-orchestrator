@@ -96,6 +96,8 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 
 완공 보고서 "검사 결과" 표에 스텝별 구현 모델·**쓴 스킬과 보조 에이전트**·검수자·수정 횟수가 나옵니다. 스텝 PR 본문의 "도구 사용 (자동 기록)"에는 구현 Claude가 실제로 쓴 도구 횟수, 스킬(예: ECC `verification-loop`), 보조 에이전트(예: `build-error-resolver`), 돌린 검증 명령(typecheck/test/build)이 실행 기록에서 자동으로 뽑혀 남습니다. ECC 효과는 이 기록과 수정 횟수를 run별로 비교해서 봅니다.
 
+스텝 PR 본문과 "수정 N회차 반영" 댓글에는 그때 쓴 **구현 모델**(예: `opus (검수 2회 실패로 상향)`)이 표시됩니다. Codex 대신 Opus가 검수할 때는 ECC 검수 에이전트(`code-reviewer`, `security-reviewer`, `typescript-reviewer`, `react-reviewer`)를 보조로 부를 수 있고, 쓴 에이전트는 검수 댓글의 "도구 사용"에 남습니다. 검수 세션은 PR이 아니라 `main`의 `.claude/`를 쓰므로 구현자가 검수 지시를 바꿀 수 없습니다.
+
 ## 8. 처음 한 번 설정 (저장소마다)
 
 | 설정 | 위치 | 내용 |
