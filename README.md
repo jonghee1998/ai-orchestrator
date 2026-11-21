@@ -3,17 +3,22 @@
 ChatGPT · Codex · Claude Code · Pickle을 하나의 **모바일 웹 대시보드**에서 관리하고,
 **GitHub를 중심으로** 작업을 배정·협업하는 개인 AI 오케스트레이션 시스템.
 
-> 현재 상태: **Phase 1 (기반 구조)** — 대시보드 UI, 어댑터 인터페이스, GitHub 작업 큐 설계.
-> 에이전트와 작업 큐는 아직 **실제로 연결되지 않았습니다** (샘플 모드).
+> 현재 상태 (2026-11-21): **엔진 이전 중** — 작업 진행은 GitHub Actions 오케스트레이터(`scripts/orch/`)가 담당하고,
+> 이 앱은 진행 상황판으로 바뀝니다. 운영 방법은 **[운영 매뉴얼](docs/ORCH_MANUAL.md)**, 진행 추적은 #206.
 
 ## 에이전트 역할
 
 | 에이전트 | 역할 |
 |---|---|
-| ChatGPT | PM · 작업 분배, 진행 관리, 최종 검수 |
-| Codex | 코드 개발 및 수정 |
-| Claude Code | 코드 리뷰, 독립 검수 및 개발 지원 (1차 연결 대상) |
-| Pickle | 개인 데이터 수집 및 외부 서비스 작업 |
+| Claude (PM) | 요구사항 정리·계획 Issue 작성, 1시간마다 점검, 판단 필요 시 알림 |
+| Claude Sonnet / Opus | 스텝 단위 구현 (난이도·위험도에 따라 자동 선택, 반복 실패 시 Opus로 상향) |
+| Codex | 독립 검수 (기본). 쓸 수 없거나 OFF면 Claude Opus가 별도 세션에서 대체 검수 |
+| GitHub Actions | CI, 상태 전이, 스텝 PR 자동 머지, 위험도 판정 |
+| 사용자 | 시작 승인(`orch:go`), 위험한 변경의 최종 머지, 배포 |
+
+각 AI는 저장소 변수 `ORCH_SONNET` / `ORCH_OPUS` / `ORCH_CODEX` / `ORCH_PAUSED` / `ORCH_WINDOW`로 끄고 켭니다 (매뉴얼 4장).
+
+이전 방식(GPT PM, handoff coordinator)의 작업 기록은 `archived:pre-engine` 라벨과 `archive/pre-engine-2026-11-21` 브랜치에 보존되어 있습니다.
 
 ## 기술 스택
 

@@ -7,12 +7,7 @@ import { mutateControl } from "../control/service";
 import { retryDispatchRecord } from "./service";
 import { normalizeIssues, planDispatch } from "../github/work-queue";
 import { buildEvidence } from "../github/evidence";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-// Coordinator core is untyped ESM; load it with a real dynamic import (tests run from the repo root).
-const esmImport = new Function("s", "return import(s)") as (s: string) => Promise<{ agentOf: (i: unknown) => string | null }>;
-const agentOfP = esmImport(pathToFileURL(path.resolve("scripts/handoff/core.mjs")).href).then((m) => m.agentOf);
 
 const NOW = "2026-01-01T00:00:00.000Z";
 type Call = { method: string; url: string; body?: unknown; headers: Record<string, string> };
@@ -51,7 +46,7 @@ test("finding 1: claude-opus emits agent:opus; sonnet stays agent:claude; codex 
   }
 });
 
-test("finding 1 downstream: mocked Opus submission normalizes to opus in queue, plan, evidence and coordinator", async () => {
+test("finding 1 downstream: mocked Opus submission normalizes to opus in queue, plan and evidence", async () => {
   const s = new MemoryRunStore();
   await mutateControl(s, { action: "set_agent", agent: "claude-opus", enabled: true }, "t", NOW);
   await mutateControl(s, { action: "set_claude_provider", enabled: true }, "t", NOW);
@@ -63,7 +58,6 @@ test("finding 1 downstream: mocked Opus submission normalizes to opus in queue, 
   const [task] = queue(labels);
   assert.deepEqual([task.agent, task.status], ["opus", "ready"]);
   assert.equal(planDispatch([task])[0].eligible, true);
-  assert.equal((await agentOfP)({ labels: labels.map((name) => ({ name })) }), "opus");
   const ev = buildEvidence({ repo: "o/r", generatedAt: NOW, issues: [{ number: 1, title: "t", body: null, html_url: "u", state: "open", labels: labels.map((name) => ({ name })) } as never], pulls: [], comments: [], pullDetail: new Map(), commentsTruncated: false, pullsTruncated: false });
   assert.deepEqual([ev.issues[0].agent, ev.issues[0].status], ["opus", "ready"]);
 });
@@ -75,7 +69,6 @@ test("finding 2: Claude(review) -> Codex(ready) -> back to Claude replaces names
   assert.deepEqual(gh.labels(), ["priority:high", "bug", "agent:codex", "status:ready"]);
   let [t] = queue(gh.labels());
   assert.deepEqual([t.agent, t.status, planDispatch([t])[0].reasons], ["codex", "ready", []]);
-  assert.equal((await agentOfP)({ labels: gh.labels() }), "codex");
 
   // Codex finishes and someone flips status to review; return to Claude.
   gh.labels().splice(gh.labels().indexOf("status:ready"), 1, "status:review");
