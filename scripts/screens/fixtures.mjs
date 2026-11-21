@@ -2,9 +2,10 @@
 // 토큰·개인정보 없음. 저장소 이름도 가짜(example/orch-screens).
 export const REPO = "example/orch-screens";
 
-const plan = (goal, steps = 2) => "```json\n" + JSON.stringify({
+// tag: 스텝 제목·할 일 문구를 화면의 다른 문구와 겹치지 않게 만드는 고유 접두어.
+const plan = (goal, steps = 2, tag = "베타") => "```json\n" + JSON.stringify({
   goal,
-  steps: Array.from({ length: steps }, (_, i) => ({ id: i + 1, title: `스텝 ${i + 1}`, task: "x", done_when: ["d"] })),
+  steps: Array.from({ length: steps }, (_, i) => ({ id: i + 1, title: `${tag}공정 ${i + 1}단계 제목`, task: "x", done_when: [`${tag}공정 ${i + 1}단계 확인항목`] })),
 }, null, 2) + "\n```";
 const state = (s) => `<!-- orch-state:v1 ${JSON.stringify({ v: 1, ...s })} -->`;
 const issue = (number, title, body, extra = {}) => ({ number, title, body, html_url: `https://github.com/${REPO}/issues/${number}`, state: "open", ...extra });
@@ -13,11 +14,11 @@ const issue = (number, title, body, extra = {}) => ({ number, title, body, html_
 export function githubFixtures(now) {
   const iso = (minAgo) => new Date(now.getTime() - minAgo * 60_000).toISOString();
   const runsOpen = [
-    issue(11, "[plan] 상황판 시험 작업", `${plan("상황판 시험 작업", 3)}\n${state({ status: "implementing", step: 2, passed: { 1: true }, updatedAt: iso(3) })}`),
+    issue(11, "[plan] 상황판 시험 작업", `${plan("상황판 시험 작업", 3, "알파")}\n${state({ status: "implementing", step: 2, passed: { 1: true }, updatedAt: iso(3) })}`),
     issue(12, "[plan] 승인 대기 시험 작업", `${plan("승인 대기 시험 작업")}\n${state({ status: "awaiting_merge", step: 2, passed: { 1: true, 2: true }, finalPr: 99, updatedAt: iso(10) })}`),
   ];
   const runsDone = [
-    issue(10, "[plan] 끝난 시험 작업", `${plan("끝난 시험 작업", 1)}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 98, updatedAt: iso(120) })}`, { state: "closed" }),
+    issue(10, "[plan] 끝난 시험 작업", `${plan("끝난 시험 작업", 1, "감마")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 98, updatedAt: iso(120) })}`, { state: "closed" }),
   ];
   const usage = {
     v: 1, updatedAt: iso(5), claudeCheckedAt: iso(5), claudeError: null,

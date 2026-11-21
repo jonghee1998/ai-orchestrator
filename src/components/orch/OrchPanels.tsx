@@ -6,7 +6,7 @@ import { Card } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKst } from "@/lib/time/kst";
-import { FLAG_KEYS, latestUsage, type FlagKey, type OrchRun, type RepoView, type UsageWindow } from "@/lib/orch/model";
+import { FLAG_KEYS, latestUsage, type FlagKey, type OrchRun, type RepoView, type RunStep, type UsageWindow } from "@/lib/orch/model";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
 
@@ -53,20 +53,94 @@ function RunCard({ r }: { r: OrchRun }) {
   );
 }
 
-/** 프로젝트 탭: 저장소(프로젝트)별 진행 중인 작업. */
+const isEnded = (r: OrchRun) => r.status === "done" || r.status === "cancelled";
+const SUMMARY = "flex min-h-11 cursor-pointer items-center gap-2 py-2";
+
+function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
+  const icon = s.state === "passed" ? "✅" : s.state === "current" ? (blocked ? "⛔" : "▶") : "⬜";
+  const label = s.state === "passed" ? "통과" : s.state === "current" ? (blocked ? "멈춤" : "진행 중") : "대기";
+  return (
+    <details open={s.state === "current"} className="rounded-lg border border-border" data-testid={`orch-step-${s.id}`}>
+      <summary className={`${SUMMARY} px-2 text-sm`}>
+        <span aria-label={label} role="img" className="shrink-0">{icon}</span>
+        <span className="min-w-0 break-words">Step {s.id}. {s.title}</span>
+      </summary>
+      <ul className="space-y-1 px-2 pb-2 text-xs">
+        {s.checks.map((c, i) => (
+          <li key={i} className="flex gap-1.5">
+            <span aria-label={c.done ? "완료" : "미완료"} role="img" className="shrink-0">{c.done ? "✅" : "⬜"}</span>
+            <span className="min-w-0 break-words">{c.text}</span>
+          </li>
+        ))}
+        {!s.checks.length && <li className="text-text-faint">세부 할 일 없음</li>}
+      </ul>
+    </details>
+  );
+}
+
+function RunDetails({ r }: { r: OrchRun }) {
+  const showNow = !!r.step && !["done", "awaiting_merge", "finalizing"].includes(r.status) && r.steps.some((s) => s.state === "current");
+  const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${showNow ? ` · 지금 ${r.step}번` : ""}`;
+  const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
+  return (
+    <details open={r.needsUser || !isEnded(r)} className={`rounded-xl border px-3 ${tone(r)}`} data-testid={`orch-run-${short(r.repo)}-${r.number}`}>
+      <summary className="min-h-11 cursor-pointer py-2">
+        <span className="flex items-start justify-between gap-2">
+          <span className="min-w-0 break-words font-medium">{r.goal}</span>
+          <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs">{r.statusLabel}</span>
+        </span>
+        <span className="mt-1 block text-xs text-text-muted">{stepText}{r.retries ? ` · 수정 ${r.retries}회` : ""}</span>
+        <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-border" role="progressbar" aria-label="통과한 스텝" aria-valuemin={0} aria-valuemax={r.total} aria-valuenow={r.passed}>
+          <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+        </span>
+      </summary>
+      <div className="space-y-1 pb-3">
+        <p className="text-xs"><a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline">#{r.number} 열기</a>{r.finalPr ? ` · 최종 PR #${r.finalPr}` : ""}</p>
+        {r.held && <p className="text-xs text-yellow-100">⏸️ {r.held}</p>}
+        {r.reason && <p className="break-words text-xs text-red-200">⛔ {r.reason}</p>}
+        <p className="text-xs">다음 · {r.next}</p>
+        {r.updatedAt && <p className="text-[11px] text-text-faint">갱신 {formatKst(r.updatedAt)}</p>}
+        <div className="space-y-1 pt-1">
+          {r.steps.map((s) => <StepDetails key={s.id} s={s} blocked={r.status === "blocked"} />)}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+/** 프로젝트 탭: 저장소(프로젝트) → 작업 → 스텝 → 세부 할 일, 모두 접고 펼 수 있음. */
 export function OrchRunsPanel() {
   const { state } = useOrch();
   return (
     <section aria-label="자동 진행 작업" className="space-y-2" data-testid="orch-runs">
       <h2 className="text-sm font-semibold text-text-muted">자동 진행 작업</h2>
-      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => (
-        <Card key={v.repo} className="space-y-2">
-          <p className="font-semibold">{short(v.repo)}</p>
-          {v.runsError && <p className="text-xs text-red-200">불러오기 실패 · {v.runsError}</p>}
-          {v.runs.map((r) => <RunCard key={r.number} r={r} />)}
-          {!v.runs.length && !v.runsError && <p className="text-sm text-text-faint">진행 중인 작업 없음</p>}
-        </Card>
-      ))}
+      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => {
+        const active = v.runs.filter((r) => !isEnded(r));
+        const ended = v.runs.filter(isEnded);
+        const needs = v.runs.filter((r) => r.needsUser).length;
+        return (
+          <Card key={v.repo}>
+            <details open data-testid={`orch-project-${short(v.repo)}`}>
+              <summary className={`${SUMMARY} flex-wrap`}>
+                <span className="font-semibold">{short(v.repo)}</span>
+                <span className="text-xs text-text-muted">진행 중 {active.length}개</span>
+                {needs > 0 && <span className="rounded-full bg-warn/20 px-2 py-0.5 text-xs">확인 필요 {needs}개</span>}
+              </summary>
+              <div className="space-y-2 pb-1">
+                {v.runsError && <p className="text-xs text-red-200">불러오기 실패 · {v.runsError}</p>}
+                {active.map((r) => <RunDetails key={r.number} r={r} />)}
+                {!active.length && !v.runsError && <p className="text-sm text-text-faint">진행 중인 작업 없음</p>}
+                {ended.length > 0 && (
+                  <details>
+                    <summary className={`${SUMMARY} text-sm text-text-muted`}>끝난 작업 {ended.length}개</summary>
+                    <div className="space-y-2 pb-1">{ended.map((r) => <RunDetails key={r.number} r={r} />)}</div>
+                  </details>
+                )}
+              </div>
+            </details>
+          </Card>
+        );
+      })}
     </section>
   );
 }
