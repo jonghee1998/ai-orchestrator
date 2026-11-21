@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approveMessage, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
+import { STATUS_LABEL, approveMessage, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
 import { readRepo, writeSwitch } from "./github";
 
 const planBlock = (steps = 2) => "```json\n" + JSON.stringify({
@@ -35,6 +35,10 @@ test("parseRun: plan + state marker → view model; non-plan issues ignored", ()
   const merge = parseRun("o/r", issue(6, { status: "awaiting_merge", finalPr: 20 }))!;
   assert.equal(merge.needsUser, true);
   assert.match(merge.next, /#20/);
+  assert.equal(STATUS_LABEL.awaiting_merge, "반영 승인 대기");
+  assert.equal(merge.next, "완공 보고서 확인 후 반영 (최종 PR #20)");
+  assert.equal(parseRun("o/r", issue(9, { status: "awaiting_merge" }))!.next, "완공 보고서 확인 후 반영 (최종 PR #?)");
+  assert.equal(parseRun("o/r", issue(10, { status: "finalizing" }))!.next, "최종 CI 통과 시 자동 반영");
 
   const bogus = parseRun("o/r", issue(7, { status: "hacked" }))!;
   assert.equal(bogus.status, "waiting", "unknown status never shown as progress");

@@ -93,7 +93,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목"], forbid: ["설정되지 않았습니다"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목", "반영 승인 대기"], forbid: ["설정되지 않았습니다"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
