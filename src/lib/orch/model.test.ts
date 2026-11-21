@@ -218,3 +218,9 @@ test("parseRun steps: malformed input does not throw", () => {
   assert.equal(r.steps[1].title.length, 200);
   assert.deepEqual(r.steps[1].checks.map((c) => c.text.length), [200, 4]);
 });
+
+test("parseRun: prose mention of the state marker in the plan context does not break state (run #239)", () => {
+  const body = "설명: <!-- orch-state:v1 --> 마커를 읽는다\n\n```json\n" + JSON.stringify({ goal: "g", steps: [{ id: 1, title: "t", task: "x", done_when: ["d"] }] }) + "\n```\n<!-- orch-state:v1 " + JSON.stringify({ v: 1, status: "implementing", step: 1 }) + " -->";
+  const r = parseRun("o/r", { number: 1, title: "[plan] g", html_url: "u", body });
+  assert.equal(r?.status, "implementing");
+});

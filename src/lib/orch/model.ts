@@ -56,7 +56,13 @@ export interface IssueLike {
   labels?: { name?: string }[];
 }
 
-const STATE_RE = /<!-- orch-state:v1 ([\s\S]*?) -->/;
+/** Engine state marker: one-line JSON with < > escaped; the last valid one wins (a plan may mention the marker in prose). */
+const STATE_RE = /<!-- orch-state:v1 (\{[^<>\n]*\}) -->/g;
+const lastState = (body: string) => {
+  let found: ReturnType<typeof parseJson> = null;
+  for (const m of body.matchAll(STATE_RE)) { const j = parseJson(m[1]); if (j && j.v === 1) found = j; }
+  return found;
+};
 const PLAN_RE = /```json[^\n]*\n([\s\S]*?)```/;
 const STATUSES = new Set<string>(Object.keys(STATUS_LABEL));
 
@@ -76,7 +82,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
   const plan = parseJson(PLAN_RE.exec(body)?.[1]);
   const steps = Array.isArray(plan?.steps) ? (plan!.steps as unknown[]) : null;
   if (!plan || !steps || !str(plan.goal)) return null;
-  const st = parseJson(STATE_RE.exec(body)?.[1]);
+  const st = lastState(body);
   const raw = st && st.v === 1 ? str(st.status) : null;
   const status: OrchStatus = raw && STATUSES.has(raw) ? (raw as OrchStatus) : "waiting";
   const passedMap = obj(st?.passed) ?? {};
