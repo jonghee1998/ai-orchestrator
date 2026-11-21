@@ -13,6 +13,10 @@ const REQUIRED = [
   '.claude/skills/tdd-workflow/SKILL.md',
   '.claude/agents/build-error-resolver.md',
   '.claude/agents/react-build-resolver.md',
+  '.claude/agents/code-reviewer.md',
+  '.claude/agents/security-reviewer.md',
+  '.claude/agents/typescript-reviewer.md',
+  '.claude/agents/react-reviewer.md',
 ];
 
 // 파일 내용이 lock 의 sha256 과 일치하는지 검사한다. 불일치 목록을 반환.
@@ -37,7 +41,7 @@ test('lock 메타데이터', () => {
   assert.equal(lock.package, 'ecc-universal');
   assert.equal(lock.version, '2.2.3');
   assert.equal(lock.sourceCommit, 'c05b2d6');
-  assert.equal(lock.files.length, 4);
+  assert.equal(lock.files.length, 8);
   for (const f of lock.files) assert.match(f.sha256, /^[0-9a-f]{64}$/);
 });
 

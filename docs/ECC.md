@@ -13,6 +13,12 @@
 | 스킬 | `.claude/skills/tdd-workflow/SKILL.md` |
 | 에이전트 | `.claude/agents/build-error-resolver.md` |
 | 에이전트 | `.claude/agents/react-build-resolver.md` |
+| 검수 에이전트 | `.claude/agents/code-reviewer.md` |
+| 검수 에이전트 | `.claude/agents/security-reviewer.md` |
+| 검수 에이전트 | `.claude/agents/typescript-reviewer.md` |
+| 검수 에이전트 | `.claude/agents/react-reviewer.md` |
+
+검수 에이전트 4종은 Codex 대신 Opus가 검수할 때(`claude-review`) 보조 검토로 씁니다. 검수 세션은 PR이 아니라 `main`의 `.claude/`를 쓰므로, 구현자가 PR에서 검수 지시를 바꿀 수 없습니다. 최종 판정(PASS/FAIL)은 Opus 본인이 내리고, 사용한 에이전트는 검수 댓글의 '도구 사용'에 자동 기록됩니다.
 
 사용 규칙은 [CLAUDE.md](../CLAUDE.md)의 'ECC 보조 도구' 절을 따릅니다.
 
