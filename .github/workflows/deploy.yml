@@ -1,0 +1,56 @@
+# 운영 배포: main에 10개 업데이트(머지)가 쌓이면 Vercel Deploy Hook으로 한 번 배포한다.
+# Vercel 자동 배포는 vercel.json에서 꺼 두었다(무료 플랜 하루 배포 한도 보호).
+# 마지막으로 배포한 커밋은 태그 `prod-deployed`로 기억한다. 바로 배포하려면 Actions → deploy → Run workflow (force).
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force: { description: "개수와 상관없이 지금 배포", type: boolean, default: true }
+
+permissions: {}
+
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # move the prod-deployed tag
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Count updates since last deploy
+        id: count
+        env:
+          EVERY: ${{ vars.ORCH_DEPLOY_EVERY || '10' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: |
+          if git rev-parse -q --verify refs/tags/prod-deployed >/dev/null; then
+            n=$(git rev-list --count --first-parent prod-deployed..HEAD)
+          else
+            n=$EVERY   # first run: deploy once to set the baseline
+          fi
+          echo "n=$n" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE" = "true" ] || [ "$n" -ge "$EVERY" ]; then echo "go=true" >> "$GITHUB_OUTPUT"; fi
+          echo "### 운영 배포" >> "$GITHUB_STEP_SUMMARY"
+          echo "마지막 배포 이후 업데이트 ${n}개 / 기준 ${EVERY}개 · 강제: ${FORCE:-false}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Trigger Vercel deploy hook
+        if: steps.count.outputs.go == 'true'
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "::error::VERCEL_DEPLOY_HOOK 시크릿이 없습니다 (docs/ORCH_MANUAL.md 배포 절)."; exit 1; fi
+          curl -fsS -X POST "$HOOK" > /dev/null
+          echo "배포 요청 보냄 ($(git rev-parse --short HEAD))" >> "$GITHUB_STEP_SUMMARY"
+      - name: Remember deployed commit
+        if: steps.count.outputs.go == 'true'
+        run: |
+          git tag -f prod-deployed HEAD
+          git push -f origin refs/tags/prod-deployed

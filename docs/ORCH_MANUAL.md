@@ -150,3 +150,14 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 - **처음 한 번 (폰으로)**: ① 저장소 Settings → Secrets and variables → Actions → New secret → 이름 `CODEX_AUTH_KEY`, 값은 20자 이상 아무 문자열 ② Actions → `codex-login` → Run workflow ③ 실행 요약(또는 `orch:usage` Issue 댓글)에 나온 주소를 열고 코드를 넣어 승인.
 - 로그인이 풀리면 상황판과 `orch:usage` Issue에 "폰 로그인 필요"가 뜨고, ②~③만 다시 하면 돼요. 이 로그인 정보는 사용량 조회에만 쓰여요.
 - 문서화되지 않은 정보라 형식이 바뀌면 "확인 불가"로 표시돼요. 엔진 동작에는 영향이 없어요.
+
+
+## 운영 배포 (10개 업데이트마다)
+
+Vercel 자동 배포는 꺼져 있습니다(`vercel.json`). 무료 플랜의 하루 배포 한도를 보호하기 위해서입니다. 대신 `deploy` 워크플로가 main에 업데이트(머지)가 **10개** 쌓일 때마다 Vercel Deploy Hook으로 한 번 배포합니다.
+
+- 마지막으로 배포한 커밋은 태그 `prod-deployed`로 기억합니다. 개수는 그 이후 main에 머지된 수입니다.
+- 지금 바로 배포하려면 GitHub 앱 → Actions → `deploy` → **Run workflow**를 누릅니다(기본값이 강제 배포).
+- 기준 개수는 저장소 변수 `ORCH_DEPLOY_EVERY`로 바꿀 수 있습니다(기본 10).
+- 한 번만 설정하면 됩니다: Vercel → `ai-orchestrator` → Settings → Git → **Deploy Hooks**에서 이름 `orch`, 브랜치 `main`으로 만들고, 나온 URL을 GitHub 저장소 Settings → Secrets and variables → Actions → **New repository secret** `VERCEL_DEPLOY_HOOK`에 넣습니다.
+- 배포 전 화면은 각 PR의 CI `screens` 스크린샷(Artifacts)으로 확인합니다.
