@@ -176,12 +176,33 @@ function Bar({ label, w }: { label: string; w: UsageWindow | null }) {
 
 /** AI 팀 탭: 구독 사용량 (계정 전체 기준, orch:usage 스냅샷). */
 export function OrchUsagePanel() {
-  const { state } = useOrch();
+  const { state, reload } = useOrch();
+  const session = useSession();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   if (state.kind !== "ok") return <section aria-label="AI 사용량" className="space-y-2"><h2 className="text-lg font-semibold">AI 사용량</h2><Card><StateNote kind={state.kind} /></Card></section>;
   const u = latestUsage(state.data.repos);
+  const canRefresh = session.role === "admin" && state.data.canWrite;
+
+  async function refresh() {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/orch", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify({ action: "refresh-usage" }) });
+      const j = (await r.json().catch(() => null)) as { ok?: boolean; results?: { result: string }[]; error?: string } | null;
+      const running = j?.results?.some((x) => x.result === "running");
+      setMsg(r.ok && j?.ok ? (running ? "방금 확인을 시작했습니다 · 1~2분 뒤 자동 반영" : "확인 요청함 · 1~2분 뒤 자동 반영") : `요청 실패 · ${j?.error ?? r.status}`);
+      await reload();
+    } catch { setMsg("요청 실패 · 네트워크 오류"); }
+    finally { setBusy(false); }
+  }
+
   return (
     <section aria-label="AI 사용량" className="space-y-2" data-testid="orch-usage">
-      <h2 className="text-lg font-semibold">AI 사용량</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold">AI 사용량</h2>
+        {canRefresh && <button type="button" onClick={refresh} disabled={busy} data-testid="usage-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "요청 중…" : "↻ 지금 확인"}</button>}
+      </div>
+      {msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>}
       {u && state.data.repos.some((r) => r.usageRefresh === "requested" || r.usageRefresh === "running") && <p className="text-[11px] text-text-faint" data-testid="usage-refreshing">값이 1시간 넘게 지나 새로 확인하는 중입니다. 1~2분 뒤 새로고침하면 반영됩니다.</p>}
       {!u ? <Card><p className="text-sm text-text-muted">아직 사용량 기록이 없습니다. 엔진의 usage 작업이 처음 돌면 표시됩니다.</p></Card> : <>
         <Card className="space-y-3">

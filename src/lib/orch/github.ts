@@ -75,12 +75,19 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
  */
 export async function refreshUsageIfStale(repo: string, usage: UsageView | null | undefined, env: Env, nowMs = Date.now(), f: Fetch = fetch): Promise<UsageRefresh> {
   if (!usageStale(usage, nowMs)) return "fresh";
+  return requestUsageRun(repo, env, nowMs, USAGE_RETRY_MS, f);
+}
+
+/** Manual refresh button: run usage.yml now unless one started in the last 2 minutes. */
+export const USAGE_MANUAL_GAP_MS = 2 * 60_000;
+
+export async function requestUsageRun(repo: string, env: Env, nowMs = Date.now(), minGapMs = USAGE_MANUAL_GAP_MS, f: Fetch = fetch): Promise<UsageRefresh> {
   const token = writeToken(env);
   if (!token) return "unavailable";
   try {
     const j = (await call(f, token, "GET", `/repos/${repo}/actions/workflows/usage.yml/runs?per_page=1`)) as { workflow_runs?: { created_at?: string }[] };
     const last = Date.parse(j.workflow_runs?.[0]?.created_at ?? "");
-    if (Number.isFinite(last) && nowMs - last < USAGE_RETRY_MS) return "running";
+    if (Number.isFinite(last) && nowMs - last < minGapMs) return "running";
     await call(f, token, "POST", `/repos/${repo}/actions/workflows/usage.yml/dispatches`, { ref: "main" });
     return "requested";
   } catch {
