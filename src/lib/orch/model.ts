@@ -312,10 +312,46 @@ export function approveMessage(status: number, body: { ok?: boolean; error?: str
   return { ok: false, text: `승인 실패 · ${body?.detail ?? e ?? status}` };
 }
 
+/** One model's opinion on an idea (scripts/orch/idea-review.mjs clean()). */
+export interface Opinion {
+  value: "high" | "medium" | "low";
+  effort: "S" | "M" | "L";
+  risk: "high" | "medium" | "low";
+  steps: number | null;
+  recommend: "now" | "later" | "hold";
+  reasons: string;
+}
+
+/** Owner-authored '[idea] 항목' Issue + the latest Actions-bot review (orch-idea:v1 marker). */
+export interface Idea {
+  repo: string;
+  number: number;
+  url: string;
+  /** Title without the '[idea] ' prefix. */
+  title: string;
+  /** Issue body (the owner's own opinion), at most 4000 chars. */
+  mine: string;
+  createdAt: string | null;
+  closed: boolean;
+  /** collecting = no review yet, stale = text changed after the review, codex_pending = Claude only so far. */
+  status: "collecting" | "codex_pending" | "done" | "stale";
+  review: {
+    recommend: "now" | "later" | "hold";
+    summary: string;
+    agree: string;
+    disagree: string;
+    at: string | null;
+    claude: Opinion | null;
+    codex: Opinion | null;
+  } | null;
+}
+
 export interface RepoView {
   repo: string;
   plans: PendingPlan[];
   plansError: string | null;
+  ideas: Idea[];
+  ideasError: string | null;
   usage?: UsageView | null;
   usageRefresh?: UsageRefresh;
   switches: Switches | null;

@@ -1,11 +1,15 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
 //   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
-//           pending '[plan]' Issues + their plan-review comments
-//   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch)
-// Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read, Variables read/write, Actions read/write).
+//           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments
+//   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch);
+//           'orch:go' label on plan approval; one '[idea]' Issue per idea
+// Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read and write, Variables read/write, Actions read/write).
+//   Issues: Read and write 필요(계획 승인·아이디어 등록), 토큰 주인이 저장소 소유자여야 등록한 아이디어가 화면에 보임
+//   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
-import { USAGE_RETRY_MS, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type OrchRun, type PendingPlan, type RepoView, type UsageRefresh, type UsageView } from "./model";
+import { USAGE_RETRY_MS, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type UsageRefresh, type UsageView } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
+import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Fetch = typeof fetch;
@@ -74,9 +78,24 @@ export async function readPendingPlans(f: Fetch, token: string, repo: string): P
   return list.filter((p): p is PendingPlan => p !== null);
 }
 
+/** Ideas read per repo (newest first); each costs one comments request. */
+export const MAX_IDEAS = 15;
+
+export async function readIdeas(f: Fetch, token: string, repo: string): Promise<Idea[]> {
+  const issues = (await call(f, token, "GET", `/repos/${repo}/issues?state=all&sort=created&direction=desc&per_page=50`)) as IdeaIssue[];
+  const candidates = (Array.isArray(issues) ? issues : []).filter((i) => isIdeaCandidate(repo, i)).slice(0, MAX_IDEAS);
+  const list = await Promise.all(candidates.map(async (i) => {
+    const comments = (await call(f, token, "GET", `/repos/${repo}/issues/${i.number}/comments?per_page=100`)) as IdeaComment[];
+    return parseIdea(repo, i, Array.isArray(comments) ? comments : []);
+  }));
+  return list.filter((x): x is Idea => x !== null);
+}
+
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw, usage, plans] = await Promise.allSettled([readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo)]);
+  const [runs, sw, usage, plans, ideas] = await Promise.allSettled([
+    readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo), readIdeas(f, token, repo),
+  ]);
   return {
     repo,
     usage: usage.status === "fulfilled" ? usage.value : null,
@@ -86,6 +105,8 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     switchesError: sw.status === "rejected" ? describe(sw.reason) : null,
     plans: plans.status === "fulfilled" ? plans.value : [],
     plansError: plans.status === "rejected" ? describe(plans.reason) : null,
+    ideas: ideas.status === "fulfilled" ? ideas.value : [],
+    ideasError: ideas.status === "rejected" ? describe(ideas.reason) : null,
   };
 }
 
@@ -152,6 +173,30 @@ export async function approvePlan(repo: string, issue: number, hash: string, env
   if (plan.hash !== hash) return { ok: false, error: "plan_changed" };
   await call(f, token, "POST", `/repos/${repo}/issues/${issue}/labels`, { labels: ["orch:go"] });
   return { ok: true, issue };
+}
+
+export const MAX_IDEA_TITLE = 80;
+export type IdeaInput = { ok: true; title: string; body: string } | { ok: false; error: "bad_title" | "bad_body" };
+
+/** Title 1~80 chars after trim, single line; body 0~4000 chars (missing/null = empty). */
+export function checkIdea(title: unknown, body: unknown): IdeaInput {
+  const t = typeof title === "string" ? title.trim() : "";
+  if (!t || t.length > MAX_IDEA_TITLE || /[\r\n]/.test(t)) return { ok: false, error: "bad_title" };
+  const b = body === undefined || body === null ? "" : body;
+  if (typeof b !== "string" || b.length > MAX_MINE) return { ok: false, error: "bad_body" };
+  return { ok: true, title: t, body: b };
+}
+
+export type CreateIdeaResult = { ok: true; issue: number; url: string | null } | { ok: false; error: "bad_title" | "bad_body" };
+
+/** Register one idea: validate, then a single POST of an '[idea] 항목' Issue. Throws GitHubError (503 = no write token). */
+export async function createIdea(repo: string, title: unknown, body: unknown, env: Env, f: Fetch = fetch): Promise<CreateIdeaResult> {
+  const input = checkIdea(title, body);
+  if (!input.ok) return input;
+  const token = writeToken(env);
+  if (!token) throw new GitHubError(503, "ORCH_GITHUB_TOKEN not configured");
+  const r = (await call(f, token, "POST", `/repos/${repo}/issues`, { title: `${IDEA_PREFIX} ${input.title}`, body: input.body })) as { number?: number; html_url?: string } | null;
+  return { ok: true, issue: typeof r?.number === "number" ? r.number : 0, url: typeof r?.html_url === "string" ? r.html_url : null };
 }
 
 export { describe as describeGitHubError };
