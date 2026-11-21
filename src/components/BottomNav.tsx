@@ -7,6 +7,7 @@ const items = [
   { href: "/projects", label: "프로젝트", icon: "▤" },
   { href: "/agents", label: "AI 팀", icon: "◉" },
   { href: "/briefing", label: "PM 브리핑", icon: "◆" },
+  { href: "/patch-notes", label: "패치노트", icon: "✎" },
 ];
 
 export function BottomNav() {
