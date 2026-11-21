@@ -37,3 +37,6 @@ credentials.json
 # editor
 .vscode/
 .idea/
+
+# Impeccable engine binary (downloaded by the skill launcher, never committed)
+.claude/skills/impeccable/scripts/bin/

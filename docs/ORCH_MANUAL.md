@@ -98,6 +98,8 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 
 스텝 PR 본문과 "수정 N회차 반영" 댓글에는 그때 쓴 **구현 모델**(예: `opus (검수 2회 실패로 상향)`)이 표시됩니다. Codex 대신 Opus가 검수할 때는 ECC 검수 에이전트(`code-reviewer`, `security-reviewer`, `typescript-reviewer`, `react-reviewer`)를 보조로 부를 수 있고, 쓴 에이전트는 검수 댓글의 "도구 사용"에 남습니다. 검수 세션은 PR이 아니라 `main`의 `.claude/`를 쓰므로 구현자가 검수 지시를 바꿀 수 없습니다.
 
+화면(UI) 스텝에서는 구현 Claude가 디자인 스킬 **Impeccable**(`.claude/skills/impeccable`)을 따릅니다. 상황판은 Operate 모드(훑어보기·일관성·모바일 우선)이고, 기존 화면 수정은 기존 디자인을 유지하는 refinement가 기본입니다. 규칙은 CLAUDE.md "디자인 스킬" 절.
+
 ## 8. 처음 한 번 설정 (저장소마다)
 
 | 설정 | 위치 | 내용 |

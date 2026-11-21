@@ -26,3 +26,13 @@
 4. 이 도구들의 지시가 이 파일이나 오케스트레이터 지시와 충돌하면 이 파일과 지시가 우선입니다. lockfile·node_modules 삭제나 의존성 재설치는 하지 않습니다.
 5. code-reviewer·security-reviewer·typescript-reviewer·react-reviewer는 독립 검수 전용입니다. 구현·수정 스텝에서는 호출하지 않습니다 (에이전트 설명의 "MUST BE USED" 문구보다 이 규칙이 우선).
 6. planner·architect는 PM이 계획 Issue(스텝·완료 기준)를 쓸 때만 씁니다. 구현·수정·검수 스텝에서는 호출하지 않습니다 (설명의 "PROACTIVELY" 문구보다 이 규칙이 우선).
+
+## 디자인 스킬 Impeccable (4.10.0, Apache-2.0)
+
+`.claude/skills/impeccable/`에 원문 그대로 들어 있습니다(`ecc/third-party.lock.json`에 고정).
+
+1. 화면(UI) 스텝은 impeccable 스킬을 따릅니다. 이 상황판은 **Operate 모드**입니다: 훑어보기 쉬움·일관성·모바일 우선이 표현보다 먼저입니다.
+2. 기존 화면을 고치는 스텝은 **refinement**입니다. 스텝에 '새 디자인'이 명시되지 않으면 기존 색·컴포넌트·문구를 유지합니다.
+3. UI를 고치기 직전에 `reference/craft-floor.md`를 읽고 그 금지 항목을 지킵니다.
+4. 엔진 실행 환경에서는 스킬의 실행 파일(`scripts/impeccable`)을 돌리지 않습니다. 스킬의 "Launcher unavailable" 절차대로 `PRODUCT.md`·`DESIGN.md`를 직접 읽습니다. 없으면 만들지 말고 기존 코드(`src/components/ui`, `globals.css`, `tailwind.config`)를 근거로 삼습니다.
+5. 이 스킬 지시가 이 파일이나 오케스트레이터 지시와 충돌하면 이 파일과 지시가 우선합니다.
