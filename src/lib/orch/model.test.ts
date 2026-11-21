@@ -115,3 +115,50 @@ test("usage snapshot: parsed from marker, invalid numbers dropped, freshest repo
   assert.deepEqual([noQuota.codex.weekly, noQuota.codex.needsLogin], [null, true]);
   assert.equal(latestUsage([{ usage: noQuota }, { usage: u }, {}])!.updatedAt, "2026-11-20T22:14:00Z");
 });
+
+import { usageStale } from "./model";
+import { refreshUsageIfStale } from "./github";
+
+test("usage refresh: stale snapshot asks GitHub for a usage run, throttled; fresh or no token does nothing", async () => {
+  const now = Date.parse("2026-11-21T04:00:00Z");
+  const u = (at: string | null) => ({ ...(parseUsage(`<!-- orch-usage:v1 {"v":1,"updatedAt":"2026-11-21T00:00:00Z"} -->`) as NonNullable<ReturnType<typeof parseUsage>>), updatedAt: at });
+  assert.equal(usageStale(null, now), false, "no usage issue → not set up");
+  assert.equal(usageStale(u("2026-11-21T03:30:00Z"), now), false);
+  assert.equal(usageStale(u("2026-11-21T00:29:00Z"), now), true);
+  assert.equal(usageStale(u(null), now), true);
+
+  const calls: string[] = [];
+  const fake = (lastRun: string | null) => (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push(`${init?.method} ${String(url).replace(/^https:\/\/api\.github\.com/, "")}`);
+    if (String(url).includes("/runs")) return new Response(JSON.stringify({ workflow_runs: lastRun ? [{ created_at: lastRun }] : [] }), { status: 200 });
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  const env = { ORCH_GITHUB_TOKEN: "t" };
+
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T03:30:00Z"), env, now, fake(null)), "fresh");
+  assert.equal(calls.length, 0);
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T00:29:00Z"), {}, now, fake(null)), "unavailable", "reads never dispatch without the write token");
+  assert.equal(calls.length, 0);
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T00:29:00Z"), env, now, fake("2026-11-21T03:55:00Z")), "running");
+  assert.deepEqual(calls, ["GET /repos/o/r/actions/workflows/usage.yml/runs?per_page=1"]);
+  calls.length = 0;
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T00:29:00Z"), env, now, fake("2026-11-21T00:28:00Z")), "requested");
+  assert.deepEqual(calls, ["GET /repos/o/r/actions/workflows/usage.yml/runs?per_page=1", "POST /repos/o/r/actions/workflows/usage.yml/dispatches"]);
+});
+
+import { requestUsageRun } from "./github";
+
+test("manual usage refresh: dispatches unless a run started within 2 minutes", async () => {
+  const now = Date.parse("2026-11-21T04:00:00Z");
+  const calls: string[] = [];
+  const fake = (lastRun: string) => (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push(`${init?.method}`);
+    if (String(url).includes("/runs")) return new Response(JSON.stringify({ workflow_runs: [{ created_at: lastRun }] }), { status: 200 });
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  const env = { ORCH_GITHUB_TOKEN: "t" };
+  assert.equal(await requestUsageRun("o/r", env, now, undefined, fake("2026-11-21T03:59:00Z")), "running");
+  assert.equal(await requestUsageRun("o/r", env, now, undefined, fake("2026-11-21T03:50:00Z")), "requested", "10 minutes ago is fine for a manual press");
+  assert.deepEqual(calls, ["GET", "GET", "POST"]);
+  assert.equal(await requestUsageRun("o/r", {}, now, undefined, fake("2026-11-21T03:50:00Z")), "unavailable");
+});

@@ -1,13 +1,14 @@
 // Orchestrator engine status + ON/OFF switches for the mobile dashboard.
 //   GET  (read)          → runs and switches for every repo in ORCH_REPOS
 //   POST (admin + CSRF)  → { repo, key, value } writes one ORCH_* repository variable and wakes the engine
+//                          { action: "refresh-usage" } runs usage.yml now in every configured repo (2-minute throttle)
 // The engine (GitHub Actions) reads the same variables before every new dispatch, so OFF is enforced
 // even when this app is down.
 import { NextResponse } from "next/server";
 import { authorize } from "@/lib/session/guard";
 import { requireRead, NOSTORE } from "../_auth";
 import { configuredRepos, switchChange } from "@/lib/orch/model";
-import { GitHubError, describeGitHubError, readRepo, readToken, writeSwitch, writeToken } from "@/lib/orch/github";
+import { GitHubError, describeGitHubError, readRepo, readToken, refreshUsageIfStale, requestUsageRun, writeSwitch, writeToken } from "@/lib/orch/github";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,7 +18,10 @@ export async function GET(req: Request): Promise<Response> {
   if (denied) return denied;
   const repos = configuredRepos(process.env);
   if (!repos.length || !readToken(process.env)) return NextResponse.json({ mode: "unconfigured" }, { headers: NOSTORE });
-  const views = await Promise.all(repos.map((r) => readRepo(r, process.env)));
+  const views = await Promise.all(repos.map(async (r) => {
+    const v = await readRepo(r, process.env);
+    return v.usage ? { ...v, usageRefresh: await refreshUsageIfStale(r, v.usage, process.env) } : v;
+  }));
   return NextResponse.json(
     { mode: "live", generatedAt: new Date().toISOString(), canWrite: Boolean(writeToken(process.env)), repos: views },
     { headers: NOSTORE },
@@ -31,6 +35,12 @@ export async function POST(req: Request): Promise<Response> {
   if (raw.length > 2048) return NextResponse.json({ error: "too_large" }, { status: 413, headers: NOSTORE });
   let b: Record<string, unknown>;
   try { b = JSON.parse(raw); } catch { return NextResponse.json({ error: "bad_request" }, { status: 400, headers: NOSTORE }); }
+  if (b?.action === "refresh-usage") {
+    const repos = configuredRepos(process.env);
+    if (!writeToken(process.env)) return NextResponse.json({ error: "write_unconfigured" }, { status: 503, headers: NOSTORE });
+    const results = await Promise.all(repos.map(async (r) => ({ repo: r, result: await requestUsageRun(r, process.env) })));
+    return NextResponse.json({ ok: results.some((x) => x.result !== "unavailable"), results }, { headers: NOSTORE });
+  }
   const repo = typeof b?.repo === "string" ? b.repo : "";
   if (!configuredRepos(process.env).includes(repo)) return NextResponse.json({ error: "unknown_repo" }, { status: 400, headers: NOSTORE });
   const change = switchChange(b.key, b.value);
