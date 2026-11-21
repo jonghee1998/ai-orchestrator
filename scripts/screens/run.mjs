@@ -93,9 +93,9 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중"], forbid: ["설정되지 않았습니다"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목"], forbid: ["설정되지 않았습니다"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
-    { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업"], forbid: [] },
+    { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12"], forbid: [] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
     { name: "patch-notes", path: "/patch-notes", nav: "패치노트", expect: [`v${CURRENT_VERSION}`, "오케스트레이터 엔진"], forbid: [] },
   ];
@@ -110,6 +110,13 @@ try {
       try { await page.getByText(text, { exact: false }).first().waitFor({ timeout: 15000 }); }
       catch { problems.push(`[${t.name}] '${text}' 가 보이지 않음`); }
     }
+    if (t.name === "briefing" && !(await page.locator('a[href$="/issues/12"]').count())) problems.push("[briefing] 카드의 Issue(#12) 링크가 없음");
+    if (t.name === "projects") {
+      // 기본 상태: 현재 스텝은 펼침, 대기 스텝(3번)·끝난 작업은 접힘
+      if (await page.getByText("알파공정 3단계 확인항목").isVisible()) problems.push("[projects] 대기 스텝의 할 일이 기본 상태에서 보임");
+      if (await page.getByText("끝난 시험 작업").isVisible()) problems.push("[projects] 끝난 작업이 기본 상태에서 보임");
+      if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
+    }
     for (const text of t.forbid) if (await page.getByText(text, { exact: false }).count()) problems.push(`[${t.name}] '${text}' 가 보임`);
     const active = await page.getByRole("navigation", { name: "주 메뉴" }).locator('[aria-current="page"]').allInnerTexts();
     if (!active.some((a) => a.includes(t.nav))) problems.push(`[${t.name}] 활성 탭 표시가 '${t.nav}' 아님 (${active.join(",")})`);
@@ -123,6 +130,24 @@ try {
       shots.push(path.relative(ROOT, file));
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    if (t.name === "projects") {
+      // 펼친 상태: 끝난 작업 묶음 + 대기 스텝
+      await page.getByText("끝난 작업 1개").click();
+      try { await page.getByText("끝난 시험 작업").first().waitFor({ state: "visible", timeout: 5000 }); }
+      catch { problems.push("[projects] '끝난 작업 1개' 를 눌러도 '끝난 시험 작업' 이 안 보임"); }
+      await page.getByText("Step 3. 알파공정 3단계 제목").click();
+      try { await page.getByText("알파공정 3단계 확인항목").waitFor({ state: "visible", timeout: 5000 }); }
+      catch { problems.push("[projects] 대기 스텝을 눌러도 할 일이 안 보임"); }
+      for (const w of WIDTHS) {
+        await page.setViewportSize({ width: w, height: 844 });
+        await page.waitForTimeout(150);
+        if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[projects-expanded] ${w}px 에서 가로 넘침`);
+        const file = path.join(OUT, `projects-expanded-${w}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        shots.push(path.relative(ROOT, file));
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
   }
   if (pageErrors.length) problems.push(`페이지 오류: ${pageErrors.slice(0, 3).join(" | ")}`);
   if (external.length) problems.push(`외부 요청 차단됨: ${[...new Set(external)].slice(0, 3).join(", ")}`);
