@@ -2,13 +2,14 @@
 //   GET  (read)          → runs and switches for every repo in ORCH_REPOS
 //   POST (admin + CSRF)  → { repo, key, value } writes one ORCH_* repository variable and wakes the engine
 //                          { action: "refresh-usage" } runs usage.yml now in every configured repo (2-minute throttle)
+//                          { action: "approve", repo, issue, hash } re-checks a pending '[plan]' Issue and adds 'orch:go'
 // The engine (GitHub Actions) reads the same variables before every new dispatch, so OFF is enforced
 // even when this app is down.
 import { NextResponse } from "next/server";
 import { authorize } from "@/lib/session/guard";
 import { requireRead, NOSTORE } from "../_auth";
 import { configuredRepos, switchChange } from "@/lib/orch/model";
-import { GitHubError, describeGitHubError, readRepo, readToken, refreshUsageIfStale, requestUsageRun, writeSwitch, writeToken } from "@/lib/orch/github";
+import { GitHubError, approvePlan, describeGitHubError, readRepo, readToken, refreshUsageIfStale, requestUsageRun, writeSwitch, writeToken } from "@/lib/orch/github";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +41,22 @@ export async function POST(req: Request): Promise<Response> {
     if (!writeToken(process.env)) return NextResponse.json({ error: "write_unconfigured" }, { status: 503, headers: NOSTORE });
     const results = await Promise.all(repos.map(async (r) => ({ repo: r, result: await requestUsageRun(r, process.env) })));
     return NextResponse.json({ ok: results.some((x) => x.result !== "unavailable"), results }, { headers: NOSTORE });
+  }
+  if (b?.action === "approve") {
+    const repo = typeof b.repo === "string" ? b.repo : "";
+    if (!configuredRepos(process.env).includes(repo)) return NextResponse.json({ error: "unknown_repo" }, { status: 400, headers: NOSTORE });
+    const issue = b.issue;
+    if (typeof issue !== "number" || !Number.isSafeInteger(issue) || issue <= 0) return NextResponse.json({ error: "bad_issue" }, { status: 400, headers: NOSTORE });
+    if (typeof b.hash !== "string" || !/^[0-9a-f]{16}$/.test(b.hash)) return NextResponse.json({ error: "bad_hash" }, { status: 400, headers: NOSTORE });
+    if (!writeToken(process.env)) return NextResponse.json({ error: "write_unconfigured" }, { status: 503, headers: NOSTORE });
+    try {
+      const r = await approvePlan(repo, issue, b.hash, process.env);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 409, headers: NOSTORE });
+      return NextResponse.json({ ok: true, issue: r.issue }, { headers: NOSTORE });
+    } catch (e) {
+      const cfg = e instanceof GitHubError && e.status === 503;
+      return NextResponse.json({ error: cfg ? "write_unconfigured" : "github_error", detail: describeGitHubError(e) }, { status: cfg ? 503 : 502, headers: NOSTORE });
+    }
   }
   const repo = typeof b?.repo === "string" ? b.repo : "";
   if (!configuredRepos(process.env).includes(repo)) return NextResponse.json({ error: "unknown_repo" }, { status: 400, headers: NOSTORE });
