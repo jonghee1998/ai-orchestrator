@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
 import Module from "node:module";
-import { approvePlan, GitHubError } from "./github";
+import { approvePlan, createIdea, GitHubError } from "./github";
 import { parsePlan, planHash, type PlanComment, type PlanIssue } from "./plans";
+import { cookieName, csrfToken, issueSession } from "../session/session";
 
 const REPO = "o/r";
 const ENV = { ORCH_GITHUB_TOKEN: "test-write-token-value" };
@@ -16,7 +17,7 @@ const issue = (extra: Partial<PlanIssue> = {}): PlanIssue => ({
 
 type Call = { method: string; path: string; body: unknown };
 /** Fake GitHub: serves the Issue + comments, records every request. */
-function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: { labelStatus?: number } = {}) {
+function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: { labelStatus?: number; issueStatus?: number } = {}) {
   const calls: Call[] = [];
   const f = (async (url: string | URL, init?: RequestInit) => {
     const u = new URL(String(url));
@@ -26,6 +27,7 @@ function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: { labelSta
     if (method === "GET" && u.pathname === `/repos/${REPO}/issues/${i.number}`) return json(200, i);
     if (method === "GET" && u.pathname === `/repos/${REPO}/issues/${i.number}/comments`) return json(200, comments);
     if (method === "POST" && u.pathname === `/repos/${REPO}/issues/${i.number}/labels`) return json(opts.labelStatus ?? 200, [{ name: "orch:go" }]);
+    if (method === "POST" && u.pathname === `/repos/${REPO}/issues`) return json(opts.issueStatus ?? 201, { number: 42, html_url: `https://github.com/${REPO}/issues/42` });
     return json(404, { message: "Not Found" });
   }) as typeof fetch;
   const labelPosts = () => calls.filter((c) => c.method === "POST" && c.path.endsWith("/labels"));
@@ -68,6 +70,42 @@ test("approvePlan: no write token → GitHubError 503 and no GitHub request; lab
   assert.equal(g.calls.length, 0);
   const bad = fakeGitHub(issue(), [], { labelStatus: 403 });
   await assert.rejects(approvePlan(REPO, 7, H, ENV, bad.f), (e) => e instanceof GitHubError && e.status === 403);
+});
+
+// ---------------------------------------------------------------- createIdea
+
+test("createIdea: trims the title and POSTs exactly one '[idea] ' Issue", async () => {
+  const g = fakeGitHub(issue());
+  assert.deepEqual(await createIdea(REPO, "  상황판 채팅  ", "폰에서 바로\n물어보고 싶음", ENV, g.f), { ok: true, issue: 42, url: `https://github.com/${REPO}/issues/42` });
+  assert.deepEqual(g.calls, [{ method: "POST", path: `/repos/${REPO}/issues`, body: { title: "[idea] 상황판 채팅", body: "폰에서 바로\n물어보고 싶음" } }]);
+  const empty = fakeGitHub(issue());
+  assert.equal((await createIdea(REPO, "x".repeat(80), undefined, ENV, empty.f)).ok, true, "80 chars and no body are fine");
+  assert.deepEqual(empty.calls[0].body, { title: `[idea] ${"x".repeat(80)}`, body: "" });
+  const full = fakeGitHub(issue());
+  assert.equal((await createIdea(REPO, "t", "가".repeat(4000), ENV, full.f)).ok, true, "4000-char body");
+});
+
+test("createIdea: bad title/body → error with no GitHub request", async () => {
+  for (const t of ["", "   ", "x".repeat(81), "두 줄\n제목", "캐리지\r리턴", 5, null, undefined]) {
+    const g = fakeGitHub(issue());
+    assert.deepEqual(await createIdea(REPO, t, "", ENV, g.f), { ok: false, error: "bad_title" }, JSON.stringify(t));
+    assert.equal(g.calls.length, 0);
+  }
+  for (const b of ["가".repeat(4001), 7, { x: 1 }]) {
+    const g = fakeGitHub(issue());
+    assert.deepEqual(await createIdea(REPO, "제목", b, ENV, g.f), { ok: false, error: "bad_body" });
+    assert.equal(g.calls.length, 0);
+  }
+});
+
+test("createIdea: no write token → GitHubError 503 and no request; GitHub failure → GitHubError", async () => {
+  const g = fakeGitHub(issue());
+  await assert.rejects(createIdea(REPO, "제목", "", { GITHUB_TOKEN: "read-only-test-token" }, g.f), (e) => e instanceof GitHubError && e.status === 503);
+  await assert.rejects(createIdea(REPO, "제목", "", {}, g.f), (e) => e instanceof GitHubError && e.status === 503);
+  assert.equal(g.calls.length, 0);
+  const bad = fakeGitHub(issue(), [], { issueStatus: 403 });
+  await assert.rejects(createIdea(REPO, "제목", "", ENV, bad.f), (e) => e instanceof GitHubError && e.status === 403);
+  assert.equal(bad.calls.length, 1, "no retry");
 });
 
 // ---------------------------------------------------------------- route.ts POST (auth + validation before any GitHub call)
@@ -142,5 +180,49 @@ test("route POST approve: validates repo/issue/hash (400), token (503), then app
     const r = await post(approve, h); // Issue 7 → fake 404
     assert.equal(r.status, 502);
     assert.equal((await r.json()).error, "github_error");
+  });
+});
+
+const idea = { action: "idea", repo: REPO, title: "상황판 채팅", body: "폰에서 바로 물어보고 싶음" };
+
+test("route POST idea: no admin auth, read-role session or session without CSRF → 401/403 and zero GitHub calls", async () => {
+  await withRoute({ ...LIVE, CONTROL_READ_TOKEN: "test-read-token-for-route" }, issue(), async (post, g) => {
+    assert.equal((await post(idea)).status, 401);
+    assert.equal((await post(idea, { "x-admin-token": "wrong-token-but-long-enough" })).status, 401);
+    assert.equal((await post(idea, { "x-admin-token": "test-read-token-for-route" })).status, 401, "read token is not admin");
+    assert.equal((await post(idea, { cookie: "orch_session=forged" })).status, 401);
+    const admin = issueSession("admin", process.env, Date.now())!;
+    const read = issueSession("read", process.env, Date.now())!;
+    const same = { host: "localhost", origin: "http://localhost" };
+    const ck = (s: typeof admin) => `${cookieName(process.env)}=${s.value}`;
+    assert.equal((await post(idea, { ...same, cookie: ck(admin) })).status, 403, "no CSRF token");
+    assert.equal((await post(idea, { ...same, cookie: ck(admin), "x-csrf-token": "wrong" })).status, 403);
+    assert.equal((await post(idea, { ...same, cookie: ck(admin), origin: "https://evil.example", "x-csrf-token": csrfToken(admin.session, process.env) })).status, 403);
+    assert.equal((await post(idea, { ...same, cookie: ck(read), "x-csrf-token": csrfToken(read.session, process.env) })).status, 403, "read role");
+    assert.equal(g.calls.length, 0);
+    const ok = await post(idea, { ...same, cookie: ck(admin), "x-csrf-token": csrfToken(admin.session, process.env) });
+    assert.equal(ok.status, 200, "admin session + CSRF works");
+    assert.equal(g.writes().length, 1);
+  });
+});
+
+test("route POST idea: validates repo/title/body (400), token (503), then creates exactly one Issue", async () => {
+  const h = { "x-admin-token": ADMIN };
+  await withRoute(LIVE, issue(), async (post, g) => {
+    for (const b of [{ ...idea, repo: "x/y" }, { ...idea, title: "" }, { ...idea, title: "  " }, { ...idea, title: "x".repeat(81) }, { ...idea, title: "두\n줄" }, { ...idea, title: 3 }, { ...idea, body: "가".repeat(4001) }, { ...idea, body: 1 }]) {
+      assert.equal((await post(b, h)).status, 400, JSON.stringify(b).slice(0, 80));
+    }
+    assert.equal(g.calls.length, 0, "bad input never reaches GitHub");
+    const ok = await post({ ...idea, title: "  상황판 채팅 " }, h);
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { ok: true, issue: 42, url: `https://github.com/${REPO}/issues/42` });
+    assert.deepEqual(g.calls, [{ method: "POST", path: `/repos/${REPO}/issues`, body: { title: "[idea] 상황판 채팅", body: idea.body } }]);
+    assert.equal((await post({ ...idea, body: "가".repeat(4000) }, h)).status, 200, "a 4000-char body fits the request limit");
+    assert.equal((await post({ action: "approve", repo: REPO, issue: 7, hash: H, pad: "x".repeat(3000) }, h)).status, 413, "other actions keep the 2 KB limit");
+  });
+  await withRoute({ ...LIVE, ORCH_GITHUB_TOKEN: undefined, GITHUB_TOKEN: "read-only-test-token" }, issue(), async (post, g) => {
+    const r = await post(idea, h);
+    assert.deepEqual([r.status, (await r.json()).error], [503, "write_unconfigured"]);
+    assert.equal(g.calls.length, 0);
   });
 });
