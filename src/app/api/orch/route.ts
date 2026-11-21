@@ -2,10 +2,8 @@
 //   GET  (read)          → runs and switches for every repo in ORCH_REPOS
 //   POST (admin + CSRF)  → { repo, key, value } writes one ORCH_* repository variable and wakes the engine
 // The engine (GitHub Actions) reads the same variables before every new dispatch, so OFF is enforced
-// even when this app is down. Demo mode never touches GitHub.
+// even when this app is down.
 import { NextResponse } from "next/server";
-import { demoRequestBlock } from "@/lib/demo/respond-http";
-import { demoDecision } from "@/lib/demo/gate";
 import { authorize } from "@/lib/session/guard";
 import { requireRead, NOSTORE } from "../_auth";
 import { configuredRepos, switchChange } from "@/lib/orch/model";
@@ -17,9 +15,6 @@ export const revalidate = 0;
 export async function GET(req: Request): Promise<Response> {
   const denied = requireRead(req);
   if (denied) return denied;
-  const blocked = demoRequestBlock(req);
-  if (blocked) return blocked;
-  if (demoDecision(req.headers).demo === true) return NextResponse.json({ mode: "unconfigured", reason: "demo" }, { headers: NOSTORE });
   const repos = configuredRepos(process.env);
   if (!repos.length || !readToken(process.env)) return NextResponse.json({ mode: "unconfigured" }, { headers: NOSTORE });
   const views = await Promise.all(repos.map((r) => readRepo(r, process.env)));
@@ -30,8 +25,6 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const blocked = demoRequestBlock(req);
-  if (blocked) return blocked;
   const auth = authorize(req.method, req.headers, "admin");
   if (!auth.ok) return NextResponse.json({ error: auth.status === 503 ? "auth_unconfigured" : "unauthorized", reason: auth.reason }, { status: auth.status, headers: NOSTORE });
   const raw = await req.text();
