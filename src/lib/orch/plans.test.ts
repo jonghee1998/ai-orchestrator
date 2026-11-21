@@ -145,3 +145,23 @@ test("readRepo: plans + plansError alongside runs/switches/usage; plan failure l
   assert.ok(bad.switches);
   assert.deepEqual([bad.runsError, bad.switchesError], [null, null]);
 });
+
+type Fixtures = { REPO: string; githubFixtures: (now: Date) => (m: string, u: URL) => { status: number; body: unknown } | null };
+
+test("screens fixture (scripts/screens/fixtures.mjs): one pending plan, audit OK 2/3, not stale; runs not listed as plans", async () => {
+  const fx = await (load("scripts/screens/fixtures.mjs") as unknown as Promise<Fixtures>);
+  const gh = fx.githubFixtures(new Date());
+  const calls: string[] = [];
+  const f = (async (url: string, init?: RequestInit) => {
+    const m = init?.method ?? "GET";
+    calls.push(m);
+    const hit = gh(m, new URL(url));
+    return new Response(JSON.stringify(hit?.body ?? { message: "Not Found" }), { status: hit?.status ?? 404 });
+  }) as typeof fetch;
+  const v = await readRepo(fx.REPO, { ORCH_GITHUB_TOKEN: "t" }, f);
+  assert.equal(v.plansError, null);
+  assert.deepEqual(v.plans.map((p) => [p.number, p.goal, p.steps]), [[13, "승인 기다리는 시험 계획", 2]]);
+  assert.deepEqual([v.plans[0].review?.verdict, v.plans[0].review?.round, v.plans[0].review?.stale], ["OK", 2, false]);
+  assert.ok(v.runs.some((r) => r.number === 12), "runs still read");
+  assert.ok(calls.every((m) => m === "GET"));
+});
