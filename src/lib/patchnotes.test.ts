@@ -28,5 +28,6 @@ test("patch notes are strictly descending by version", () => {
 test("current version and first/last entries", () => {
   assert.equal(CURRENT_VERSION, PATCH_NOTES[0].version);
   assert.equal(PATCH_NOTES[PATCH_NOTES.length - 1].version, "1.0.0");
-  assert.equal(PATCH_NOTES.length, 11);
+  // 항목 수는 고정하지 않는다: 새 릴리스마다 맨 앞에 추가된다.
+  assert.ok(PATCH_NOTES.length >= 11);
 });
