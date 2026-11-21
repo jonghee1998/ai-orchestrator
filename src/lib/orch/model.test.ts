@@ -162,3 +162,9 @@ test("manual usage refresh: dispatches unless a run started within 2 minutes", a
   assert.deepEqual(calls, ["GET", "GET", "POST"]);
   assert.equal(await requestUsageRun("o/r", {}, now, undefined, fake("2026-11-21T03:50:00Z")), "unavailable");
 });
+
+test("parseRun: prose mention of the state marker in the plan context does not break state (run #239)", () => {
+  const body = "설명: <!-- orch-state:v1 --> 마커를 읽는다\n\n```json\n" + JSON.stringify({ goal: "g", steps: [{ id: 1, title: "t", task: "x", done_when: ["d"] }] }) + "\n```\n<!-- orch-state:v1 " + JSON.stringify({ v: 1, status: "implementing", step: 1 }) + " -->";
+  const r = parseRun("o/r", { number: 1, title: "[plan] g", html_url: "u", body });
+  assert.equal(r?.status, "implementing");
+});
