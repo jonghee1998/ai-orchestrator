@@ -32,7 +32,7 @@ test("usageBody/readUsage round-trip with human table", () => {
   const u = { v: 1, updatedAt: "2026-11-21T00:00:00Z", claude: claudeFromStream(EVENT), claudeCheckedAt: "2026-11-21T00:00:00Z", claudeError: null,
     codex: { limited: true, lastLimitAt: "2026-11-20T17:00:00Z", lastReviewAt: null, checkedAt: "2026-11-21T00:00:00Z" } };
   const body = usageBody(u);
-  assert.match(body, /\| 5시간 \| 11% \| 11-21 09:00 \|/);
+  assert.match(body, /\| 5시간 \| 11% \| 11-21\(토\) 09:00 \|/);
   assert.match(body, /한도 소진/);
   assert.deepEqual(readUsage(body), u);
   assert.equal(readUsage("nothing"), null);

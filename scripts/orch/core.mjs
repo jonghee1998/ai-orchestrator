@@ -219,9 +219,13 @@ export function composeBody(original, plan, state, now = new Date()) {
   return `${stripManaged(original)}\n\n<!-- orch-board:start -->\n${board}\n<!-- orch-board:end -->\n${stateMarker(state)}\n`;
 }
 
+export const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+
+/** "2026-11-21(토) 08:00 KST" — the weekday avoids date mix-ups on a phone. */
 export function kst(iso) {
   const d = new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} KST`;
+  const t = d.toISOString();
+  return `${t.slice(0, 10)}(${WEEKDAY_KO[d.getUTCDay()]}) ${t.slice(11, 16)} KST`;
 }
 
 const STATUS_TEXT = {

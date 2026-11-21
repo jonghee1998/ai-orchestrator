@@ -65,7 +65,13 @@ export function readUsage(body) {
   try { return JSON.parse(m[1]); } catch { return null; }
 }
 
-const kst = (isoStr) => (isoStr ? new Date(Date.parse(isoStr) + 9 * 3600 * 1000).toISOString().slice(5, 16).replace("T", " ") : "-");
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+const kst = (isoStr) => {
+  if (!isoStr) return "-";
+  const d = new Date(Date.parse(isoStr) + 9 * 3600 * 1000);
+  const t = d.toISOString();
+  return `${t.slice(5, 10)}(${WD[d.getUTCDay()]}) ${t.slice(11, 16)}`;           // "11-21(토) 14:00"
+};
 
 export function usageBody(u) {
   const c = u.claude;

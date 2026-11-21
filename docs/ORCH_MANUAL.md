@@ -164,3 +164,12 @@ Vercel 자동 배포는 꺼져 있습니다(`vercel.json`). 무료 플랜의 하
 - 기준 개수는 저장소 변수 `ORCH_DEPLOY_EVERY`로 바꿀 수 있습니다(기본 10).
 - 한 번만 설정하면 됩니다: Vercel → `ai-orchestrator` → Settings → Git → **Deploy Hooks**에서 이름 `orch`, 브랜치 `main`으로 만들고, 나온 URL을 GitHub 저장소 Settings → Secrets and variables → Actions → **New repository secret** `VERCEL_DEPLOY_HOOK`에 넣습니다.
 - 배포 전 화면은 각 PR의 CI `screens` 스크린샷(Artifacts)으로 확인합니다.
+
+## 아이디어함
+
+생각날 때 아이디어를 적어 두면 Claude(PM)와 Codex가 의견을 내고, 종합 의견을 남깁니다. 개발 여부는 나중에 정합니다.
+
+- 제목이 `[idea] 항목`인 Issue를 소유자가 쓰면 됩니다(상황판 입력창도 같은 Issue를 만듭니다). 본문에는 내 의견을 적습니다.
+- `idea-review` 워크플로가 Codex 의견 → Claude 의견과 종합을 거쳐 댓글 1개를 남깁니다. 댓글에는 가치·규모(스텝 수)·위험·추천(지금/나중/보류)과 같은 점·다른 점이 들어갑니다.
+- 본문을 고치면 의견을 다시 냅니다. Codex를 못 쓸 때는 "Codex 의견 대기"로 표시합니다. Codex가 다시 되면 Actions → `idea-review` → Run workflow(해당 Issue 번호)로 채웁니다.
+- 의견만 내고 코드는 바꾸지 않습니다. 하기로 정하면 PM이 계획 Issue로 옮깁니다.

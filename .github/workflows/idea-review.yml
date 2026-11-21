@@ -1,0 +1,132 @@
+# 아이디어함: 소유자가 쓴 "[idea] 항목" Issue(본문 = 사용자 의견)에 Codex와 Claude(PM)가 의견을 내고 종합 의견 댓글 1개를 남긴다.
+# 읽기 전용(코드 변경 없음). Codex를 못 쓰면 Claude 의견만으로 종합하고 "Codex 의견 대기"로 표시 → Codex가 되면 다시 실행(force 없이도 채움).
+# Codex 로그인은 usage·plan-review와 같은 암호화 캐시를 쓰므로 같은 concurrency 그룹으로 직렬화한다.
+name: idea-review
+run-name: "idea-review #${{ inputs.issue || github.event.issue.number }}"
+
+on:
+  issues:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      issue: { required: true, type: string }
+      force: { type: boolean, default: false }
+
+permissions: {}
+
+concurrency:
+  group: orch-usage
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.issue.title, '[idea]') &&
+       github.event.issue.user.login == github.repository_owner &&
+       github.event.sender.login == github.repository_owner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      actions: write   # prune old encrypted-login cache entries
+      id-token: write  # claude-code-action
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Decide
+        id: prep
+        run: node scripts/orch/idea-review.mjs prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          FORCE: ${{ inputs.force }}
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+          ORCH_SONNET: ${{ vars.ORCH_SONNET }}
+          ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_CODEX: ${{ vars.ORCH_CODEX }}
+          ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
+
+      # ---- Codex opinion (read-only sandbox)
+      - name: Restore encrypted Codex login
+        if: steps.prep.outputs.skip == 'false' && steps.prep.outputs.codex == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-latest
+          restore-keys: codex-auth-
+      - name: Codex opinion
+        id: codex
+        if: steps.prep.outputs.skip == 'false' && steps.prep.outputs.codex == 'true'
+        continue-on-error: true
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          [ -f ~/.orch/codex-auth.enc ] || { echo "note=Codex 로그인 없음" >> "$GITHUB_OUTPUT"; exit 0; }
+          mkdir -p ~/.codex
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null \
+            || { rm -f ~/.codex/auth.json; echo "note=Codex 로그인 복호화 실패" >> "$GITHUB_OUTPUT"; exit 0; }
+          before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          npm i -g @openai/codex >/dev/null 2>&1
+          codex exec -s read-only --skip-git-repo-check \
+            --output-schema "$RUNNER_TEMP/idea-schema.json" \
+            -o "$RUNNER_TEMP/codex-idea.json" \
+            "$(cat "$RUNNER_TEMP/idea-codex-prompt.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || echo "note=Codex 실행 실패(한도 또는 오류)" >> "$GITHUB_OUTPUT"
+          after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
+          if [ -n "$after" ] && [ "$before" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Remove Codex credentials from the runner
+        if: always()
+        run: rm -rf ~/.codex
+      - name: Save refreshed encrypted login
+        if: steps.codex.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-${{ github.run_id }}
+      - name: Prune old login cache entries
+        if: steps.codex.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: codex-auth-${{ github.run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
+            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
+
+      # ---- Claude (PM) opinion + synthesis
+      - name: Build Claude prompt (with Codex opinion if any)
+        id: cp
+        if: steps.prep.outputs.skip == 'false'
+        run: node scripts/orch/idea-review.mjs claude-prompt
+      - name: Claude opinion and synthesis
+        id: claude
+        if: steps.prep.outputs.skip == 'false'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          allowed_bots: "*"
+          prompt: ${{ steps.cp.outputs.prompt }}
+          claude_args: >-
+            --max-turns 30
+            --model ${{ (vars.ORCH_OPUS == 'off' && 'sonnet') || 'opus' }}
+            --allowedTools "Read,Glob,Grep,Write,Bash(ls:*),Bash(git log:*),Bash(mkdir:*)"
+
+      - name: Post opinion
+        if: always() && steps.prep.outputs.skip == 'false'
+        run: node scripts/orch/idea-review.mjs publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          HASH: ${{ steps.prep.outputs.hash }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
