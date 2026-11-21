@@ -1,0 +1,143 @@
+# claudex 루프 — PM 계획 감사. 소유자가 쓴 "[plan]" Issue가 열리거나 계획 본문이 바뀌면(orch:go 전까지) 한 라운드 감사.
+# Codex(기본, 읽기 전용 sandbox) → 안 되면 Claude Opus(+planner·architect). 최대 3라운드. 결과는 Issue 댓글 1개.
+# Codex 로그인은 usage.yml과 같은 암호화 캐시를 쓰므로 같은 concurrency 그룹으로 직렬화한다(토큰 갱신 충돌 방지).
+name: plan-review
+run-name: "plan-review #${{ inputs.issue || github.event.issue.number }}"
+
+on:
+  issues:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      issue: { required: true, type: string }
+
+permissions: {}
+
+concurrency:
+  group: orch-usage
+  cancel-in-progress: false
+
+jobs:
+  review:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.issue.title, '[plan]') &&
+       github.event.issue.user.login == github.repository_owner &&
+       github.event.sender.login == github.repository_owner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+      actions: write   # prune old encrypted-login cache entries
+      id-token: write  # claude-code-action
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Decide round and reviewer
+        id: prep
+        run: node scripts/orch/plan-review.mjs prepare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+          ORCH_SONNET: ${{ vars.ORCH_SONNET }}
+          ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_CODEX: ${{ vars.ORCH_CODEX }}
+          ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
+
+      # ---- Codex (read-only sandbox)
+      - name: Restore encrypted Codex login
+        if: steps.prep.outputs.skip == 'false' && steps.prep.outputs.reviewer == 'codex'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-latest
+          restore-keys: codex-auth-
+      - name: Codex plan audit
+        id: codex
+        if: steps.prep.outputs.skip == 'false' && steps.prep.outputs.reviewer == 'codex'
+        continue-on-error: true
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          [ -f ~/.orch/codex-auth.enc ] || { echo "note=Codex 로그인 없음" >> "$GITHUB_OUTPUT"; exit 0; }
+          mkdir -p ~/.codex
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null \
+            || { rm -f ~/.codex/auth.json; echo "note=Codex 로그인 복호화 실패" >> "$GITHUB_OUTPUT"; exit 0; }
+          before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          npm i -g @openai/codex >/dev/null 2>&1
+          codex exec -s read-only --skip-git-repo-check \
+            --output-schema "$RUNNER_TEMP/plan-review-schema.json" \
+            -o "$RUNNER_TEMP/codex-plan-review.json" \
+            "$(cat "$RUNNER_TEMP/plan-review-prompt.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || echo "note=Codex 실행 실패(한도 또는 오류)" >> "$GITHUB_OUTPUT"
+          node -e 'import("./scripts/orch/plan-review.mjs").then(m=>{const t=require("fs").readFileSync(process.argv[1],"utf8");process.exit(m.parseReview(t)?0:1)}).catch(()=>process.exit(1))' "$RUNNER_TEMP/codex-plan-review.json" 2>/dev/null \
+            && echo "ok=true" >> "$GITHUB_OUTPUT"
+          after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
+          if [ -n "$after" ] && [ "$before" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Remove Codex credentials from the runner
+        if: always()
+        run: rm -rf ~/.codex
+      - name: Save refreshed encrypted login
+        if: steps.codex.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-${{ github.run_id }}
+      - name: Prune old login cache entries
+        if: steps.codex.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: codex-auth-${{ github.run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
+            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
+
+      # ---- Claude Opus (fallback, or primary when Codex is OFF / not logged in)
+      - name: Decide Claude fallback
+        id: fb
+        if: steps.prep.outputs.skip == 'false'
+        env:
+          REVIEWER: ${{ steps.prep.outputs.reviewer }}
+          CODEX_OK: ${{ steps.codex.outputs.ok }}
+          ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+        run: |
+          opus_off=$(echo "$ORCH_OPUS" | tr '[:upper:]' '[:lower:]' | xargs)
+          if [ "$REVIEWER" = claude ] || { [ "$CODEX_OK" != true ] && ! echo "$opus_off" | grep -Eq '^(off|false|0|no|disabled?)$'; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Claude plan audit (Opus)
+        id: claude
+        if: steps.fb.outputs.run == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          allowed_bots: "*"
+          prompt: ${{ steps.prep.outputs.prompt }}
+          claude_args: >-
+            --max-turns 40
+            --model opus
+            --allowedTools "Read,Glob,Grep,Write,Task,Agent,Bash(ls:*),Bash(git log:*),Bash(mkdir:*)"
+
+      - name: Post audit
+        if: always() && steps.prep.outputs.skip == 'false'
+        run: node scripts/orch/plan-review.mjs publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          ROUND: ${{ steps.prep.outputs.round }}
+          HASH: ${{ steps.prep.outputs.hash }}
+          CLAUDE_RAN: ${{ steps.fb.outputs.run == 'true' }}
+          NOTE: ${{ steps.codex.outputs.note }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

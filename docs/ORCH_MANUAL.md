@@ -35,6 +35,16 @@ PC를 꺼도 GitHub에서 돌아갑니다. 별도 유료 API는 쓰지 않습니
 | `try` | | 완공 보고서의 "확인 방법"에 들어갈 사용법 |
 | `context` | | 기술 스택, 제약 등 |
 
+### 계획 감사 (claudex 루프)
+
+PM이 계획 Issue(제목 `[plan] ...`)를 쓰면 `orch:go` 전에 **Codex가 계획을 감사**합니다(`plan-review` 워크플로).
+
+1. Issue가 열리거나 계획 JSON이 바뀔 때마다 한 라운드 감사합니다. 최대 3라운드이고, 본문이 그대로면 다시 감사하지 않습니다.
+2. 확인하는 것: 실제 코드와 맞는지, 스텝 분할·순서, `done_when`이 기계로 확인 가능한지, 빠진 테스트·문서, 보안·회귀 위험, 모델·자동 머지 선택.
+3. 결과는 Issue 댓글 "계획 감사 N/3"으로 남습니다. ✅ OK면 승인 가능, ✏️ 수정 필요면 PM이 고치고 다음 라운드가 자동으로 돕니다.
+4. Codex를 쓸 수 없으면(OFF·한도·로그인 없음) Claude Opus가 `planner`·`architect` 보조 에이전트로 대신 감사합니다.
+5. 사용자는 마지막 감사가 OK인 것을 보고 `orch:go`를 붙이면 됩니다. 급하면 감사를 기다리지 않고 바로 붙여도 됩니다(붙이는 순간 감사는 멈춤).
+
 ## 3. 진행 상황 보기
 
 계획 Issue 본문 아래의 "진행 상황" 표와 로그 댓글에 모두 기록됩니다. 상황판(모바일)도 같은 정보를 읽습니다.
@@ -97,6 +107,10 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 완공 보고서 "검사 결과" 표에 스텝별 구현 모델·**쓴 스킬과 보조 에이전트**·검수자·수정 횟수가 나옵니다. 스텝 PR 본문의 "도구 사용 (자동 기록)"에는 구현 Claude가 실제로 쓴 도구 횟수, 스킬(예: ECC `verification-loop`), 보조 에이전트(예: `build-error-resolver`), 돌린 검증 명령(typecheck/test/build)이 실행 기록에서 자동으로 뽑혀 남습니다. ECC 효과는 이 기록과 수정 횟수를 run별로 비교해서 봅니다.
 
 스텝 PR 본문과 "수정 N회차 반영" 댓글에는 그때 쓴 **구현 모델**(예: `opus (검수 2회 실패로 상향)`)이 표시됩니다. Codex 대신 Opus가 검수할 때는 ECC 검수 에이전트(`code-reviewer`, `security-reviewer`, `typescript-reviewer`, `react-reviewer`)를 보조로 부를 수 있고, 쓴 에이전트는 검수 댓글의 "도구 사용"에 남습니다. 검수 세션은 PR이 아니라 `main`의 `.claude/`를 쓰므로 구현자가 검수 지시를 바꿀 수 없습니다.
+
+화면(UI) 스텝에서는 구현 Claude가 디자인 스킬 **Impeccable**(`.claude/skills/impeccable`)을 따릅니다. 상황판은 Operate 모드(훑어보기·일관성·모바일 우선)이고, 기존 화면 수정은 기존 디자인을 유지하는 refinement가 기본입니다. 규칙은 CLAUDE.md "디자인 스킬" 절.
+
+**결과 화면 테스트 (Playwright):** 모든 PR의 CI에서 `screens` 검사가 실제 빌드를 띄우고 실제 로그인으로 4개 탭(프로젝트·AI 팀·PM 브리핑·패치노트)을 폰 폭 360/390/430px로 엽니다. 기대 문구가 보이는지, 가로로 넘치는지, 페이지 오류·외부 요청·GitHub 쓰기가 없는지 확인합니다. GitHub API는 가짜 서버(`scripts/screens/fixtures.mjs`)를 씁니다. 스크린샷 12장은 해당 CI 실행의 **Artifacts → screens**에서 받을 수 있습니다. 로컬에서는 `npm run build && npm run screens`.
 
 ## 8. 처음 한 번 설정 (저장소마다)
 

@@ -22,3 +22,31 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: node --test scripts/login-smoke.test.mjs
+
+  # 결과 화면 테스트: 실제 빌드 + 실제 로그인으로 4개 탭을 폰 크기(360/390/430)로 열어 확인하고 스크린샷을 남긴다.
+  # GitHub API는 가짜 서버(scripts/screens/fixtures.mjs)라 비밀값이 필요 없다.
+  screens:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: npm run screens
+        env:
+          SCREENS_DIR: .screens
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: .screens/
+          retention-days: 14
+          if-no-files-found: ignore
