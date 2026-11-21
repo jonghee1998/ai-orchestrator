@@ -35,11 +35,12 @@ test("#65: progress counts come from GitHub state; label-only done is NOT comple
     issue(1, ["agent:opus", "status:done"]),          // label says done but issue is open
     issue(2, ["agent:codex", "status:ready"]),         // no ACK
     issue(3, ["agent:claude", "status:in-progress"]),  // ACKed
-    issue(4, ["agent:opus", "status:done"], "closed"), // actually closed
+    { ...issue(4, ["agent:opus", "status:done"], "closed", "Completion type: nondeploy"), state_reason: "completed" }, // closed, completed, explicit type
+    issue(5, ["agent:opus", "status:done"], "closed"), // closed without a completion type: NOT done (I8)
   ], [], [comment(10, 3, "ACK — started", "2026-01-01T00:00:00Z")]);
   const g = githubProgress(r);
-  assert.equal(g.total, 4); assert.equal(g.open, 3);
-  assert.equal(g.stages.done, 1, "only the closed issue counts as done");
+  assert.equal(g.total, 5); assert.equal(g.open, 3);
+  assert.equal(g.stages.done, 1, "only the closed issue with proven completion counts as done"); assert.equal(g.stages.closed_unverified, 1);
   assert.equal(g.stages.await_ack, 1); assert.ok(g.stages.implementing >= 1);
   const row1 = g.rows.find((x) => x.number === 1)!;
   assert.notEqual(row1.stage, "done"); assert.equal(row1.statusLabel, "done");
@@ -72,13 +73,13 @@ test("#65: stage mapping covers every next-action code; parse rejects non-live b
   assert.equal(parseEvidenceResponse(200, { mode: "live", report: { source: "runtime", issues: [] } }), null);
 });
 
-test("#67: open issue whose PR merged stays in the open list (stage done, closure pending)", () => {
+test("#67: open issue whose PR merged stays in the open list (PR merged but completion unverified)", () => {
   const r = build([issue(8, ["agent:opus", "status:review"]), issue(9, ["agent:opus", "status:done"], "closed")],
     [pull(10, "fix — Refs #8", null, { state: "closed", merged_at: "2026-01-01T03:00:00Z" } as Partial<RawPull>)], []);
   const g = githubProgress(r);
   const row = g.rows.find((x) => x.number === 8)!;
-  assert.equal(r.issues.find((i) => i.number === 8)!.nextAction.code, "pr_merged");
-  assert.equal(row.stage, "done"); assert.equal(row.issueState, "open");
+  assert.equal(r.issues.find((i) => i.number === 8)!.nextAction.code, "completion_unverified");
+  assert.equal(row.stage, "review"); assert.equal(row.issueState, "open");
   const openList = g.rows.filter((x) => x.issueState === "open");
   assert.deepEqual(openList.map((x) => x.number), [8], "panel list uses issue state, so the pending closure is visible");
   assert.equal(g.open, openList.length, "summary open count matches the listed rows");
@@ -126,7 +127,8 @@ test("#69: task split keeps open+merged-PR as remaining/closure-pending; closed 
   assert.deepEqual(s.remaining.map((x) => x.number).sort(), [10, 8]);
   assert.deepEqual(s.history.map((x) => x.number), [9]);
   const t8 = s.remaining.find((x) => x.number === 8)!;
-  assert.equal(t8.closurePending, true); assert.equal(t8.mergedPr, 11); assert.equal(t8.statusLabel, "done");
+  // #113: no completion type → completion unknown → closure is NOT pending-provable (fail closed); the merged PR is still shown.
+  assert.equal(t8.closurePending, false); assert.equal(t8.mergedPr, 11); assert.equal(t8.statusLabel, "done");
   assert.equal(s.remaining.find((x) => x.number === 10)!.closurePending, false);
 });
 
@@ -151,4 +153,22 @@ test("#71: approval indicator is bound to the primary PR, not any historical PR 
   assert.equal(githubTaskSplit(mk(approved(SHA2))).remaining[0].reviewedExact, true);
   // Newer open PR approved on a stale SHA -> off.
   assert.equal(githubTaskSplit(mk(approved(SHA))).remaining[0].reviewedExact, false);
+});
+
+// ---- Issue #113: PM self-report vs official review rendered distinctly; stranded closed boundary; SHA case ----
+import { acceptanceKind } from "./evidence-views";
+test("T1r1/P2: PM self-report, official review and both are rendered as distinct signals; rollup counts PM-only", () => {
+  const sha = "a".repeat(40);
+  const mkPull = (o = {}) => ({ number: 10, url: "u", title: "", state: "merged", draft: false, base: "b", head: "h", headSha: sha, linkedBy: ["body"], commits: { count: 1, truncated: false }, reviews: [], comments: [], revisions: 0, detail: "loaded", ...o }) as never;
+  const acc = [{ issue: 1, pr: 10, sha: sha.toUpperCase(), target: "b", at: "", url: "", by: "o" }];
+  const off = { by: "r", at: "", sha: sha.toUpperCase(), url: "" };
+  assert.equal(acceptanceKind(mkPull(), acc), "pm-self-report");
+  assert.equal(acceptanceKind(mkPull({ officialApproval: off })), "official");
+  assert.equal(acceptanceKind(mkPull({ officialApproval: off }), acc), "official+pm-self-report");
+  assert.equal(acceptanceKind(mkPull(), []), "none");
+  const rep = (pulls: unknown[], acceptances: unknown[]) => githubProgress({ source: "github", repo: "o/r", generatedAt: "", limits: {}, issues: [{ number: 1, title: "", url: "", agent: "claude", status: "review", state: "open", acks: [], completions: [], pulls, acceptances, nextAction: { code: "pm_review", label: "", actor: "" } }] } as never);
+  const pm = rep([mkPull()], acc), off2 = rep([mkPull({ officialApproval: off })], acc);
+  assert.match(pm.rows[0].pull!.review, /PM 자체 수락 표식.*공식 리뷰 아님/); assert.equal(pm.pmSelfReportOnly, 1);
+  assert.match(off2.rows[0].pull!.review, /공식 리뷰 승인.*PM 자체 수락 표식/); assert.equal(off2.pmSelfReportOnly, 0);
+  assert.equal(stageOf({ nextAction: { code: "completion_unverified", label: "", actor: "" } }), "review");
 });

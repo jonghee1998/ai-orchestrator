@@ -1,2 +1,2 @@
-import ControlDashboard from "@/components/control/ControlDashboard";
-export default function ControlPage() { return <ControlDashboard />; }
+import { redirect } from "next/navigation";
+export default function Page() { redirect("/agents#assignment-settings"); }

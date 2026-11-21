@@ -21,7 +21,7 @@ const NAMES: Record<string, string> = { gpt: "GPT", "claude-sonnet": "Claude Son
 const t = (s: string | null) => formatKst(s);
 const DOT: Record<string, string> = { ok: "bg-green-500", missing: "bg-yellow-500", blocked: "bg-red-500" };
 
-export default function OverviewDashboard() {
+export default function OverviewDashboard({ embedded = false }: { embedded?: boolean }) {
   const sess = useSession();
   const token = sess.status === "authed" ? SESSION_MARK : "";
   const [view, setView] = useState<OverviewView<Snap, Ready>>({ state: { kind: "loading" }, ready: null, staleErr: null, readyError: null });
@@ -41,11 +41,9 @@ export default function OverviewDashboard() {
 
   return (
     <div className="space-y-4">
-      <PageTitle title="AI Orchestrator" subtitle="실제 상태 · 증거 기반 (가짜 텔레메트리 없음)" />
-      <ScopeNotice />
-      <LoginCard />
+      {!embedded && <><PageTitle title="연결 및 기록" /><ScopeNotice /><LoginCard /></>}
       {s.kind === "loading" && <p className="text-sm text-text-faint">불러오는 중…</p>}
-      {s.kind === "notoken" && <Card><p className="text-sm">로그인하면 실제 상태를 불러옵니다. 연결 전에는 어떤 상태도 표시하지 않습니다.</p></Card>}
+      {s.kind === "notoken" && <Card><p className="text-sm">로그인하면 저장된 상태를 불러옵니다. 연결 전에는 어떤 상태도 표시하지 않습니다.</p></Card>}
       {s.kind === "unauth" && <Card><p className="text-sm">{s.reason === "token_missing" ? "토큰이 비어 있습니다 (401)." : "토큰이 올바르지 않습니다 (401). 서버에는 토큰이 설정되어 있으나 입력값과 일치하지 않습니다."}</p></Card>}
       {s.kind === "unconfigured" && <Card><p className="text-sm">서버 저장소/인증이 설정되지 않았습니다 (DATABASE_URL, CONTROL_*_TOKEN). 어떤 에이전트도 dispatch 되지 않습니다.</p></Card>}
       {s.kind === "error" && <Card><p className="text-sm">상태를 불러오지 못했습니다.</p>{s.detail && <p className="mt-1 text-xs text-text-faint">{s.detail}</p>}<button className="mt-2 min-h-11 rounded-lg border border-border px-3 text-xs" onClick={load}>다시 시도</button></Card>}

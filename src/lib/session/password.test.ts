@@ -82,12 +82,13 @@ test("rate limit: five attempts, Retry-After, no username/IP bypass, expiry perm
   assert.equal((await handleSession("POST", H(), body(), env, NOW + LOGIN_WINDOW_MS, limiter)).status, 200);
 });
 
-test("rate limit reserves concurrent requests before hashing; successful login does not reset it", async () => {
+test("rate limit reserves concurrent requests before hashing; successful logins are refunded", async () => {
   const limiter = new LoginLimiter();
   const replies = await Promise.all(Array.from({ length: LOGIN_ATTEMPTS + 2 }, () => handleSession("POST", H(), body(), env, NOW, limiter)));
   assert.equal(replies.filter(r => r.status === 200).length, LOGIN_ATTEMPTS);
   assert.equal(replies.filter(r => r.status === 429).length, 2);
-  assert.equal((await handleSession("POST", H(), JSON.stringify({ token: env.CONTROL_ADMIN_TOKEN }), env, NOW, limiter)).status, 429);
+  // Successes refund their reservation (#122): the legitimate owner is not locked out by their own logins.
+  assert.equal((await handleSession("POST", H(), JSON.stringify({ token: env.CONTROL_ADMIN_TOKEN }), env, NOW, limiter)).status, 200);
 });
 
 test("login/logout CSRF requires positive same origin; cookies cannot authorize logout without CSRF", async () => {

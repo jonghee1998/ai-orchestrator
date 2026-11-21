@@ -4,18 +4,19 @@
 // - "done" is a closed issue or a merged PR, never a status:* label alone;
 // - ACK/completion are comment self-reports by the GitHub login, labelled as such;
 // - counts are only shown when the report was actually read (the caller renders non-ok states explicitly).
-import type { CommentEvidence, EvidenceReport, IssueEvidence, NextActionCode, PullEvidence } from "./evidence";
+import type { Acceptance, CommentEvidence, EvidenceReport, IssueEvidence, NextActionCode, PullEvidence } from "./evidence";
 
-export type GitHubStage = "await_ack" | "implementing" | "review" | "revision" | "owner_decision" | "blocked" | "triage" | "done";
+export type GitHubStage = "await_ack" | "implementing" | "review" | "revision" | "owner_decision" | "blocked" | "triage" | "closed_unverified" | "done";
 export const GITHUB_STAGE_LABEL: Record<GitHubStage, string> = {
   await_ack: "ACK 대기", implementing: "구현 중", review: "검수/리뷰", revision: "수정 대기",
-  owner_decision: "소유자 결정", blocked: "차단", triage: "라벨 정리", done: "완료(닫힘/병합)",
+  owner_decision: "소유자 결정", blocked: "차단", triage: "라벨 정리", closed_unverified: "닫힘·완료 미확인", done: "완료(닫힘/병합)",
 };
 const STAGE_OF: Record<NextActionCode, GitHubStage> = {
   await_ack: "await_ack", agent_implementing: "implementing",
   await_pr: "review", pm_review: "review", pm_rereview: "review", codex_review: "review", pm_decision: "review",
   agent_revision: "revision", owner_merge_decision: "owner_decision", pr_merged: "done",
-  blocked: "blocked", triage: "triage", done: "done",
+  stranded_stack: "blocked", completed_open: "owner_decision", acceptance_incomplete: "review", completion_unverified: "review",
+  blocked: "blocked", triage: "triage", closed_unverified: "closed_unverified", done: "done",
 };
 export const stageOf = (i: Pick<IssueEvidence, "nextAction">): GitHubStage => STAGE_OF[i.nextAction.code] ?? "triage";
 
@@ -28,13 +29,24 @@ const last = <T>(xs: T[]): T | undefined => xs[xs.length - 1];
 export interface GitHubIssueRow {
   number: number; title: string; url: string; agent: string; statusLabel: string; stage: GitHubStage;
   ack: CommentEvidence | null; completion: CommentEvidence | null;
-  pull: { number: number; url: string; state: PullEvidence["state"]; headSha: string; review: string } | null;
+  pull: { number: number; url: string; state: PullEvidence["state"]; headSha: string; review: string; acceptance: AcceptanceKind } | null;
   nextAction: string; actor: string;
   /** #67: GitHub issue state. An open issue can be in stage "done" (PR merged, closure pending) — list by THIS. */
   issueState: "open" | "closed";
 }
-function reviewText(p: PullEvidence): string {
+/** Official non-author GitHub approval and PM self-reported acceptance markers are rendered as separate signals, never merged. */
+export type AcceptanceKind = "official" | "pm-self-report" | "official+pm-self-report" | "none";
+export function acceptanceKind(p: PullEvidence, acceptances: Acceptance[] = []): AcceptanceKind {
+  const official = !!p.officialApproval && p.officialApproval.sha.toLowerCase() === p.headSha.toLowerCase();
+  const pm = acceptances.some((a) => a.pr === p.number && a.sha.toLowerCase() === p.headSha.toLowerCase());
+  return official && pm ? "official+pm-self-report" : official ? "official" : pm ? "pm-self-report" : "none";
+}
+function reviewText(p: PullEvidence, acceptances: Acceptance[] = []): string {
   if (p.detail === "skipped") return "리뷰 상세 미조회(unknown)";
+  const k = acceptanceKind(p, acceptances);
+  if (k === "official+pm-self-report") return "공식 리뷰 승인(비작성자 · 현재 head) + PM 자체 수락 표식(자기보고, 별도)";
+  if (k === "official") return `공식 리뷰 승인(비작성자 · 현재 head)`;
+  if (k === "pm-self-report") return "PM 자체 수락 표식(자기보고 · 현재 head) — 공식 리뷰 아님";
   const d = p.decision;
   if (d) return `${d.kind === "approve" ? "승인" : "수정 요청"} · ${d.source} · SHA ${d.headMatch === "exact" ? "현재 head 일치" : d.headMatch === "stale" ? "이전 head" : "확인 불가"}`;
   if (p.botReviewOnHead) return `${p.botReviewOnHead.login} 리뷰(현재 head)`;
@@ -46,6 +58,8 @@ export interface GitHubProgress {
   /** Within the read bounds; a lower bound when `coverage.issuesTruncated`. */
   total: number; open: number;
   stages: Record<GitHubStage, number>; rows: GitHubIssueRow[];
+  /** Issues whose primary PR has only a PM self-reported acceptance marker (no official non-author approval). Evidence only. */
+  pmSelfReportOnly: number;
 }
 /** #67: what the bounded reader could NOT see. Callers must disclose it and qualify counts / "none found" claims:
  *  issues truncated → issue totals are lower bounds; comments truncated → only the newest comments were read, so a
@@ -73,11 +87,11 @@ export function githubProgress(r: EvidenceReport): GitHubProgress {
     return {
       number: i.number, title: i.title, url: i.url, agent: i.agent, statusLabel: i.status, stage,
       ack: last(i.acks) ?? null, completion: last(i.completions) ?? null,
-      pull: p ? { number: p.number, url: p.url, state: p.state, headSha: p.headSha, review: reviewText(p) } : null,
+      pull: p ? { number: p.number, url: p.url, state: p.state, headSha: p.headSha, review: reviewText(p, i.acceptances), acceptance: acceptanceKind(p, i.acceptances) } : null,
       nextAction: i.nextAction.label, actor: i.nextAction.actor, issueState: i.state,
     };
   });
-  return { repo: r.repo, generatedAt: r.generatedAt, total: rows.length, open: r.issues.filter((i) => i.state === "open").length, stages, rows };
+  return { repo: r.repo, generatedAt: r.generatedAt, total: rows.length, open: r.issues.filter((i) => i.state === "open").length, stages, rows, pmSelfReportOnly: rows.filter((x) => x.pull?.acceptance === "pm-self-report").length };
 }
 
 /** agent:* label value → internal agent key used by /api/dashboard. */

@@ -50,7 +50,7 @@ async function server(extra = {}) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.ok(ready, "test server did not become ready");
-    return { request, close, tmp, password, username, token, cron, hash };
+    return { request, base, close, tmp, password, username, token, cron, hash };
   } catch (e) { await close(); throw e; }
 }
 const dataPaths = ["dashboard", "readiness", "runs", "work-queue", "evidence", "collaboration"];
@@ -88,10 +88,26 @@ test("real HTTP: password login, browser/persistent session, logout/CSRF, reconc
     assert.equal(persistent.status, 200); assert.ok(persistent.headers.get("set-cookie").includes("Max-Age=2592000"));
     const forged = cookie(persistent) + "x";
     assert.equal((await s.request("/api/session", { headers: { cookie: forged } })).body.authenticated, false);
-    for (let i = 0; i < 3; i++) assert.equal((await s.request("/api/session", post({ username: `wrong-${i}`, password: "wrong" }))).status, 401);
+    // #122: anonymous malformed junk and successful logins do not consume the budget; only wrong credentials do.
+    for (let i = 0; i < 20; i++) assert.equal((await s.request("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: "{" })).status, 400);
+    for (let i = 0; i < 5; i++) assert.equal((await s.request("/api/session", post({ username: `wrong-${i}`, password: "wrong" }))).status, 401);
     const limited = await s.request("/api/session", post(credentials, { "x-forwarded-for": "192.0.2.42" }));
     assert.equal(limited.status, 429); assert.ok(Number(limited.headers.get("retry-after")) > 0);
     assert.equal(limited.headers.get("set-cookie"), null);
+  } finally { await s.close(); }
+});
+
+test("real HTTP: legacy Host-only token exchange works; cross-origin/password Host-only rejected; flood does not lock owner", async () => {
+  const s = await server();
+  try {
+    // Node fetch sends only Host (no Origin / Sec-Fetch-Site), like curl-based legacy scripts.
+    const raw = async (body, headers = {}) => { const r = await fetch(s.base + "/api/session", { method: "POST", headers: { "content-type": "application/json", ...headers }, body }); return { status: r.status, set: r.headers.get("set-cookie") }; };
+    for (let i = 0; i < 20; i++) assert.equal((await raw("{")).status, 403); // junk never reaches the login budget
+    const ok = await raw(JSON.stringify({ token: s.token }));
+    assert.equal(ok.status, 200); assert.ok(ok.set.includes("HttpOnly"));
+    assert.equal((await raw(JSON.stringify({ token: s.token }), { origin: "https://evil.example" })).status, 403);
+    assert.equal((await raw(JSON.stringify({ username: s.username, password: s.password }))).status, 403);
+    assert.equal((await s.request("/api/session", post({ username: s.username, password: s.password }))).status, 200);
   } finally { await s.close(); }
 });
 

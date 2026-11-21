@@ -13,6 +13,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+html,
+body { background-color: #0b1220; }
+
 body {
   font-family:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
@@ -22,4 +25,9 @@ body {
 /* 모바일에서 과도한 가로 스크롤 방지 */
 * {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
+
+:focus-visible { outline: 2px solid #8db5ff; outline-offset: 3px; }
+summary { min-height: 44px; }
+html { scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }

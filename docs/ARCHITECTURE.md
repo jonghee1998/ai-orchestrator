@@ -82,3 +82,11 @@ Next.js App Router. 모바일 우선 다크모드. 하단 탭 네비게이션.
 PC 종료 후에도 운영하려면 각 에이전트의 인증을 클라우드에서 재현할 수 있어야 한다.
 구독 기반 CLI 인증은 이것이 **보장되지 않으므로**, 각 에이전트별 `cloudCapable`을
 실측해 가능한 것부터 단계적으로 클라우드로 이전한다. 구체 방식은 Phase 3에서 검토한다.
+
+## Lifecycle correctness (Issue #110 / T1)
+
+- **R9**: a closed-unmerged ancestor in a stack never delivered its branch; any open/merged descendant (any depth) is `stranded_stack`, never complete.
+- **nextAction** is derived from the lifecycle (`classify`) for open *and* closed issues (`stranded_stack`, `completed_open`, `acceptance_incomplete`, `done`, `closed_unverified`).
+- **Acceptance vs review**: `review: "pm-accepted"` = PM self-reported marker; `"verified"` = official non-author GitHub approval on the exact head. `rollup().doneWithoutOfficialReview` counts complete tasks lacking an official review. `Lifecycle.authorizesExecution` is always `false`: completion/markers never authorize execution, merge or deploy.
+- **Truncation**: `issuesTruncated` adds `issues_truncated` to per-issue `partial` → completion `unknown` (fail closed).
+- **Known limitation**: `pulls/comments/issues_truncated` are global flags applied to every issue; per-issue evidence collection (fetching only the PRs/comments each issue needs) is not implemented. Truncation therefore over-reports partial evidence rather than under-reporting.

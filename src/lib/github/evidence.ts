@@ -3,67 +3,11 @@
 // comment authorship is the GitHub login (routines post as the owner account), so agent identity in
 // comment text is self-reported and is labelled as such. Nothing is invented; missing data stays absent.
 
-export type EvidenceKind = "ack" | "completion" | "approve" | "revise" | "review" | "other";
-export type DecisionSource = "review" | "comment" | "pm-marker";
-
-export interface RawUser { login?: string | null; type?: string | null }
-export interface RawIssue {
-  number: number; title: string; body: string | null; html_url: string; state?: string;
-  labels: Array<string | { name?: string | null }>; pull_request?: unknown; updated_at?: string;
-}
-export interface RawComment { id: number; body?: string | null; html_url: string; issue_url: string; created_at: string; user?: RawUser | null }
-export interface RawPull {
-  number: number; title: string; body: string | null; html_url: string; state: string; draft?: boolean;
-  merged_at?: string | null; updated_at?: string; head: { ref: string; sha: string }; base: { ref: string };
-}
-export interface RawReview { id: number; state: string; submitted_at?: string | null; commit_id?: string | null; html_url?: string; user?: RawUser | null }
-export interface RawCommit { sha: string; commit?: { committer?: { date?: string | null } | null } | null }
-
-export interface CommentEvidence { id: number; url: string; at: string; login: string; bot: boolean; kind: EvidenceKind; headline: string }
-export interface ReviewEvidence { id: number; url?: string; at: string; login: string; state: string; commit?: string }
-export interface PullEvidence {
-  number: number; url: string; title: string; state: "open" | "closed" | "merged"; draft: boolean;
-  base: string; head: string; headSha: string;
-  linkedBy: Array<"title" | "body" | "issue-body" | "issue-comment">;
-  commits: { count: number; truncated: boolean; latestAt?: string };
-  reviews: ReviewEvidence[]; comments: CommentEvidence[];
-  /** Revision rounds: revise signals that were followed by at least one later commit. */
-  revisions: number;
-  /** Latest approve/revise signal. headMoved: a PM marker named a SHA that is no longer the PR head. */
-  decision?: {
-    kind: "approve" | "revise"; at: string; source: DecisionSource; by: string; url?: string; commitsAfter: number;
-    /** SHA the decision is bound to: official review commit_id, PM marker SHA, or the single full SHA named in a comment. */
-    sha?: string;
-    /** exact = bound to the current head; stale = bound to another SHA; unknown = no SHA evidence. Timestamps never decide this. */
-    headMatch: "exact" | "stale" | "unknown";
-    /** = headMatch === "stale" (kept for display compatibility). */
-    headMoved: boolean; stackedPulls: number[];
-  };
-  /** Latest PM "codex review" request marker; onHead = it names the current head SHA. */
-  reviewRequest?: { at: string; url: string; sha: string; onHead: boolean };
-  /** A bot (e.g. Codex connector) submitted a review on the current head SHA. */
-  botReviewOnHead?: { at: string; login: string; url?: string };
-  detail: "loaded" | "skipped";
-}
-export type NextActionCode =
-  | "done" | "blocked" | "await_ack" | "agent_implementing" | "await_pr" | "pm_review"
-  | "agent_revision" | "pm_rereview" | "owner_merge_decision" | "pr_merged" | "triage" | "codex_review" | "pm_decision";
-export interface NextAction { code: NextActionCode; label: string; actor: string }
-export interface IssueEvidence {
-  number: number; title: string; url: string; state: "open" | "closed"; agent: string; status: string;
-  acks: CommentEvidence[]; completions: CommentEvidence[]; comments: number;
-  pulls: PullEvidence[]; nextAction: NextAction;
-}
-export interface EvidenceReport {
-  source: "github"; repo: string; generatedAt: string;
-  /** Session/runtime callbacks are intentionally not consulted here (Issue #59 deferred). */
-  runtimeProof: "not_included";
-  identityNote: string;
-  limits: { issues: number; pulls: number; comments: number; commentsTruncated: boolean; pullsTruncated: boolean; detailedPulls: number;
-    /** #67: the issue listing hit its page bound — older issues are omitted from every count. */
-    issuesTruncated: boolean };
-  issues: IssueEvidence[];
-}
+import type {
+  CommentEvidence, DecisionSource, EvidenceKind, IssueEvidence, NextAction, PullEvidence, RawComment, RawIssue, RawPull, RawReview, RawCommit, ReviewEvidence, EvidenceReport, StackRef, Acceptance,
+} from "./evidence-types";
+export type * from "./evidence-types";
+import { classify, type Lifecycle } from "../workflow/lifecycle";
 
 const labelNames = (i: RawIssue) => i.labels.map((l) => (typeof l === "string" ? l : l.name)).filter((l): l is string => typeof l === "string");
 function namespaced(labels: string[], prefix: string): string {
@@ -108,12 +52,13 @@ export function toComment(c: RawComment): CommentEvidence {
   return { id: c.id, url: c.html_url, at: c.created_at, login, bot: c.user?.type === "Bot" || login.endsWith("[bot]"), kind: classifyComment(c.body), headline: headline(c.body) };
 }
 
-const KEYWORD_REF = /\b(?:refs?|close[sd]?|fix(?:e[sd])?|resolve[sd]?|issue)\b\s*:?\s*#(\d+)/gi;
+// Keyword followed by one OR MORE refs: `Refs #104 #99 #102`, `Refs #102, #99`, `Closes #1 and #2`.
+const KEYWORD_REF = /\b(?:refs?|close[sd]?|fix(?:e[sd])?|resolve[sd]?|issue)\b\s*:?\s*((?:#\d+(?:\s*(?:,|and|&)?\s*)?)+)/gi;
 const ANY_REF = /#(\d+)/g;
 /** Issue numbers a PR claims to address: any `#N` in its title, keyword-gated `#N` in its body. */
 export function pullIssueRefs(p: Pick<RawPull, "title" | "body">): { title: Set<number>; body: Set<number> } {
   const title = new Set([...p.title.matchAll(ANY_REF)].map((m) => Number(m[1])));
-  const body = new Set([...(p.body ?? "").matchAll(KEYWORD_REF)].map((m) => Number(m[1])));
+  const body = new Set([...(p.body ?? "").matchAll(KEYWORD_REF)].flatMap((m) => [...m[1].matchAll(ANY_REF)].map((n) => Number(n[1]))));
   return { title, body };
 }
 /** PR numbers an issue comment (or issue body, #65) points at: `/pull/N` URLs, `PR #N` / `PR: #N` mentions,
@@ -135,6 +80,13 @@ export function pmMarkers(c: RawComment): PmMarker[] {
     kind: m[5] === "revise" ? "revise_request" as const : "review_request" as const,
     pr: Number(m[2]), sha: m[3], agent: m[4], round: Number(m[6]), url: c.html_url, at: c.created_at,
   }));
+}
+
+/** PM acceptance marker. SELF-REPORTED by whoever posts it (all routines share the owner login): it is a record, not
+ *  authentication, and must never authorize execution, merge or deploy. Binds issue, PR, exact SHA and target branch. */
+const PM_ACCEPT = /<!--\s*gpt-pm-accept:v1\s+issue(\d+):pr(\d+):([a-f0-9]{40}):target=([A-Za-z0-9_./-]+)\s*-->/g;
+export function pmAcceptances(c: RawComment): Acceptance[] {
+  return [...(c.body ?? "").matchAll(PM_ACCEPT)].map((m) => ({ issue: Number(m[1]), pr: Number(m[2]), sha: m[3], target: m[4], at: c.created_at, url: c.html_url, by: c.user?.login ?? "unknown" }));
 }
 
 const FULL_SHA = /\b[a-f0-9]{40}\b/g;
@@ -165,11 +117,17 @@ export function pullEvidence(p: RawPull, linkedBy: PullEvidence["linkedBy"], det
   const addressed = (s: { at: string; sha?: string }) => after(s.at) > 0 || (!!s.sha && s.sha !== p.head.sha) || stackedAfter(s.at).length > 0;
   const last = signals[signals.length - 1];
   const reviewRequest = markers.filter((m) => m.kind === "review_request").sort((a, b) => a.at.localeCompare(b.at)).pop();
+  // Official approval: latest review by a NON-author; must be APPROVED and bound to the current head. Author unknown → unprovable.
+  const author = p.user?.login ?? undefined;
+  const lastOfficial = author ? reviews.filter((r) => r.login !== author && r.login !== "unknown" && REVIEW_DECISION[r.state]).pop() : undefined;
+  const officialApproval = detail && lastOfficial && lastOfficial.state === "APPROVED" && lastOfficial.commit?.toLowerCase() === p.head.sha.toLowerCase()
+    ? { by: lastOfficial.login, at: lastOfficial.at, sha: lastOfficial.commit!.toLowerCase(), url: lastOfficial.url } : undefined;
   const botReviewOnHead = reviews.filter((r) => r.login.endsWith("[bot]") && r.commit === p.head.sha).pop();
   return {
     number: p.number, url: p.html_url, title: p.title,
     state: p.merged_at ? "merged" : p.state === "open" ? "open" : "closed", draft: !!p.draft,
     base: p.base.ref, head: p.head.ref, headSha: p.head.sha, linkedBy,
+    ...(author ? { author } : {}), ...(p.merged_at ? { mergedAt: p.merged_at } : {}), ...(officialApproval ? { officialApproval } : {}),
     commits: { count: commitTimes.length, truncated: detail?.commitsTruncated ?? false, latestAt: commitTimes[commitTimes.length - 1] },
     reviews, comments,
     revisions: detail ? signals.filter((s) => s.kind === "revise" && addressed(s)).length : 0,
@@ -184,9 +142,16 @@ export function pullEvidence(p: RawPull, linkedBy: PullEvidence["linkedBy"], det
 }
 
 const AGENT_NAMES: Record<string, string> = { opus: "Claude Opus", claude: "Claude Sonnet", codex: "Codex" };
-export function nextAction(i: { state: "open" | "closed"; agent: string; status: string; acks: unknown[]; pulls: PullEvidence[] }): NextAction {
+/** `closedVerified`: the lifecycle (same model as the workspace) proved the closed issue complete. Otherwise a closed
+ *  issue is never "done" here — it is `closed_unverified`, matching lifecycle phase `unknown`. */
+export function nextAction(i: { state: "open" | "closed"; agent: string; status: string; acks: unknown[]; pulls: PullEvidence[] }, lc?: Pick<Lifecycle, "completion" | "missingEvidence">): NextAction {
   const agent = AGENT_NAMES[i.agent] ?? `agent:${i.agent}`;
-  if (i.state === "closed") return { code: "done", label: "완료 (이슈 닫힘)", actor: "-" };
+  const miss = lc?.missingEvidence ?? [];
+  // Unified with lifecycle (same model as the workspace). Evidence only: none of these authorizes execution/merge/deploy.
+  if (miss.includes("stranded_stack")) return { code: "stranded_stack", label: "스택 단절 — 닫힌(미병합) 상위 PR 아래 PR이 대상 브랜치에 도달하지 않음. PM 정리 필요", actor: "PM" };
+  if (i.state === "closed") return lc?.completion === "complete" ? { code: "done", label: "완료 (완료 기준 충족 확인됨)", actor: "-" } : { code: "closed_unverified", label: "이슈 닫힘 — 완료 기준 확인되지 않음", actor: "PM" };
+  if (lc?.completion === "complete") return { code: "completed_open", label: "완료 기준 충족 — 이슈가 아직 열려 있음, PM 종료 판단 (실행 승인 아님)", actor: "PM" };
+  if (miss.includes("acceptance_current")) return { code: "acceptance_incomplete", label: "병합됨 — 현재 head 기준 수락(PM 표식 또는 공식 리뷰) 없음", actor: "PM" };
   if (i.status === "blocked") return { code: "blocked", label: "차단 — 이슈 코멘트의 차단 사유 해소 필요", actor: "PM/소유자" };
   if (i.agent === "none" || i.agent === "ambiguous" || i.status === "none" || i.status === "ambiguous")
     return { code: "triage", label: "agent:/status: 라벨 정리 필요", actor: "PM" };
@@ -196,6 +161,9 @@ export function nextAction(i: { state: "open" | "closed"; agent: string; status:
     if (i.status === "review") return { code: "await_pr", label: "검수 상태이나 연결된 PR 증거 없음 — 완료 보고 확인", actor: "PM" };
     return { code: "agent_implementing", label: `${agent} 구현 중 (PR 미생성)`, actor: agent };
   }
+  // Fail closed: with lifecycle evidence available, a merged PR on an OPEN issue is never "close the issue" unless the lifecycle proved completion
+  // (handled above). Unknown (partial/missing metadata/merge order) or incomplete completion must not fall through to pr_merged.
+  if (pr.state === "merged" && lc) return { code: "completion_unverified", label: `PR #${pr.number} 병합됨 — 완료 기준 ${lc.completion === "unknown" ? "확인 불가" : "미충족"}${miss.length ? ` (${miss.join(", ")})` : ""}. 이슈 종료 판단 불가, PM 확인 필요`, actor: "PM" };
   if (pr.state === "merged") return { code: "pr_merged", label: `PR #${pr.number} 병합됨 — 이슈 종료 판단`, actor: "PM" };
   const d = pr.decision;
   if (d?.kind === "revise" && d.commitsAfter === 0 && !d.headMoved && d.stackedPulls.length)
@@ -251,6 +219,22 @@ export function linkPulls(issues: RawIssue[], pulls: RawPull[], comments: RawCom
   return links;
 }
 
+const toRef = (p: RawPull, explicit: boolean): StackRef => ({
+  number: p.number, state: p.merged_at ? "merged" : p.state === "open" ? "open" : "closed", base: p.base.ref, head: p.head.ref, headSha: p.head.sha,
+  ...(p.merged_at ? { mergedAt: p.merged_at } : {}), explicit,
+});
+/** Every repo PR stacked on a seed PR (Q.base === P.head, transitive), plus the seeds. Linked or not: up-stack PRs count. */
+export function stackUniverse(seeds: StackRef[], all: StackRef[]): StackRef[] {
+  const out = new Map(seeds.map((r) => [r.number, r]));
+  let frontier = seeds;
+  while (frontier.length) {
+    const next = all.filter((q) => !out.has(q.number) && frontier.some((p) => q.base === p.head && q.head !== p.head));
+    next.forEach((q) => out.set(q.number, q)); frontier = next;
+  }
+  return [...out.values()].sort((a, b) => a.number - b.number);
+}
+
+const toReason = (r: string | null | undefined) => (r === "completed" || r === "not_planned" || r === "duplicate" ? r : r ? ("unknown" as const) : undefined);
 export function buildEvidence(input: EvidenceInput): EvidenceReport {
   const byThread = new Map<number, RawComment[]>();
   for (const c of input.comments) {
@@ -273,12 +257,29 @@ export function buildEvidence(input: EvidenceInput): EvidenceReport {
         .sort((a, b) => a[0] - b[0])
         .map(([n, how]) => pullEvidence(pullsByNum.get(n)!, [...how].sort() as PullEvidence["linkedBy"], input.pullDetail.get(n), byThread.get(n) ?? [], markersByPr.get(n) ?? [],
           input.pulls.filter((q) => q.number !== n && q.base.ref === pullsByNum.get(n)!.head.ref)));
+      const explicitNums = [...(links.get(i.number) ?? new Map<number, Set<string>>()).entries()].filter(([, how]) => ["title", "body", "issue-body"].some((h) => how.has(h as never))).map(([n]) => n);
+      const allRefs = input.pulls.map((q) => toRef(q, explicitNums.includes(q.number)));
+      const stack = stackUniverse(allRefs.filter((r) => r.explicit).map((r) => ({ ...r, officialApproved: pulls.find((x) => x.number === r.number)?.officialApproval?.sha.toLowerCase() === r.headSha.toLowerCase() || undefined })), allRefs);
+      const stackNums = new Set(stack.map((r) => r.number));
+      const acceptances = [
+        ...(byThread.get(i.number) ?? []).flatMap(pmAcceptances),
+        ...[...stackNums, ...pulls.map((x) => x.number)].flatMap((n) => (byThread.get(n) ?? []).flatMap(pmAcceptances).filter((a) => a.pr === n)),
+      ].filter((a) => a.issue === i.number && stackNums.has(a.pr));
+      const partial = [
+        ...(input.issuesTruncated ? ["issues_truncated"] : []),
+        ...(input.pullsTruncated ? ["pulls_truncated"] : []), ...(input.commentsTruncated ? ["comments_truncated"] : []),
+        ...pulls.filter((x) => stackNums.has(x.number) && x.detail === "skipped").map((x) => `pull_detail_skipped:#${x.number}`),
+        ...pulls.filter((x) => stackNums.has(x.number) && x.commits.truncated).map((x) => `commits_truncated:#${x.number}`),
+      ];
       const base = {
         number: i.number, title: i.title, url: i.html_url, state: (i.state === "closed" ? "closed" : "open") as "open" | "closed",
         agent: namespaced(labels, "agent:"), status: i.state === "closed" ? "done" : namespaced(labels, "status:"),
         acks: own.filter((c) => c.kind === "ack"), completions: own.filter((c) => c.kind === "completion"), comments: own.length, pulls,
       };
-      return { ...base, nextAction: nextAction(base) };
+      const rich = { ...base, stack, acceptances, partial };
+      // Same lifecycle model as the workspace derives nextAction for open AND closed issues (I8 — one model).
+      const lc = classify({ status: base.status, dependsOn: [], issueState: base.state, stateReason: toReason(i.state_reason), description: i.body ?? undefined }, { ...rich, nextAction: nextAction(base) }, () => true);
+      return { ...rich, nextAction: nextAction(base, lc) };
     });
   return {
     source: "github", repo: input.repo, generatedAt: input.generatedAt, runtimeProof: "not_included",

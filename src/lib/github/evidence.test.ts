@@ -71,8 +71,12 @@ test("skipped detail is reported, not guessed; merged and closed issues map dete
   const ev = build([issue(5, ["agent:codex", "status:review"]), issue(4, ["agent:codex"], "closed")], [pull(6, "x", "Fixes #5", { merged_at: "2026-01-01T00:00:00Z", state: "closed" })], []);
   assert.equal(ev.issues[0].pulls[0].detail, "skipped");
   assert.equal(ev.issues[0].pulls[0].decision, undefined);
-  assert.equal(ev.issues[0].nextAction.code, "pr_merged");
-  assert.equal(ev.issues[1].nextAction.code, "done");
+  assert.equal(ev.issues[0].nextAction.code, "completion_unverified");
+  assert.equal(ev.issues[1].nextAction.code, "closed_unverified"); // closed but no completion type → never "done" (I8)
+  const ok = build([{ ...issue(4, ["agent:codex"], "closed", "Completion type: nondeploy"), state_reason: "completed" }], [], []);
+  assert.equal(ok.issues[0].nextAction.code, "done");
+  const cancelled = build([{ ...issue(4, ["agent:codex"], "closed", "Completion type: nondeploy"), state_reason: "not_planned" }], [], []);
+  assert.equal(cancelled.issues[0].nextAction.code, "closed_unverified");
 });
 
 test("ambiguous labels require triage", () => {
@@ -198,4 +202,42 @@ test("PR #61 P2: only affirmative approval counts; pending/required approval phr
     assert.equal(ev.pulls[0].decision, undefined, body);
     assert.notEqual(ev.nextAction.code, "owner_merge_decision", body);
   }
+});
+
+// ---- Issue #110 (T1): lifecycle-derived nextAction + issuesTruncated fail-closed ----
+const T1BODY = "Completion type: integration\nIntegration target: base";
+const mergedPull = (n: number, base: string, head: string, at: string, sha: string, linked = true): RawPull =>
+  pull(n, linked ? `Closes #1` : `unlinked ${n}`, null, { state: "closed", merged_at: at, base: { ref: base }, head: { ref: head, sha } } as Partial<RawPull>);
+const acceptMarker = (pr: number, sha: string) => comment(900, 1, `<!-- gpt-pm-accept:v1 issue1:pr${pr}:${sha}:target=base -->`, "2026-01-01T00:01:00Z");
+test("T1: open issue — incomplete acceptance, stranded stack, completed-open derive nextAction from lifecycle", () => {
+  const sa = "a".repeat(40), sb = "b".repeat(40), sc = "c".repeat(40);
+  const open = (extraPulls: RawPull[], comments: RawComment[]) => build([issue(1, ["agent:claude", "status:review"], "open", T1BODY)], extraPulls, comments, new Map(extraPulls.map((x) => [x.number, { reviews: [], commits: [commit("2026-01-01T00:00:00Z")], commitsTruncated: false }]))).issues[0];
+  // merged boundary, no acceptance
+  assert.equal(open([mergedPull(10, "base", "a", "2026-01-01T00:00:10Z", sa)], []).nextAction.code, "acceptance_incomplete");
+  // completed but issue still open
+  assert.equal(open([mergedPull(10, "base", "a", "2026-01-01T00:00:10Z", sa)], [acceptMarker(10, sa)]).nextAction.code, "completed_open");
+  // stranded stack: A merged, B closed unmerged, C merged on B
+  const closedB = pull(11, "x", "Refs #1", { state: "closed", base: { ref: "a" }, head: { ref: "b", sha: sb } } as Partial<RawPull>);
+  const l = open([mergedPull(10, "base", "a", "2026-01-01T00:00:10Z", sa), closedB, mergedPull(12, "b", "c", "2026-01-01T00:00:30Z", sc, false)], [acceptMarker(10, sa)]);
+  assert.equal(l.nextAction.code, "stranded_stack");
+});
+test("T1: issuesTruncated makes completion evidence partial (fail closed)", () => {
+  const sa = "a".repeat(40);
+  const r = buildEvidence({ repo: R, generatedAt: "2026-01-02T00:00:00Z", issues: [issue(1, ["agent:claude", "status:review"], "closed", T1BODY)], pulls: [mergedPull(10, "base", "a", "2026-01-01T00:00:10Z", sa)], comments: [acceptMarker(10, sa)], pullDetail: new Map([[10, { reviews: [], commits: [commit("2026-01-01T00:00:00Z")], commitsTruncated: false }]]), commentsTruncated: false, pullsTruncated: false, issuesTruncated: true });
+  assert.ok(r.issues[0].partial?.includes("issues_truncated")); assert.notEqual(r.issues[0].nextAction.code, "done");
+});
+
+// ---- Issue #113 (T1 revision 1): open + unknown/incomplete completion never falls through to pr_merged ----
+test("T1r1/P1: open issue with unknown completion never yields pr_merged (partial, missing metadata, merge order)", () => {
+  const sa = "a".repeat(40);
+  const det = new Map([[10, { reviews: [], commits: [commit("2026-01-01T00:00:00Z")], commitsTruncated: false }]]);
+  const mk = (body: string, o: { issuesTruncated?: boolean; mergedAt?: string } = {}) => buildEvidence({ repo: R, generatedAt: "2026-01-02T00:00:00Z", issues: [issue(1, ["agent:claude", "status:review"], "open", body)], pulls: [mergedPull(10, "base", "a", o.mergedAt ?? "2026-01-01T00:00:10Z", sa)], comments: [acceptMarker(10, sa)], pullDetail: det, commentsTruncated: false, pullsTruncated: false, issuesTruncated: o.issuesTruncated }).issues[0];
+  const partial = mk(T1BODY, { issuesTruncated: true });
+  assert.ok(partial.partial?.includes("issues_truncated")); assert.equal(partial.nextAction.code, "completion_unverified");
+  assert.equal(mk("no completion type here").nextAction.code, "completion_unverified"); // missing metadata
+  assert.equal(mk("Completion type: integration").nextAction.code, "completion_unverified"); // missing target
+  for (const x of [partial, mk("no completion type here"), mk("Completion type: integration")]) assert.notEqual(x.nextAction.code, "pr_merged");
+  // merge order unknown: a stacked merged PR without timestamps
+  const a = mergedPull(10, "base", "a", "2026-01-01T00:00:10Z", sa), b = { ...mergedPull(11, "a", "b", "2026-01-01T00:00:20Z", "b".repeat(40), false), merged_at: null, state: "closed" } as RawPull;
+  assert.notEqual(buildEvidence({ repo: R, generatedAt: "2026-01-02T00:00:00Z", issues: [issue(1, ["agent:claude", "status:review"], "open", T1BODY)], pulls: [a, b], comments: [], pullDetail: det, commentsTruncated: false, pullsTruncated: false }).issues[0].nextAction.code, "pr_merged");
 });
