@@ -5,6 +5,7 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "1.11.0", date: "2026-11-21", pr: 0, title: "구조 탭", items: ["하단에 '구조' 탭 추가: 오케스트레이터 아키텍처 그림과 단계별 흐름", "역할(PM·Sonnet·Opus·Codex·Actions)과 보조 도구(ECC·Impeccable·claudex·Playwright)가 어디에 붙어 어떻게 쓰이는지 정리"] },
   { version: "1.10.0", date: "2026-11-21", pr: 237, title: "계획 감사 (claudex 루프)", items: ["PM이 쓴 계획 Issue를 승인 전에 Codex가 감사, PM이 고치면 다시 감사 (최대 3라운드)", "실제 코드 일치·스텝 분할·완료 기준·위험·모델 선택 점검, 결과는 Issue 댓글", "Codex를 못 쓰면 Claude Opus가 계획 에이전트로 대신 감사"] },
   { version: "1.9.0", date: "2026-11-21", pr: 236, title: "결과 화면 자동 테스트", items: ["모든 PR의 CI에서 실제 빌드·실제 로그인으로 4개 탭을 폰 폭 360/390/430px로 열어 확인", "기대 문구·가로 넘침·페이지 오류·외부 요청 검사", "스크린샷 12장을 CI 결과에 보관"] },
   { version: "1.8.0", date: "2026-11-21", pr: 235, title: "디자인 스킬 Impeccable", items: ["화면 스텝에서 구현 Claude가 디자인 스킬 Impeccable을 따름 (금지 패턴·품질 기준·접근성)", "상황판은 Operate 모드, 기존 화면은 디자인 유지가 기본", "원문 그대로 포함하고 파일 해시 고정"] },

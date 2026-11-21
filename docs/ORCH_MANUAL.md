@@ -110,7 +110,7 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 
 화면(UI) 스텝에서는 구현 Claude가 디자인 스킬 **Impeccable**(`.claude/skills/impeccable`)을 따릅니다. 상황판은 Operate 모드(훑어보기·일관성·모바일 우선)이고, 기존 화면 수정은 기존 디자인을 유지하는 refinement가 기본입니다. 규칙은 CLAUDE.md "디자인 스킬" 절.
 
-**결과 화면 테스트 (Playwright):** 모든 PR의 CI에서 `screens` 검사가 실제 빌드를 띄우고 실제 로그인으로 4개 탭(프로젝트·AI 팀·PM 브리핑·패치노트)을 폰 폭 360/390/430px로 엽니다. 기대 문구가 보이는지, 가로로 넘치는지, 페이지 오류·외부 요청·GitHub 쓰기가 없는지 확인합니다. GitHub API는 가짜 서버(`scripts/screens/fixtures.mjs`)를 씁니다. 스크린샷 12장은 해당 CI 실행의 **Artifacts → screens**에서 받을 수 있습니다. 로컬에서는 `npm run build && npm run screens`.
+**결과 화면 테스트 (Playwright):** 모든 PR의 CI에서 `screens` 검사가 실제 빌드를 띄우고 실제 로그인으로 5개 탭(프로젝트·AI 팀·PM 브리핑·패치노트·구조)을 폰 폭 360/390/430px로 엽니다. 기대 문구가 보이는지, 가로로 넘치는지, 페이지 오류·외부 요청·GitHub 쓰기가 없는지 확인합니다. GitHub API는 가짜 서버(`scripts/screens/fixtures.mjs`)를 씁니다. 스크린샷 15장은 해당 CI 실행의 **Artifacts → screens**에서 받을 수 있습니다. 로컬에서는 `npm run build && npm run screens`.
 
 ## 8. 처음 한 번 설정 (저장소마다)
 
