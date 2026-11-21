@@ -133,6 +133,10 @@ try {
       if (await page.getByText("알파공정 3단계 확인항목").isVisible()) problems.push("[projects] 대기 스텝의 할 일이 기본 상태에서 보임");
       if (await page.getByText("끝난 시험 작업").isVisible()) problems.push("[projects] 끝난 작업이 기본 상태에서 보임");
       if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
+      // 'PM에게 말하기' 바로가기: 새 창 링크
+      const pmLink = page.getByRole("link", { name: "PM에게 말하기" });
+      if (!(await pmLink.isVisible())) problems.push("[projects] 'PM에게 말하기' 링크가 보이지 않음");
+      else if ((await pmLink.getAttribute("target")) !== "_blank" || !/noreferrer/.test((await pmLink.getAttribute("rel")) ?? "") || !/^https?:\/\//.test((await pmLink.getAttribute("href")) ?? "")) problems.push("[projects] 'PM에게 말하기' 링크가 새 창(_blank, noreferrer, http 주소)이 아님");
       // 새로고침 버튼: 보이고, 누르면(GET 만 발생) '방금 갱신' 시각이 나와야 함
       const refreshBtn = page.getByRole("button", { name: "↻ 새로고침" });
       if (!(await refreshBtn.isVisible())) problems.push("[projects] '↻ 새로고침' 버튼이 보이지 않음");

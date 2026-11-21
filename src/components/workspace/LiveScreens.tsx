@@ -10,7 +10,8 @@ import { OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, O
 
 export function LiveProjectsScreen({ projectId }: { projectId?: string; taskId?: string }) {
   if (projectId) return <div className="space-y-4"><Link href="/projects" className="inline-flex min-h-11 items-center text-accent">← 프로젝트</Link><Card><p>프로젝트 상세는 자동 진행 작업으로 통합되었습니다</p></Card><Account /></div>;
-  return <div className="space-y-4"><PageTitle title="AI Orchestrator" subtitle="실제 GitHub 기록 기준" /><OrchRunsPanel /><Account /></div>;
+  const pmChatUrl = process.env.NEXT_PUBLIC_PM_CHAT_URL || "https://claude.ai";
+  return <div className="space-y-4"><div className="flex items-start justify-between gap-3"><PageTitle title="AI Orchestrator" subtitle="실제 GitHub 기록 기준" /><a href={pmChatUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center rounded-lg border border-border px-3 text-sm text-accent">PM에게 말하기</a></div><OrchRunsPanel /><Account /></div>;
 }
 export function LiveAgentsScreen({ agentId }: { agentId?: string }) {
   if (agentId) return <div className="space-y-4"><Link href="/agents" className="inline-flex min-h-11 items-center text-accent">← AI 팀</Link><Card><p>AI 상세는 AI 팀 화면으로 통합되었습니다</p></Card><Account /></div>;
