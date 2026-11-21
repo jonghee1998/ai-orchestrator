@@ -1,16 +1,15 @@
-import type { Collaboration } from "../runs/collaboration";
-// 결정적 합성 픽스처 (#85). 실제 데이터가 아니며 모든 값은 고정 상수다(현재 시각/난수 미사용).
+// 테스트 전용 결정적 합성 픽스처. 실제 데이터가 아니며 모든 값은 고정 상수다(현재 시각/난수 미사용).
 import { defaultControl, PRESETS } from "../control/model";
 import { buildSnapshot } from "../control/service";
-import { runView } from "../runs/run-trust";
 import type { DispatchRecord } from "../runs/run-tracking";
 import type { StoreData } from "../runs/store";
 import type { WorkQueueTask } from "../github/work-queue";
 import type { EvidenceReport, IssueEvidence } from "../github/evidence";
-import type { Scenario } from "./mode";
 
-export const DEMO_NOW = "2026-01-15T03:30:00.000Z"; // KST 2026-01-15 12:30:00 (고정)
-const T = (m: number) => new Date(Date.parse(DEMO_NOW) - m * 60_000).toISOString();
+export type Scenario = "normal" | "empty";
+
+export const SAMPLE_NOW = "2026-01-15T03:30:00.000Z";
+const T = (m: number) => new Date(Date.parse(SAMPLE_NOW) - m * 60_000).toISOString();
 const rec = (n: number, agent: string, status: DispatchRecord["status"], min: number, x: Partial<DispatchRecord> = {}): DispatchRecord => ({
   dispatchId: `demo-${n}`, issueNumber: 900 + n, agent, status, requestedAt: T(min + 15), attempt: 1, evidence: [], source: "none", lastActivityAt: T(min), ...x,
 });
@@ -30,8 +29,7 @@ export function demoStore(scenario: Scenario): StoreData {
   }
   return { records, events: {}, control, audit: scenario === "empty" ? [] : [{ at: T(60), actor: "demo", action: "preset", detail: "all-enabled (합성)", version: 7 }], blocked: {}, gateChecks: {} };
 }
-export const demoDashboard = (s: Scenario) => buildSnapshot(demoStore(s), DEMO_NOW);
-export const demoRuns = (s: Scenario) => Object.values(demoStore(s).records).map(runView);
+export const demoDashboard = (s: Scenario) => buildSnapshot(demoStore(s), SAMPLE_NOW);
 
 const PROJECTS = [
   { id: "sample-dashboard", name: "모바일 업무 대시보드", goal: "휴대폰에서 진행 상황과 다음 할 일을 쉽게 확인합니다." },
@@ -67,32 +65,14 @@ export function demoEvidence(s: Scenario): EvidenceReport {
     issue(904, "검수 의견을 답변에 반영", "open", "in-progress", "agent_revision", "수정 반영 중", { acks: [c(4, "ack", 120)], comments: 3 }),
     issue(905, "모바일 화면 구성안 확정", "closed", "done", "done", "완료", { acks: [c(5, "ack", 300)], completions: [c(6, "completion", 240)], comments: 2 }),
     issue(906, "상담 정책 확인 후 안내문 작성", "open", "blocked", "blocked", "막힘 (합성 오류)"),
-    // Closed demo tasks need matching (empty-PR) evidence: completion fails closed without it (Issue #119).
+    // Closed tasks need matching (empty-PR) evidence: completion fails closed without it (Issue #119).
     issue(909, "주간 보고서 항목 정리", "closed", "done", "done", "완료"),
     issue(910, "보고서 결과 검수 및 업무 종료", "closed", "done", "done", "완료"),
   ];
   return {
-    source: "github", repo: "demo/synthetic", generatedAt: DEMO_NOW, runtimeProof: "not_included",
-    identityNote: "데모 합성 데이터 — 실제 GitHub 아님",
+    source: "github", repo: "demo/synthetic", generatedAt: SAMPLE_NOW, runtimeProof: "not_included",
+    identityNote: "합성 데이터 — 실제 GitHub 아님",
     limits: { issues: issues.length, pulls: 0, comments: 0, commentsTruncated: false, pullsTruncated: false, detailedPulls: 0, issuesTruncated: false },
     issues: issues.map((i) => ({ ...i, agent: demoQueue(s).find((t) => t.id === String(i.number))?.agent ?? "unknown" })),
   };
 }
-
-export const demoReadiness = () => ({
-  items: [
-    { id: "database", label: "데이터베이스", state: "missing", detail: "데모 모드 — 실제 DB 미사용" },
-    { id: "github", label: "GitHub", state: "missing", detail: "데모 모드 — 실제 GitHub 미사용" },
-  ],
-  releaseBlocked: true,
-  github: { state: "unconfigured", repo: null, tokenSource: "none", openIssues: null },
-  githubEvidence: { ready: false, scope: "github_read_only", runtimeVerified: false, queueReadable: false, reads: null, detail: "데모 합성 데이터" },
-});
-
-export const demoCollaborations = (s: Scenario): Collaboration[] => s === "empty" ? [] : [{
-  id: "demo-workflow-902", cycle: 1, stage: "codex", dispatchId: "demo-2", updatedAt: T(2),
-  assignment: { repo: "demo/synthetic", issueNumber: 902, baseBranch: "demo-base", baseSha: "a".repeat(40), sourcePr: 1,
-    workBranch: "demo-work", claudeAgent: "claude-sonnet", instructions: "[DEMO] 합성 검수 작업", reviewCompletedPr: true },
-  feedback: "[DEMO] 실제 에이전트 실행 없음",
-  history: [{ at: T(9), action: "demo_assigned", dispatchId: "demo-2", detail: "[DEMO] 합성 이력" }],
-}];

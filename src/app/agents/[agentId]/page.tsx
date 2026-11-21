@@ -1,2 +1,2 @@
-import { AgentDetailScreen } from "@/components/workspace/WorkspaceScreens";
-export default async function Page({params}:{params:Promise<{agentId:string}>}) { const {agentId}=await params; return <AgentDetailScreen agentId={agentId}/>; }
+import { LiveAgentsScreen } from "@/components/workspace/LiveScreens";
+export default async function Page({params}:{params:Promise<{agentId:string}>}) { const {agentId}=await params; return <LiveAgentsScreen agentId={agentId}/>; }

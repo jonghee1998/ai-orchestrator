@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { demoReadResponse } from "@/lib/demo/respond-http";
 import { requireRead } from "../_auth";
 import { computeReadiness, githubEvidenceReadiness } from "@/lib/readiness";
 import { getRunStore } from "@/lib/runs/store";
@@ -11,8 +10,6 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request): Promise<NextResponse> {
   const denied = requireRead(req);
   if (denied) return denied;
-  const demo = demoReadResponse(req, "readiness");
-  if (demo) return demo as NextResponse;
   const r = computeReadiness(process.env);
   // Real connectivity probe (read-only store read). Reports a category only, never messages or values.
   if (process.env.DATABASE_URL) {

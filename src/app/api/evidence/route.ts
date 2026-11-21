@@ -1,6 +1,5 @@
 // Issue #60 — protected, read-only GitHub collaboration evidence. Same read/admin token as other live APIs.
 import { NextResponse } from "next/server";
-import { demoReadResponse } from "@/lib/demo/respond-http";
 import { NOSTORE, requireRead } from "../_auth";
 import { EvidenceConfigurationError, EvidenceReadError, readGitHubEvidence } from "@/lib/github/evidence-reader";
 import type { EvidenceReport } from "@/lib/github/evidence";
@@ -16,8 +15,6 @@ const TTL_MS = 30_000;
 export async function GET(req: Request) {
   const denied = requireRead(req);
   if (denied) return denied;
-  const demo = demoReadResponse(req, "evidence");
-  if (demo) return demo as NextResponse;
   const key = `${process.env.GITHUB_REPO ?? ""}`;
   if (memo && memo.key === key && Date.now() - memo.at < TTL_MS) return NextResponse.json({ mode: "live", report: memo.report }, { headers: NOSTORE });
   try {

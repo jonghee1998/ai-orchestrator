@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { workspace, workActivity, PHASE_LABEL, type Runtime } from "./mobile-workspace";
 import { normalizeIssues, type WorkQueueTask } from "./work-queue";
-import { demoQueue, demoEvidence, demoDashboard } from "../demo/fixtures";
+import { demoQueue, demoEvidence, demoDashboard } from "../workspace/sample-data";
 
 test("projects use one unambiguous label or milestone; no fabricated project/goal", () => {
   const base = { number: 1, title: "task", body: null, labels: [], html_url: "" };

@@ -1,2 +1,2 @@
-import { BriefingScreen } from "@/components/workspace/WorkspaceScreens";
-export default function Page() { return <BriefingScreen />; }
+import { LiveBriefingScreen } from "@/components/workspace/LiveScreens";
+export default function Page() { return <LiveBriefingScreen />; }

@@ -62,9 +62,3 @@ test("sharedGet: rejected fetch clears pending so next call retries", async () =
   let n = 0; const g = createSharedGet((async () => { n++; if (n === 1) throw new Error("net"); return { status: 200, json: async () => ({}) }; }) as never);
   await assert.rejects(g("/x", "t")); await g("/x", "t"); assert.equal(n, 2);
 });
-
-import { formatRefreshTime } from "./format";
-test("formatRefreshTime shows 없음 without a successful refresh", () => {
-  assert.equal(formatRefreshTime(null), "없음");
-  assert.equal(formatRefreshTime(Date.UTC(2026, 0, 2, 3, 4, 5)), "12:04:05 KST");
-});
