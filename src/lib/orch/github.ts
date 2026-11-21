@@ -1,9 +1,11 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
-//   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*)
+//   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
+//           pending '[plan]' Issues + their plan-review comments
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch)
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read, Variables read/write, Actions read/write).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
-import { USAGE_RETRY_MS, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type OrchRun, type RepoView, type UsageRefresh, type UsageView } from "./model";
+import { USAGE_RETRY_MS, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type OrchRun, type PendingPlan, type RepoView, type UsageRefresh, type UsageView } from "./model";
+import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Fetch = typeof fetch;
@@ -56,9 +58,25 @@ async function readUsageIssue(f: Fetch, token: string, repo: string): Promise<Us
   return parseUsage(list?.[0]?.body);
 }
 
+/** Plans read per repo; each costs one comments request. */
+export const MAX_PENDING_PLANS = 5;
+
+export async function readPendingPlans(f: Fetch, token: string, repo: string): Promise<PendingPlan[]> {
+  const issues = (await call(f, token, "GET", `/repos/${repo}/issues?state=open&per_page=30`)) as PlanIssue[];
+  const candidates = (Array.isArray(issues) ? issues : [])
+    .filter((i) => isPlanCandidate(repo, i) && parsePendingPlan(repo, i, []) !== null)
+    .slice(0, MAX_PENDING_PLANS);
+  const list = await Promise.all(candidates.map(async (i) => {
+    // Limit: only the first page (100 comments) is read; a plan Issue with more comments may show an older review round.
+    const comments = (await call(f, token, "GET", `/repos/${repo}/issues/${i.number}/comments?per_page=100`)) as PlanComment[];
+    return parsePendingPlan(repo, i, Array.isArray(comments) ? comments : []);
+  }));
+  return list.filter((p): p is PendingPlan => p !== null);
+}
+
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw, usage] = await Promise.allSettled([readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo)]);
+  const [runs, sw, usage, plans] = await Promise.allSettled([readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo)]);
   return {
     repo,
     usage: usage.status === "fulfilled" ? usage.value : null,
@@ -66,6 +84,8 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     runsError: runs.status === "rejected" ? describe(runs.reason) : null,
     switches: sw.status === "fulfilled" ? sw.value : null,
     switchesError: sw.status === "rejected" ? describe(sw.reason) : null,
+    plans: plans.status === "fulfilled" ? plans.value : [],
+    plansError: plans.status === "rejected" ? describe(plans.reason) : null,
   };
 }
 

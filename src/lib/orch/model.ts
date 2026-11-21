@@ -266,8 +266,30 @@ export function usageStale(u: UsageView | null | undefined, nowMs: number, maxAg
 
 export type UsageRefresh = "fresh" | "requested" | "running" | "unavailable";
 
+/** A '[plan]' Issue waiting for the owner's orch:go, with the latest plan-review (audit) result. Built in plans.ts (server). */
+export interface PendingPlan {
+  repo: string;
+  number: number;
+  url: string;
+  goal: string;
+  steps: number;
+  /** Same as scripts/orch/plan-review.mjs planHash of the normalized plan. */
+  hash: string;
+  review: {
+    round: number;
+    verdict: "OK" | "REVISE" | "ERROR";
+    reviewer: string;
+    at: string | null;
+    hash: string;
+    /** The plan changed after this review (marker hash ≠ current hash). */
+    stale: boolean;
+  } | null;
+}
+
 export interface RepoView {
   repo: string;
+  plans: PendingPlan[];
+  plansError: string | null;
   usage?: UsageView | null;
   usageRefresh?: UsageRefresh;
   switches: Switches | null;
