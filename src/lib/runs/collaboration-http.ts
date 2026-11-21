@@ -1,5 +1,3 @@
-import { demoDecision, demoBlockResponse } from "../demo/gate";
-import { demoRead } from "../demo/respond";
 import { agentSecret, verifyCallback } from "./callback-auth";
 import { authorize } from "../session/guard";
 import { isAgentKey } from "../control/model";
@@ -23,13 +21,6 @@ export async function handleCollaboration(method: string, headers: Headers, raw:
   try {
     const auth = authorize(method, headers, method === "GET" ? "read" : "admin", d.env, d.nowMs);
     if (!auth.ok) return reply(auth.status, { error: "unauthorized" });
-    const demo = demoDecision(headers, d.env);
-    const blocked = demoBlockResponse(demo, method !== "GET" && method !== "HEAD");
-    if (blocked) return { status: blocked.status, body: await blocked.text() };
-    if (demo.demo === true && method === "GET") {
-      const r = demoRead("collaboration", demo.scenario);
-      return reply(r.status, r.body);
-    }
     if (method === "GET") return reply(200, { workflows: Object.values((await d.store().read()).collaborations ?? {}) });
     if (raw.length > 16_384) return reply(413, { error: "too_large" });
     let b; try { b = JSON.parse(raw); } catch { return reply(400, { error: "bad_request" }); }

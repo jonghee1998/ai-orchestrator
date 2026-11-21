@@ -5,7 +5,7 @@ import type { Live } from "../refresh/live-loader";
 import type { WorkQueueTask } from "../github/work-queue";
 import type { EvidenceReport } from "../github/evidence-types";
 import type { Runtime } from "../github/mobile-workspace";
-import { demoQueue, demoEvidence, demoDashboard } from "../demo/fixtures";
+import { demoQueue, demoEvidence, demoDashboard } from "./sample-data";
 
 const ok = <T,>(data: T): Live<T> => ({ kind: "ok", data });
 const full = (): ModelInput => ({ queue: ok(demoQueue("normal")), evidence: ok(demoEvidence("normal")), runtime: ok(demoDashboard("normal") as unknown as Runtime) });

@@ -33,6 +33,4 @@ test("explicit admin-header and cron GET compatibility; invalid credentials neve
   for (const h of [H({ "x-admin-token": env.CONTROL_ADMIN_TOKEN }), H({ authorization: `Bearer ${env.CRON_SECRET}` })]) assert.equal((await handleReconcile("GET", h, env, NOW, run)).status, 200);
   for (const h of [H({ "x-admin-token": "bad", cookie }), H({ authorization: "Bearer bad", cookie }), H({ "x-admin-token": env.CONTROL_READ_TOKEN })]) assert.equal((await handleReconcile("GET", h, env, NOW, run)).status, 401);
   assert.equal(calls, 2);
-  for (const e of [{ ...env, DEMO_MODE: "1" }, { ...env, DEMO_MODE: "1", VERCEL_ENV: "production" }]) assert.ok([403, 503].includes((await handleReconcile("GET", H({ "x-admin-token": env.CONTROL_ADMIN_TOKEN }), e, NOW, run)).status));
-  assert.equal(calls, 2);
 });
