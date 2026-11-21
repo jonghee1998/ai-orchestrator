@@ -133,4 +133,25 @@ export async function writeSwitch(repo: string, name: string, value: string, env
   }
 }
 
+export type ApproveResult = { ok: true; issue: number } | { ok: false; error: "not_pending" | "plan_changed" };
+
+/**
+ * Approve a pending plan: re-read the Issue + comments, check it with the same rule as the dashboard
+ * (parsePendingPlan: owner-authored, open, '[plan]', no orch:* label, valid plan JSON) and that its hash
+ * still matches what the admin saw, then add the 'orch:go' label once. Throws GitHubError (503 = no write token).
+ */
+export async function approvePlan(repo: string, issue: number, hash: string, env: Env, f: Fetch = fetch): Promise<ApproveResult> {
+  const token = writeToken(env);
+  if (!token) throw new GitHubError(503, "ORCH_GITHUB_TOKEN not configured");
+  const [i, comments] = await Promise.all([
+    call(f, token, "GET", `/repos/${repo}/issues/${issue}`) as Promise<PlanIssue>,
+    call(f, token, "GET", `/repos/${repo}/issues/${issue}/comments?per_page=100`) as Promise<PlanComment[]>,
+  ]);
+  const plan = i && i.number === issue ? parsePendingPlan(repo, i, Array.isArray(comments) ? comments : []) : null;
+  if (!plan) return { ok: false, error: "not_pending" };
+  if (plan.hash !== hash) return { ok: false, error: "plan_changed" };
+  await call(f, token, "POST", `/repos/${repo}/issues/${issue}/labels`, { labels: ["orch:go"] });
+  return { ok: true, issue };
+}
+
 export { describe as describeGitHubError };
