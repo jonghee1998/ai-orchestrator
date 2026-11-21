@@ -5,7 +5,8 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
-  { version: "1.6.0", date: "2026-11-21", title: "패치노트 탭", items: ["하단에 '패치노트' 탭 추가", "버전·날짜·PR 번호와 핵심 변경을 최신순으로 표시"] },
+  { version: "1.7.0", date: "2026-11-21", pr: 232, title: "ECC 2·3단계: 검수·계획 에이전트", items: ["Codex 대신 Opus가 검수할 때 code·security·typescript·react 검수 에이전트를 보조로 사용", "검수는 main의 설정만 사용해 구현자가 검수 지시를 바꿀 수 없음", "검수 댓글에 쓴 에이전트, 스텝 PR·수정 댓글에 구현 모델(승격 사유 포함) 표기", "PM 계획 작성용 planner·architect 에이전트"] },
+  { version: "1.6.0", date: "2026-11-21", pr: 233, title: "패치노트 탭", items: ["하단에 '패치노트' 탭 추가", "버전·날짜·PR 번호와 핵심 변경을 최신순으로 표시"] },
   { version: "1.5.0", date: "2026-11-21", pr: 229, title: "데모·시뮬레이션 삭제", items: ["개발용 데모 모드·시뮬레이션·테스트 모드 기능 삭제", "상단 공통 머리글 제거, 실데이터 화면만 남김"] },
   { version: "1.4.1", date: "2026-11-21", pr: 225, title: "구현 Claude 파일 삭제 허용", items: ["구현 Claude가 git rm으로 파일 삭제 가능", "끝내기 전 검증 스킬 사용을 지시에 명시"] },
   { version: "1.4.0", date: "2026-11-21", pr: 222, title: "도구 사용 자동 기록", items: ["스텝 PR에 구현 Claude가 쓴 스킬·보조 에이전트·검증 명령을 자동 기록", "완공 보고서에 '스킬·보조 에이전트' 열 추가"] },
