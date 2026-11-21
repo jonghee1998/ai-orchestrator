@@ -5,6 +5,7 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "1.16.0", date: "2026-11-21", pr: 259, title: "아이디어함 (의견 수집)", items: ["[idea] Issue를 쓰면 Claude(PM)와 Codex가 의견을 내고 종합 의견 1개를 남김 (가치·규모·위험·추천)", "Codex를 못 쓰면 'Codex 의견 대기'로 두었다가 다시 실행해 채움", "엔진이 남기는 날짜에 요일 표시 (예: 11-21(토) 14:00)"] },
   { version: "1.15.1", date: "2026-11-21", pr: 258, title: "충돌 자동 정리 보완", items: ["같은 패치노트 항목이 PR 번호만 다르게 양쪽에 있으면 번호 있는 쪽으로 자동 정리", "충돌로 멈춘 저위험 작업은 orch:go를 다시 붙이면 자동 반영 경로로 복귀"] },
   { version: "1.15.0", date: "2026-11-21", pr: 257, title: "디자인 기준 문서", items: ["PRODUCT.md: 사용자·목적·화면 모드(Operate) 등 제품 기준", "DESIGN.md: 실제 코드의 색·글자·간격·컴포넌트·접근성 규칙과 불일치 목록", "문서의 색 토큰이 코드와 다르면 테스트가 실패"] },
   { version: "1.14.0", date: "2026-11-21", pr: 253, title: "최종 PR 충돌 자동 정리", items: ["그사이 다른 작업이 main에 반영돼 최종 PR이 충돌하면 엔진이 main을 합쳐 자동 정리 (패치노트 충돌은 자동으로 풂)", "자동으로 못 풀면 중단하고 사용자에게 알림 (예전엔 말없이 멈춤)", "GitHub 알림 문구도 '머지' 대신 '반영'"] },
