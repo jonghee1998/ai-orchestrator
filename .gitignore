@@ -40,3 +40,6 @@ credentials.json
 
 # Impeccable engine binary (downloaded by the skill launcher, never committed)
 .claude/skills/impeccable/scripts/bin/
+
+# 결과 화면 테스트 스크린샷
+.screens/

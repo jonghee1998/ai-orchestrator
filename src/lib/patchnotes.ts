@@ -5,6 +5,7 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "1.9.0", date: "2026-11-21", pr: 0, title: "결과 화면 자동 테스트", items: ["모든 PR의 CI에서 실제 빌드·실제 로그인으로 4개 탭을 폰 폭 360/390/430px로 열어 확인", "기대 문구·가로 넘침·페이지 오류·외부 요청 검사", "스크린샷 12장을 CI 결과에 보관"] },
   { version: "1.8.0", date: "2026-11-21", pr: 235, title: "디자인 스킬 Impeccable", items: ["화면 스텝에서 구현 Claude가 디자인 스킬 Impeccable을 따름 (금지 패턴·품질 기준·접근성)", "상황판은 Operate 모드, 기존 화면은 디자인 유지가 기본", "원문 그대로 포함하고 파일 해시 고정"] },
   { version: "1.7.1", date: "2026-11-21", pr: 234, title: "사용량 자동 최신화", items: ["상황판을 열 때 사용량이 1시간 넘게 지났으면 바로 새로 확인 요청 (GitHub 예약 실행 누락 대비)", "AI 팀 탭에 '↻ 지금 확인' 버튼 (관리자) — 누르면 바로 새로 확인", "확인 중이면 안내 표시"] },
   { version: "1.7.0", date: "2026-11-21", pr: 232, title: "ECC 2·3단계: 검수·계획 에이전트", items: ["Codex 대신 Opus가 검수할 때 code·security·typescript·react 검수 에이전트를 보조로 사용", "검수는 main의 설정만 사용해 구현자가 검수 지시를 바꿀 수 없음", "검수 댓글에 쓴 에이전트, 스텝 PR·수정 댓글에 구현 모델(승격 사유 포함) 표기", "PM 계획 작성용 planner·architect 에이전트"] },
