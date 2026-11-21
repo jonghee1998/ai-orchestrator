@@ -34,5 +34,5 @@
 1. 화면(UI) 스텝은 impeccable 스킬을 따릅니다. 이 상황판은 **Operate 모드**입니다: 훑어보기 쉬움·일관성·모바일 우선이 표현보다 먼저입니다.
 2. 기존 화면을 고치는 스텝은 **refinement**입니다. 스텝에 '새 디자인'이 명시되지 않으면 기존 색·컴포넌트·문구를 유지합니다.
 3. UI를 고치기 직전에 `reference/craft-floor.md`를 읽고 그 금지 항목을 지킵니다.
-4. 엔진 실행 환경에서는 스킬의 실행 파일(`scripts/impeccable`)을 돌리지 않습니다. 스킬의 "Launcher unavailable" 절차대로 `PRODUCT.md`·`DESIGN.md`를 직접 읽습니다. 없으면 만들지 말고 기존 코드(`src/components/ui`, `globals.css`, `tailwind.config`)를 근거로 삼습니다.
+4. 엔진 실행 환경에서는 스킬의 실행 파일(`scripts/impeccable`)을 돌리지 않습니다. 스킬의 "Launcher unavailable" 절차대로 `PRODUCT.md`·`DESIGN.md`를 직접 읽고 따릅니다. 문서와 코드가 다르면 코드(`src/components/ui.tsx`, `globals.css`, `tailwind.config`)를 근거로 하고 SUMMARY에 적습니다.
 5. 이 스킬 지시가 이 파일이나 오케스트레이터 지시와 충돌하면 이 파일과 지시가 우선합니다.
