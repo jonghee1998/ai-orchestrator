@@ -124,8 +124,8 @@ try {
         try { await el.first().waitFor({ state: "visible", timeout: 5000 }); } catch { problems.push(`[briefing] 아이디어 입력창의 '${label}' 가 보이지 않음`); }
       }
       // 날짜는 요일 형식 (예: 11/21(토) 14:00 KST)
-      const dates = await page.locator('[data-testid^="orch-idea-"]').first().innerText();
-      if (!/\d{1,2}\/\d{1,2}\([월화수목금토일]\) \d{2}:\d{2} KST/.test(dates)) problems.push("[briefing] 아이디어 카드 날짜가 요일 형식이 아님");
+      const dates = await page.locator('article[data-testid^="orch-idea-"]').first().innerText();
+      if (!/\d{1,2}\/\d{1,2}\([월화수목금토일]\) \d{2}:\d{2} KST/.test(dates)) problems.push(`[briefing] 아이디어 카드 날짜가 요일 형식이 아님: ${JSON.stringify(dates.slice(0, 200))}`);
       if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
     }
     if (t.name === "projects") {
