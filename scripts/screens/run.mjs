@@ -95,7 +95,7 @@ try {
   const TABS = [
     { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목", "반영 승인 대기"], forbid: ["설정되지 않았습니다"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
-    { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3"], forbid: ["승인 대기 계획 없음"] },
+    { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
     { name: "patch-notes", path: "/patch-notes", nav: "패치노트", expect: [`v${CURRENT_VERSION}`, "오케스트레이터 엔진"], forbid: [] },
   ];
@@ -117,11 +117,26 @@ try {
       catch { problems.push("[briefing] 승인 대기 계획의 '승인' 버튼이 보이지 않음"); }
       if (!(await page.locator('a[href$="/issues/13"]').count())) problems.push("[briefing] 승인 대기 계획(#13)의 '계획 보기' 링크가 없음");
     }
+    if (t.name === "briefing") {
+      // 아이디어함: 저장소 1개라 프로젝트 칩 줄은 숨김, 관리자에게 입력창(항목·내 의견·등록)이 보임. 등록은 누르지 않는다 (읽기 전용).
+      if (await page.getByRole("group", { name: "프로젝트 필터" }).count()) problems.push("[briefing] 프로젝트가 1개인데 필터 칩 줄이 보임");
+      for (const [label, el] of [["항목", page.getByLabel("항목", { exact: false })], ["내 의견", page.getByLabel("내 의견", { exact: false })], ["등록", page.getByRole("button", { name: "등록", exact: true })]]) {
+        try { await el.first().waitFor({ state: "visible", timeout: 5000 }); } catch { problems.push(`[briefing] 아이디어 입력창의 '${label}' 가 보이지 않음`); }
+      }
+      // 날짜는 요일 형식 (예: 11/21(토) 14:00 KST)
+      const dates = await page.locator('article[data-testid^="orch-idea-"]').first().innerText();
+      if (!/\d{1,2}\/\d{1,2}\([월화수목금토일]\) \d{2}:\d{2} KST/.test(dates)) problems.push(`[briefing] 아이디어 카드 날짜가 요일 형식이 아님: ${JSON.stringify(dates.slice(0, 200))}`);
+      if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
+    }
     if (t.name === "projects") {
       // 기본 상태: 현재 스텝은 펼침, 대기 스텝(3번)·끝난 작업은 접힘
       if (await page.getByText("알파공정 3단계 확인항목").isVisible()) problems.push("[projects] 대기 스텝의 할 일이 기본 상태에서 보임");
       if (await page.getByText("끝난 시험 작업").isVisible()) problems.push("[projects] 끝난 작업이 기본 상태에서 보임");
       if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
+      // 'PM에게 말하기' 바로가기: 새 창 링크
+      const pmLink = page.getByRole("link", { name: "PM에게 말하기" });
+      if (!(await pmLink.isVisible())) problems.push("[projects] 'PM에게 말하기' 링크가 보이지 않음");
+      else if ((await pmLink.getAttribute("target")) !== "_blank" || !/noreferrer/.test((await pmLink.getAttribute("rel")) ?? "") || !/^https?:\/\//.test((await pmLink.getAttribute("href")) ?? "")) problems.push("[projects] 'PM에게 말하기' 링크가 새 창(_blank, noreferrer, http 주소)이 아님");
       // 새로고침 버튼: 보이고, 누르면(GET 만 발생) '방금 갱신' 시각이 나와야 함
       const refreshBtn = page.getByRole("button", { name: "↻ 새로고침" });
       if (!(await refreshBtn.isVisible())) problems.push("[projects] '↻ 새로고침' 버튼이 보이지 않음");

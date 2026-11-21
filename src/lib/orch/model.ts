@@ -312,10 +312,46 @@ export function approveMessage(status: number, body: { ok?: boolean; error?: str
   return { ok: false, text: `승인 실패 · ${body?.detail ?? e ?? status}` };
 }
 
+/** One model's opinion on an idea (scripts/orch/idea-review.mjs clean()). */
+export interface Opinion {
+  value: "high" | "medium" | "low";
+  effort: "S" | "M" | "L";
+  risk: "high" | "medium" | "low";
+  steps: number | null;
+  recommend: "now" | "later" | "hold";
+  reasons: string;
+}
+
+/** Owner-authored '[idea] 항목' Issue + the latest Actions-bot review (orch-idea:v1 marker). */
+export interface Idea {
+  repo: string;
+  number: number;
+  url: string;
+  /** Title without the '[idea] ' prefix. */
+  title: string;
+  /** Issue body (the owner's own opinion), at most 4000 chars. */
+  mine: string;
+  createdAt: string | null;
+  closed: boolean;
+  /** collecting = no review yet, stale = text changed after the review, codex_pending = Claude only so far. */
+  status: "collecting" | "codex_pending" | "done" | "stale";
+  review: {
+    recommend: "now" | "later" | "hold";
+    summary: string;
+    agree: string;
+    disagree: string;
+    at: string | null;
+    claude: Opinion | null;
+    codex: Opinion | null;
+  } | null;
+}
+
 export interface RepoView {
   repo: string;
   plans: PendingPlan[];
   plansError: string | null;
+  ideas: Idea[];
+  ideasError: string | null;
   usage?: UsageView | null;
   usageRefresh?: UsageRefresh;
   switches: Switches | null;
@@ -328,4 +364,21 @@ export interface RepoView {
 export function sortRuns(runs: OrchRun[]): OrchRun[] {
   const rank = (r: OrchRun) => (r.needsUser ? 0 : ["done", "cancelled"].includes(r.status) ? 2 : 1);
   return [...runs].sort((a, b) => rank(a) - rank(b) || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+}
+
+/** Idea filter chips: '전체' (null) + one per repo (ORCH_REPOS order), each with its idea count. Zero-count repos keep their chip. */
+export function ideaFilterChips(repos: { repo: string; ideas: Idea[] }[]): { repo: string | null; count: number }[] {
+  const all = repos.reduce((n, v) => n + v.ideas.length, 0);
+  return [{ repo: null, count: all }, ...repos.map((v) => ({ repo: v.repo, count: v.ideas.length }))];
+}
+
+/** Ideas to show for the chosen repo (null = all), newest first. Does not mutate the input. */
+export function filterIdeas(repos: { repo: string; ideas: Idea[] }[], repo: string | null): Idea[] {
+  const list = repos.filter((v) => repo === null || v.repo === repo).flatMap((v) => v.ideas);
+  return [...list].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+}
+
+/** Repo preselected in the register form: the filtered one, else the first repo. */
+export function defaultIdeaRepo(repos: { repo: string }[], filter: string | null): string {
+  return filter !== null && repos.some((v) => v.repo === filter) ? filter : (repos[0]?.repo ?? "");
 }

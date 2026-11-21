@@ -3,13 +3,14 @@
 //   POST (admin + CSRF)  → { repo, key, value } writes one ORCH_* repository variable and wakes the engine
 //                          { action: "refresh-usage" } runs usage.yml now in every configured repo (2-minute throttle)
 //                          { action: "approve", repo, issue, hash } re-checks a pending '[plan]' Issue and adds 'orch:go'
+//                          { action: "idea", repo, title, body } creates one '[idea] title' Issue (title 1~80, body ≤4000)
 // The engine (GitHub Actions) reads the same variables before every new dispatch, so OFF is enforced
 // even when this app is down.
 import { NextResponse } from "next/server";
 import { authorize } from "@/lib/session/guard";
 import { requireRead, NOSTORE } from "../_auth";
 import { configuredRepos, switchChange } from "@/lib/orch/model";
-import { GitHubError, approvePlan, describeGitHubError, readRepo, readToken, refreshUsageIfStale, requestUsageRun, writeSwitch, writeToken } from "@/lib/orch/github";
+import { GitHubError, approvePlan, checkIdea, createIdea, describeGitHubError, readRepo, readToken, refreshUsageIfStale, requestUsageRun, writeSwitch, writeToken } from "@/lib/orch/github";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,9 +34,26 @@ export async function POST(req: Request): Promise<Response> {
   const auth = authorize(req.method, req.headers, "admin");
   if (!auth.ok) return NextResponse.json({ error: auth.status === 503 ? "auth_unconfigured" : "unauthorized", reason: auth.reason }, { status: auth.status, headers: NOSTORE });
   const raw = await req.text();
-  if (raw.length > 2048) return NextResponse.json({ error: "too_large" }, { status: 413, headers: NOSTORE });
+  // An idea body may be 4000 chars (JSON-escaped up to 6 chars each); every other action stays under 2 KB.
+  if (raw.length > 32_768) return NextResponse.json({ error: "too_large" }, { status: 413, headers: NOSTORE });
   let b: Record<string, unknown>;
   try { b = JSON.parse(raw); } catch { return NextResponse.json({ error: "bad_request" }, { status: 400, headers: NOSTORE }); }
+  if (b?.action !== "idea" && raw.length > 2048) return NextResponse.json({ error: "too_large" }, { status: 413, headers: NOSTORE });
+  if (b?.action === "idea") {
+    const repo = typeof b.repo === "string" ? b.repo : "";
+    if (!configuredRepos(process.env).includes(repo)) return NextResponse.json({ error: "unknown_repo" }, { status: 400, headers: NOSTORE });
+    const input = checkIdea(b.title, b.body);
+    if (!input.ok) return NextResponse.json({ error: input.error }, { status: 400, headers: NOSTORE });
+    if (!writeToken(process.env)) return NextResponse.json({ error: "write_unconfigured" }, { status: 503, headers: NOSTORE });
+    try {
+      const r = await createIdea(repo, input.title, input.body, process.env);
+      if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400, headers: NOSTORE });
+      return NextResponse.json({ ok: true, issue: r.issue, url: r.url }, { headers: NOSTORE });
+    } catch (e) {
+      const cfg = e instanceof GitHubError && e.status === 503;
+      return NextResponse.json({ error: cfg ? "write_unconfigured" : "github_error", detail: describeGitHubError(e) }, { status: cfg ? 503 : 502, headers: NOSTORE });
+    }
+  }
   if (b?.action === "refresh-usage") {
     const repos = configuredRepos(process.env);
     if (!writeToken(process.env)) return NextResponse.json({ error: "write_unconfigured" }, { status: 503, headers: NOSTORE });
