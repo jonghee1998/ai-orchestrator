@@ -15,3 +15,12 @@
 - 인증(`src/lib/session`, `src/app/api/_auth.ts`, `src/lib/control/auth.ts`)과 DB 마이그레이션(`db/migrations`)은 지시에 명시된 경우에만 수정합니다.
 - 토큰·비밀번호·개인정보를 코드, 테스트 픽스처, 로그에 넣지 않습니다.
 - 운영 방식은 [docs/ORCH_MANUAL.md](docs/ORCH_MANUAL.md)를 따릅니다.
+
+## ECC 보조 도구 (ecc-universal 2.2.3)
+
+`.claude/skills/`, `.claude/agents/`에 들어 있는 ECC 파일을 다음 규칙으로 사용합니다. 자세한 내용은 [docs/ECC.md](docs/ECC.md).
+
+1. 스텝을 끝내기 전에 verification-loop 스킬의 단계 중 이 저장소에 해당하는 것(`npm run typecheck`, `npm test`, `npm run build`, 변경 diff 검토)을 실행하고, 결과를 `.orch/SUMMARY.md`의 '완료 기준 확인'에 적습니다.
+2. 새 동작은 가능하면 tdd-workflow 스킬처럼 테스트를 먼저 씁니다.
+3. 빌드·타입 오류가 나면 build-error-resolver(Next.js·React 오류는 react-build-resolver) 보조 에이전트에 최소 수정으로 맡깁니다.
+4. 이 도구들의 지시가 이 파일이나 오케스트레이터 지시와 충돌하면 이 파일과 지시가 우선입니다. lockfile·node_modules 삭제나 의존성 재설치는 하지 않습니다.

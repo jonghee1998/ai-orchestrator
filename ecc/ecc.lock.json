@@ -1,0 +1,27 @@
+{
+  "package": "ecc-universal",
+  "version": "2.2.3",
+  "sourceCommit": "c05b2d6",
+  "files": [
+    {
+      "source": "skills/verification-loop/SKILL.md",
+      "dest": ".claude/skills/verification-loop/SKILL.md",
+      "sha256": "503aebee7d414f559c4874600081a40b1e7aea269b58073c5c9660c6641b00a0"
+    },
+    {
+      "source": "skills/tdd-workflow/SKILL.md",
+      "dest": ".claude/skills/tdd-workflow/SKILL.md",
+      "sha256": "8887afa786ef30de834e7567115d3df71934b343c3d9d849714f8ea43f979ee0"
+    },
+    {
+      "source": "agents/build-error-resolver.md",
+      "dest": ".claude/agents/build-error-resolver.md",
+      "sha256": "acc9e14df59dd28d00f966b3a6cf0d9aeeda7e8a9ab7f1bc442466c0219c35ec"
+    },
+    {
+      "source": "agents/react-build-resolver.md",
+      "dest": ".claude/agents/react-build-resolver.md",
+      "sha256": "a29dec6de18ac3d7b65c746f8133c1f14de5886592fa340c5c2a62fe7c4584e0"
+    }
+  ]
+}
