@@ -5,6 +5,7 @@ import { Card, PageTitle } from "@/components/ui";
 import { formatKst } from "@/lib/time/kst";
 import { useWorkspaceModel } from "./useWorkspace";
 import { Account } from "./Account";
+import { OrchDecisionsPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel } from "@/components/orch/OrchPanels";
 import { matchRouteId } from "@/lib/workspace/route";
 import { PART_LABEL, type BriefingItem, type ModelProject, type ModelTask, type PartState, type WorkspaceModelV1 } from "@/lib/workspace/model";
 
@@ -62,7 +63,7 @@ export function LiveProjectsScreen({ projectId, taskId }: { projectId?: string; 
   const m = useWorkspaceModel();
   const p = projectId ? matchRouteId(m.projects, projectId) : undefined;
   if (projectId && p) return <div className="space-y-4"><SourceBanner m={m} />{taskId ? <TaskDetail p={p} t={matchRouteId(p.tasks, taskId)} /> : <ProjectDetail p={p} />}<Account /></div>;
-  return <div className="space-y-4"><PageTitle title="AI Orchestrator" subtitle="실제 GitHub 기록 기준 · 읽기 전용" /><SourceBanner m={m} />
+  return <div className="space-y-4"><PageTitle title="AI Orchestrator" subtitle="실제 GitHub 기록 기준" /><OrchRunsPanel /><SourceBanner m={m} />
     {m.source === "unconnected" || m.source === "loading" ? <Unconnected m={m} what="프로젝트" /> : projectId ? <Card><p>프로젝트를 찾지 못했습니다.</p></Card> : <>
       <div className="grid grid-cols-2 gap-3"><Card><p className="text-xs text-text-muted">전체 프로젝트</p><p className="mt-1 text-2xl font-semibold">{m.projects.length}</p></Card><Card><p className="text-xs text-text-muted">완료 기준 충족 업무</p><p className="mt-1 text-2xl font-semibold">{m.projects.reduce((n, x) => n + x.counts.completed, 0)}</p></Card></div>
       {m.projects.map(x => <ProjectCard key={x.id} p={x} />)}{!m.projects.length && <Card><p>확인된 프로젝트가 없습니다.</p></Card>}</>}<Account /></div>;
@@ -70,7 +71,7 @@ export function LiveProjectsScreen({ projectId, taskId }: { projectId?: string; 
 export function LiveAgentsScreen({ agentId }: { agentId?: string }) {
   const m = useWorkspaceModel();
   const list = agentId ? m.agents.filter(a => a.key === agentId) : m.agents;
-  return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="배정·증거·상태 · 읽기 전용" /><SourceBanner m={m} />
+  return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="ON/OFF와 배정·증거·상태" />{!agentId && <><OrchUsagePanel /><OrchSwitchesPanel /></>}<SourceBanner m={m} />
     {agentId && <Link href="/agents" className="inline-flex min-h-11 items-center text-accent">← AI 팀</Link>}
     {agentId && !list.length && <Card><p>에이전트 정보를 찾지 못했습니다.</p></Card>}
     {list.map(a => <Card key={a.key}><div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">{a.name}</h2><p className="text-sm text-text-muted">{a.role}</p></div>
@@ -89,6 +90,6 @@ function Group({ title, items }: { title: string; items: BriefingItem[] }) {
 }
 export function LiveBriefingScreen() {
   const m = useWorkspaceModel();
-  return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계 · 읽기 전용" /><SourceBanner m={m} />
+  return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계" /><OrchDecisionsPanel /><SourceBanner m={m} />
     {m.source === "unconnected" || m.source === "loading" ? <Unconnected m={m} what="브리핑" /> : <><Group title="결정 필요" items={m.briefing.decisions} /><Group title="승인 기록" items={m.briefing.approvals} /><Group title="사건·한계" items={m.briefing.incidents} /><Group title="다음 단계" items={m.briefing.next} /></>}</div>;
 }
