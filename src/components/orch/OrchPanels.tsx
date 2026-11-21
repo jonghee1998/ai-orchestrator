@@ -182,6 +182,7 @@ export function OrchUsagePanel() {
   return (
     <section aria-label="AI 사용량" className="space-y-2" data-testid="orch-usage">
       <h2 className="text-lg font-semibold">AI 사용량</h2>
+      {u && state.data.repos.some((r) => r.usageRefresh === "requested" || r.usageRefresh === "running") && <p className="text-[11px] text-text-faint" data-testid="usage-refreshing">값이 1시간 넘게 지나 새로 확인하는 중입니다. 1~2분 뒤 새로고침하면 반영됩니다.</p>}
       {!u ? <Card><p className="text-sm text-text-muted">아직 사용량 기록이 없습니다. 엔진의 usage 작업이 처음 돌면 표시됩니다.</p></Card> : <>
         <Card className="space-y-3">
           <p className="font-semibold">Claude <span className="text-xs font-normal text-text-muted">구독 전체 · 직접 대화 포함</span></p>

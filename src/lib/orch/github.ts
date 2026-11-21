@@ -3,7 +3,7 @@
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch)
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read, Variables read/write, Actions read/write).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
-import { parseRun, parseUsage, sortRuns, switchesFromVars, type OrchRun, type RepoView, type UsageView } from "./model";
+import { USAGE_RETRY_MS, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type OrchRun, type RepoView, type UsageRefresh, type UsageView } from "./model";
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Fetch = typeof fetch;
@@ -67,6 +67,25 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     switches: sw.status === "fulfilled" ? sw.value : null,
     switchesError: sw.status === "rejected" ? describe(sw.reason) : null,
   };
+}
+
+/**
+ * If the usage snapshot is stale, ask GitHub to run usage.yml now (best effort, throttled by the last run's start time).
+ * GitHub often skips scheduled runs, so opening the dashboard is what keeps usage current.
+ */
+export async function refreshUsageIfStale(repo: string, usage: UsageView | null | undefined, env: Env, nowMs = Date.now(), f: Fetch = fetch): Promise<UsageRefresh> {
+  if (!usageStale(usage, nowMs)) return "fresh";
+  const token = writeToken(env);
+  if (!token) return "unavailable";
+  try {
+    const j = (await call(f, token, "GET", `/repos/${repo}/actions/workflows/usage.yml/runs?per_page=1`)) as { workflow_runs?: { created_at?: string }[] };
+    const last = Date.parse(j.workflow_runs?.[0]?.created_at ?? "");
+    if (Number.isFinite(last) && nowMs - last < USAGE_RETRY_MS) return "running";
+    await call(f, token, "POST", `/repos/${repo}/actions/workflows/usage.yml/dispatches`, { ref: "main" });
+    return "requested";
+  } catch {
+    return "unavailable";
+  }
 }
 
 /** Write one switch variable, then wake the engine so held work resumes now (best effort). */

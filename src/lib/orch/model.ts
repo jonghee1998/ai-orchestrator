@@ -221,9 +221,23 @@ export function latestUsage(views: { usage?: UsageView | null }[]): UsageView | 
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0] ?? null;
 }
 
+/** Snapshot older than this → the dashboard asks GitHub to run usage.yml (scheduled runs are often skipped). */
+export const USAGE_MAX_AGE_MS = 65 * 60_000;
+/** Do not ask again while a usage run started this recently (queued, running or just finished). */
+export const USAGE_RETRY_MS = 15 * 60_000;
+
+export function usageStale(u: UsageView | null | undefined, nowMs: number, maxAgeMs = USAGE_MAX_AGE_MS): boolean {
+  if (!u) return false; // no usage Issue in this repo → usage is not set up here
+  const t = Date.parse(u.updatedAt ?? "");
+  return !Number.isFinite(t) || nowMs - t > maxAgeMs;
+}
+
+export type UsageRefresh = "fresh" | "requested" | "running" | "unavailable";
+
 export interface RepoView {
   repo: string;
   usage?: UsageView | null;
+  usageRefresh?: UsageRefresh;
   switches: Switches | null;
   switchesError: string | null;
   runs: OrchRun[];

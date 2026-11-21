@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { authorize } from "@/lib/session/guard";
 import { requireRead, NOSTORE } from "../_auth";
 import { configuredRepos, switchChange } from "@/lib/orch/model";
-import { GitHubError, describeGitHubError, readRepo, readToken, writeSwitch, writeToken } from "@/lib/orch/github";
+import { GitHubError, describeGitHubError, readRepo, readToken, refreshUsageIfStale, writeSwitch, writeToken } from "@/lib/orch/github";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,7 +17,10 @@ export async function GET(req: Request): Promise<Response> {
   if (denied) return denied;
   const repos = configuredRepos(process.env);
   if (!repos.length || !readToken(process.env)) return NextResponse.json({ mode: "unconfigured" }, { headers: NOSTORE });
-  const views = await Promise.all(repos.map((r) => readRepo(r, process.env)));
+  const views = await Promise.all(repos.map(async (r) => {
+    const v = await readRepo(r, process.env);
+    return v.usage ? { ...v, usageRefresh: await refreshUsageIfStale(r, v.usage, process.env) } : v;
+  }));
   return NextResponse.json(
     { mode: "live", generatedAt: new Date().toISOString(), canWrite: Boolean(writeToken(process.env)), repos: views },
     { headers: NOSTORE },
