@@ -11,7 +11,7 @@ on:
     workflows: [ci, claude-work, claude-review]
     types: [completed]
   schedule:
-    - cron: "*/20 * * * *"            # watchdog: missed events, Codex nudge, idle timeout, final merge
+    - cron: "7 */3 * * *"             # watchdog every 3h (Actions 무료 시간 절약): missed events, Codex nudge, idle timeout, final merge
   workflow_dispatch:
     inputs:
       pr:

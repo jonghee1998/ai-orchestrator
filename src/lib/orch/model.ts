@@ -254,7 +254,7 @@ export function latestUsage(views: { usage?: UsageView | null }[]): UsageView | 
 }
 
 /** Snapshot older than this → the dashboard asks GitHub to run usage.yml (scheduled runs are often skipped). */
-export const USAGE_MAX_AGE_MS = 65 * 60_000;
+export const USAGE_MAX_AGE_MS = 6 * 60 * 60_000; // 6시간 (Actions 무료 시간 절약; 바로 보려면 '지금 확인')
 /** Do not ask again while a usage run started this recently (queued, running or just finished). */
 export const USAGE_RETRY_MS = 15 * 60_000;
 

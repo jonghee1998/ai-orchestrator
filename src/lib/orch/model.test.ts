@@ -128,7 +128,7 @@ test("usage refresh: stale snapshot asks GitHub for a usage run, throttled; fres
   const u = (at: string | null) => ({ ...(parseUsage(`<!-- orch-usage:v1 {"v":1,"updatedAt":"2026-11-21T00:00:00Z"} -->`) as NonNullable<ReturnType<typeof parseUsage>>), updatedAt: at });
   assert.equal(usageStale(null, now), false, "no usage issue → not set up");
   assert.equal(usageStale(u("2026-11-21T03:30:00Z"), now), false);
-  assert.equal(usageStale(u("2026-11-21T00:29:00Z"), now), true);
+  assert.equal(usageStale(u("2026-11-20T20:00:00Z"), now), true);
   assert.equal(usageStale(u(null), now), true);
 
   const calls: string[] = [];
@@ -141,12 +141,12 @@ test("usage refresh: stale snapshot asks GitHub for a usage run, throttled; fres
 
   assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T03:30:00Z"), env, now, fake(null)), "fresh");
   assert.equal(calls.length, 0);
-  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T00:29:00Z"), {}, now, fake(null)), "unavailable", "reads never dispatch without the write token");
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-20T20:00:00Z"), {}, now, fake(null)), "unavailable", "reads never dispatch without the write token");
   assert.equal(calls.length, 0);
-  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T00:29:00Z"), env, now, fake("2026-11-21T03:55:00Z")), "running");
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-20T20:00:00Z"), env, now, fake("2026-11-21T03:55:00Z")), "running");
   assert.deepEqual(calls, ["GET /repos/o/r/actions/workflows/usage.yml/runs?per_page=1"]);
   calls.length = 0;
-  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-21T00:29:00Z"), env, now, fake("2026-11-21T00:28:00Z")), "requested");
+  assert.equal(await refreshUsageIfStale("o/r", u("2026-11-20T20:00:00Z"), env, now, fake("2026-11-21T00:28:00Z")), "requested");
   assert.deepEqual(calls, ["GET /repos/o/r/actions/workflows/usage.yml/runs?per_page=1", "POST /repos/o/r/actions/workflows/usage.yml/dispatches"]);
 });
 
