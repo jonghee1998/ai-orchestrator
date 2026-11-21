@@ -40,7 +40,7 @@ const describe = (e: unknown) =>
 async function readRuns(f: Fetch, token: string, repo: string): Promise<OrchRun[]> {
   const [open, done] = await Promise.all([
     call(f, token, "GET", `/repos/${repo}/issues?labels=orch:run&state=open&per_page=30`),
-    call(f, token, "GET", `/repos/${repo}/issues?labels=orch:done&state=closed&per_page=5&sort=updated`),
+    call(f, token, "GET", `/repos/${repo}/issues?labels=orch:done&state=closed&per_page=20&sort=updated`),
   ]);
   const issues = [...(open as never[]), ...(done as never[])].filter((i: { pull_request?: unknown }) => !i.pull_request);
   return sortRuns(issues.map((i) => parseRun(repo, i)).filter((r): r is OrchRun => r !== null));

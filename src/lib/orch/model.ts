@@ -18,7 +18,16 @@ export const STATUS_LABEL: Record<OrchStatus, string> = {
   cancelled: "취소",
 };
 
+export type StepState = "passed" | "current" | "pending";
+export interface RunStep {
+  id: number;
+  title: string;
+  state: StepState;
+  checks: { text: string; done: boolean }[];
+}
+
 export interface OrchRun {
+  steps: RunStep[];
   repo: string;
   number: number;
   url: string;
@@ -71,6 +80,22 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
   const raw = st && st.v === 1 ? str(st.status) : null;
   const status: OrchStatus = raw && STATUSES.has(raw) ? (raw as OrchStatus) : "waiting";
   const passedMap = obj(st?.passed) ?? {};
+  const curStep = num(st?.step);
+  const allPassed = status === "done" || status === "awaiting_merge" || status === "finalizing";
+  const runSteps: RunStep[] = [];
+  for (const item of steps) {
+    const s = obj(item);
+    const id = s?.id;
+    if (!s || typeof id !== "number" || !Number.isInteger(id)) continue;
+    const state: StepState = allPassed || Object.prototype.hasOwnProperty.call(passedMap, String(id)) ? "passed"
+      : status !== "waiting" && status !== "cancelled" && id === curStep ? "current"
+      : "pending";
+    const checks = (Array.isArray(s.done_when) ? s.done_when : [])
+      .map((c) => str(c))
+      .filter((c): c is string => c !== null)
+      .map((c) => ({ text: c.slice(0, 200), done: state === "passed" }));
+    runSteps.push({ id, title: (str(s.title) ?? `스텝 ${id}`).slice(0, 200), state, checks });
+  }
   const held = str(obj(st?.held)?.reason);
   const reason = status === "blocked" ? str(st?.reason) : null;
   const finalPr = num(st?.finalPr);
@@ -93,7 +118,8 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
     statusLabel: held && ["implementing", "fixing", "reviewing"].includes(status) ? `대기 · ${STATUS_LABEL[status]}` : STATUS_LABEL[status],
     step: num(st?.step),
     total: steps.length,
-    passed: Object.keys(passedMap).length,
+    passed: runSteps.filter((s) => s.state === "passed").length,
+    steps: runSteps,
     pr,
     finalPr,
     retries: num(st?.retries) ?? 0,
