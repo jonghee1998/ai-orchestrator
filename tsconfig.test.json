@@ -8,7 +8,6 @@
     "outDir": ".test-build"
   },
   "include": [
-    "src/lib/simulation/*.ts",
     "src/lib/github/work-queue.ts", "src/lib/github/github-read-queue.ts", "src/lib/github/*.test.ts",
     "src/lib/github/evidence.ts", "src/lib/github/evidence-reader.ts",
     "src/components/work-queue/loader.ts", "src/components/work-queue/loader.test.ts", "src/components/work-queue/viewModel.ts",

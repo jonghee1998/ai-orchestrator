@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Issue #116 live read-only mobile smoke (WorkspaceModel v1). Real server WITHOUT DEMO_MODE; GitHub/runtime APIs are mocked in the browser. Run after npm run build."""
+"""Issue #116 live read-only mobile smoke (WorkspaceModel v1). Real server with real admin login; GitHub/runtime APIs are mocked in the browser. Run after npm run build."""
 from playwright.sync_api import sync_playwright, expect
 from pathlib import Path
 import json, hashlib, secrets, os, tempfile, subprocess, threading, ssl, http.client, socket, time, shutil
@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='issue92-browser-') as tmp:
                 if r.request.url.startswith(base) and path in MOCKS and MOCKS[path] is not None:
                     r.fulfill(status=MOCKS[path][0],content_type='application/json',body=json.dumps(MOCKS[path][1]));return
                 if r.request.url.startswith(base):
-                    if r.request.method not in ['GET','HEAD'] and not any(x in r.request.url for x in ['/api/session','/api/demo']):mutations.append(r.request.url)
+                    if r.request.method not in ['GET','HEAD'] and not any(x in r.request.url for x in ['/api/session']):mutations.append(r.request.url)
                     r.continue_()
                 else:external.append(r.request.url);r.abort()
             page.route('**/*',route);page.goto(base);page.get_by_label('아이디',exact=True).fill(user);page.get_by_label('비밀번호',exact=True).fill(password);page.get_by_label('로그인 상태 유지 (30일)',exact=True).check();page.get_by_role('button',name='로그인',exact=True).click();expect(page.get_by_text('계정 · 로그인됨',exact=False)).to_be_visible()
@@ -108,7 +108,7 @@ with tempfile.TemporaryDirectory(prefix='issue92-browser-') as tmp:
                 MOCKS.clear();MOCKS.update(LIVE);MOCKS['/api/evidence']=evid
                 page.goto(base+'/projects/'+quote('label:알파 프로젝트',safe=''));expect(page.get_by_text('완료 업무 · 0')).to_be_visible(timeout=15000),label
             page.goto(base+'/projects');page.get_by_text('계정 · 로그인됨',exact=False).click();page.get_by_role('button',name='로그아웃',exact=True).click();expect(page.get_by_label('아이디',exact=True)).to_be_visible()
-            assert not errors,errors;assert not external,external;assert not mutations,mutations;browser.close();print('PASS: live/unconnected/partial, 360/390/430, read-only, no demo controls, no mutations')
+            assert not errors,errors;assert not external,external;assert not mutations,mutations;browser.close();print('PASS: live/unconnected/partial, 360/390/430, read-only, no mutations')
     finally:
         proxy.shutdown();proxy.server_close();proc.terminate()
         try:proc.wait(timeout=10)
