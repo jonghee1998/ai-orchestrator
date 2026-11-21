@@ -42,6 +42,16 @@
       "source": "agents/react-reviewer.md",
       "dest": ".claude/agents/react-reviewer.md",
       "sha256": "17d0286b4f101e27b818cad026a6bfc1f9fd3e7f9b52c8414e6ea2a05481995a"
+    },
+    {
+      "source": "agents/planner.md",
+      "dest": ".claude/agents/planner.md",
+      "sha256": "63aba865206bac9cb5887542fb01b97656e7701faff98e091aa77057ba9860bc"
+    },
+    {
+      "source": "agents/architect.md",
+      "dest": ".claude/agents/architect.md",
+      "sha256": "6b8e1e8bd274995f3949691731f4334820c061d3054eaea3be2ce163386d1f24"
     }
   ]
 }

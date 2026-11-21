@@ -25,3 +25,4 @@
 3. 빌드·타입 오류가 나면 build-error-resolver(Next.js·React 오류는 react-build-resolver) 보조 에이전트에 최소 수정으로 맡깁니다.
 4. 이 도구들의 지시가 이 파일이나 오케스트레이터 지시와 충돌하면 이 파일과 지시가 우선입니다. lockfile·node_modules 삭제나 의존성 재설치는 하지 않습니다.
 5. code-reviewer·security-reviewer·typescript-reviewer·react-reviewer는 독립 검수 전용입니다. 구현·수정 스텝에서는 호출하지 않습니다 (에이전트 설명의 "MUST BE USED" 문구보다 이 규칙이 우선).
+6. planner·architect는 PM이 계획 Issue(스텝·완료 기준)를 쓸 때만 씁니다. 구현·수정·검수 스텝에서는 호출하지 않습니다 (설명의 "PROACTIVELY" 문구보다 이 규칙이 우선).
