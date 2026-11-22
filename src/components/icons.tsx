@@ -28,6 +28,8 @@ export const CheckIcon = (p: IconProps) => <Svg {...p}><path d="M5 12.5l4.5 4.5L
 export const PauseIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M10 9v6M14 9v6" /></Svg>;
 export const StopIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></Svg>;
 export const EditIcon = (p: IconProps) => <Svg {...p}><path d="M4 20l4-1 11-11-3-3L5 16z" /></Svg>;
+/** Disclosure chevron: put it directly inside a <summary>; points right, turns down while its own <details> is open. */
+export const ChevronIcon = ({ className = "" }: IconProps) => <Svg className={`shrink-0 text-text-faint transition-transform motion-reduce:transition-none [details[open]>summary>&]:rotate-90 ${className}`}><path d="M9 6l6 6-6 6" /></Svg>;
 export const ArrowRightIcon = (p: IconProps) => <Svg {...p}><path d="M5 12h14M13 6l6 6-6 6" /></Svg>;
 export const KeyIcon =(p: IconProps) => <Svg {...p}><circle cx="8" cy="15" r="4" /><path d="M11 12l8-8M16 7l3 3" /></Svg>;
 

@@ -93,7 +93,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 3", "완료 기록", "인프라", "확장", "검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 3", "완료 기록", "인프라", "확장", "추가 검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
@@ -140,16 +140,20 @@ try {
       if (!head.startsWith("배포 대기 3 · 완료 기록")) problems.push(`[projects] 카드 머리가 '배포 대기 3 · 완료 기록' 이 아님 (${head})`);
       const doneLink = card.getByRole("link", { name: "완료 기록" });
       if (!(await doneLink.isVisible()) || !/\/patch-notes$/.test((await doneLink.getAttribute("href")) ?? "")) problems.push("[projects] '완료 기록' 이 /patch-notes 로 가는 링크가 아님");
-      // 남은 할 일 (fixtures, 지금 과정도 남은 것으로 셈): 아이디어 #22 1.3→4 + #21 1.5→2, 계획 #13 2.8→2+16+8=26, #11 3.7→10+8=18, #12 4.7→2 = 52
+      // 남은 할 일 (fixtures, 지금 과정도 남은 것으로 셈, 아이디어는 '추가 검토'라 제외): 계획 #13 2.8→2+16+8=26, #11 3.7→10+8=18, #12 4.7→2 = 46
       const remain = await flat(card.getByTestId("orch-remaining"));
-      if (remain !== "남은 할 일 52과정 · 단계별") problems.push(`[projects] '남은 할 일 52과정 · 단계별' 이 아님 (${remain})`);
-      // 4칸: 단계 안 남은 과정(여럿이면 가장 많이 남은 값)/단계 세부 개수
-      const CELLS = [[1, "검토4/6"], [2, "계획2/9"], [3, "개발10/16"], [4, "통합2/8"]];
+      if (remain !== "남은 할 일 46과정 · 단계별") problems.push(`[projects] '남은 할 일 46과정 · 단계별' 이 아님 (${remain})`);
+      // 3칸(계획·개발·통합): 단계 안 남은 과정(여럿이면 가장 많이 남은 값)/단계 세부 개수. 검토는 칸 없이 아래 '추가 검토'
+      const CELLS = [[2, "계획2/9"], [3, "개발10/16"], [4, "통합2/8"]];
       for (const [n, want] of CELLS) {
         const got = (await flat(card.getByTestId(`orch-cell-${n}`))).replace(/ /g, "");
         if (got !== want) problems.push(`[projects] ${n}번 칸이 '${want}' 이 아님 (${got})`);
       }
-      if (await card.getByTestId("orch-cell-5").count()) problems.push("[projects] 5번 칸이 있음 (4칸이어야 함)");
+      if (await card.getByTestId("orch-cell-5").count() || await card.getByTestId("orch-cell-1").count()) problems.push("[projects] 1번·5번 칸이 있음 (계획·개발·통합 3칸이어야 함)");
+      // 추가 검토는 작업 흐름 아래 따로
+      const reviewSec = card.getByTestId("orch-review");
+      if (!(await reviewSec.count()) || !(await reviewSec.getByTestId("orch-stage-1").count())) problems.push("[projects] '추가 검토' 절에 1 검토 줄이 없음");
+      if (await card.getByTestId("orch-flow").getByTestId("orch-stage-1").count()) problems.push("[projects] 1 검토 줄이 작업 흐름 안에 있음 (따로 있어야 함)");
       // 단계 줄 4개 '번호 단계 #번호… 상태 · 개수' (5 완료 없음), 기본 접힘
       const rowCount = await card.locator('[data-testid^="orch-stage-"]:not([data-testid^="orch-stage-process"])').count();
       if (rowCount !== 4) problems.push(`[projects] 단계 줄이 4개가 아님 (${rowCount})`);

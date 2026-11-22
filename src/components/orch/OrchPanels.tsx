@@ -8,7 +8,7 @@ import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
-import { AlertIcon, ArrowRightIcon, CheckIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
+import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
 import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
 
@@ -67,7 +67,8 @@ function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
     <details open={s.state === "current"} className="rounded-lg border border-border" data-testid={`orch-step-${s.id}`}>
       <summary className={`${SUMMARY} px-2 text-sm`}>
         <span aria-label={label} role="img" className="shrink-0"><StateIcon kind={icon} /></span>
-        <span className="min-w-0 break-words">Step {s.id}. {s.title}</span>
+        <span className="min-w-0 flex-1 break-words">Step {s.id}. {s.title}</span>
+        <ChevronIcon className="h-4 w-4" />
       </summary>
       <ul className="space-y-1 px-2 pb-2 text-xs">
         {s.checks.map((c, i) => (
@@ -144,6 +145,7 @@ function RoadmapLine({ setup, expansion }: { setup: RoadmapItem[]; expansion: Ro
           <span className="block h-full bg-text" style={{ width: `${pct}%` }} />
         </span>{" "}
         <span className="shrink-0 tabular-nums"><b className="font-semibold text-text">확장</b> {e.text}</span>
+        <ChevronIcon className="h-4 w-4" />
       </summary>
       <div className="pb-2">
         <RoadmapList title="인프라" items={setup} testid="orch-roadmap-setup" />
@@ -201,7 +203,7 @@ function ItemCard({ item, repo }: { item: BoardItem; repo: string }) {
       )}
       {r && (
         <details className="mt-1" data-testid={`orch-run-steps-${short(repo)}-${r.number}`}>
-          <summary className={`${SUMMARY} text-xs font-semibold text-accent`}>스텝 보기</summary>
+          <summary className={`${SUMMARY} text-xs font-semibold text-accent`}>스텝 보기<ChevronIcon className="h-3.5 w-3.5 text-accent" /></summary>
           <RunDetails r={r} />
         </details>
       )}
@@ -256,6 +258,7 @@ function StageRow({ c, repo }: { c: BoardColumn; repo: string }) {
         <small className="min-w-0 truncate text-xs text-text-muted group-open:hidden">{note}</small>{" "}
         {needs > 0 && <span className="shrink-0 self-center rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">확인 필요 {needs}</span>}
         <span className={`ml-auto shrink-0 tabular-nums ${empty ? "font-medium text-text-faint" : "font-bold"}`}><span className="sr-only"> · </span>{c.items.length}</span>
+        <ChevronIcon className="h-4 w-4 self-center" />
       </summary>
       <div className="pb-3">
         <p className="ml-[22px] text-xs text-text-muted">{LIFECYCLE[c.n - 1].desc}</p>
@@ -282,7 +285,10 @@ function StageCell({ c }: { c: BoardColumn }) {
 
 function ProjectCard({ v }: { v: RepoView }) {
   const board = stageBoard({ runs: v.runs, plans: v.plans ?? [], ideas: v.ideas ?? [] });
-  const left = boardRemaining(board);
+  // 검토(아이디어)는 개발할지 정하기 전이라 본 흐름(계획·개발·통합)과 따로 보인다
+  const flow = board.filter((c) => c.n > 1);
+  const review = board[0];
+  const left = boardRemaining(flow);
   const roadmapNote = v.roadmapError ? `로드맵 읽기 실패 · ${v.roadmapError}` : !v.roadmap ? "로드맵 없음(docs/roadmap.json)" : null;
   return (
     <Card>
@@ -297,8 +303,8 @@ function ProjectCard({ v }: { v: RepoView }) {
         <p className="mt-3 text-[13px] tabular-nums text-text-muted" data-testid="orch-remaining">
           {left === null ? "남은 할 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
         </p>
-        <div className="mt-2 grid grid-cols-4 gap-1.5">
-          {board.map((c) => <StageCell key={c.n} c={c} />)}
+        <div className="mt-2 grid grid-cols-3 gap-1.5">
+          {flow.map((c) => <StageCell key={c.n} c={c} />)}
         </div>
         {roadmapNote ? <p className={`mt-3 text-xs ${v.roadmapError ? "text-danger" : "text-text-muted"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
           : <RoadmapLine setup={v.roadmap!.setup} expansion={v.roadmap!.expansion} />}
@@ -306,14 +312,18 @@ function ProjectCard({ v }: { v: RepoView }) {
           {v.runsError && <p className="pb-1 text-xs text-danger">작업 불러오기 실패 · {v.runsError}</p>}
           {v.plansError && <p className="pb-1 text-xs text-danger">계획 불러오기 실패 · {v.plansError}</p>}
           {v.ideasError && <p className="pb-1 text-xs text-danger">아이디어 불러오기 실패 · {v.ideasError}</p>}
-          {board.map((c) => <StageRow key={c.n} c={c} repo={v.repo} />)}
+          {flow.map((c) => <StageRow key={c.n} c={c} repo={v.repo} />)}
+        </section>
+        <section aria-label="추가 검토" className="mt-4" data-testid="orch-review">
+          <p className="pb-1 text-xs font-semibold text-text-muted">추가 검토 · 개발 여부를 정하기 전 아이디어 <span className="tabular-nums">{review.items.length}건</span></p>
+          <StageRow c={review} repo={v.repo} />
         </section>
       </section>
     </Card>
   );
 }
 
-/** 프로젝트 탭: 프로젝트마다 남은 할 일 · 4칸(검토·계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 4개(접고 펼 수 있음). */
+/** 프로젝트 탭: 프로젝트마다 남은 할 일 · 3칸(계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 3개 · 추가 검토(아이디어) 줄 (모두 접고 펼 수 있음). */
 export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
   const { state, reload, error } = useOrch();
   const latest = useRef({ state, error }); latest.current = { state, error };
