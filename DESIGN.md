@@ -143,7 +143,11 @@ Card만 옅은 그림자를 씁니다: `0 1px 2px rgba(17,20,24,.04), 0 4px 16px
 
 ### PageTitle (`src/components/ui.tsx`)
 
-- 제목 `text-[22px] font-bold tracking-[-0.03em]`, 부제 `mt-1 text-sm text-text-muted`, 아래 여백 `mb-4`.
+- 시안 header 모양: 왼쪽 제목 `text-[22px] font-[750] tracking-[-0.03em]` + 아래 한 줄 `mt-[3px] text-xs text-text-muted tabular-nums`(갱신 시각·부제), 오른쪽 `actions`(간격 6px). 아래 여백 `mb-4`.
+- 프로젝트 탭: 부제 = '11/22(일) 16:50 KST 갱신'(누른 뒤 '방금 갱신 …'), actions = 새로고침 아이콘 버튼 + 'PM에게 말하기'.
+- 카드 제목 `CARD_TITLE`(`text-base font-[750]`), 카드 밖 구역 제목 `text-lg font-[750]`.
+- 카드 안 목록은 `ROW`(`border-t border-border py-3`) 줄 구분선 하나. 승인 대기 계획·아이디어함·결정 필요·ON/OFF·패치노트·구조가 이 모양입니다.
+- 아이디어함 한 줄: 제목(굵게) · '날짜 · 저장소 · 상태' 한 줄 · 오른쪽 '#번호' accent 링크(원문).
 
 ### 상태 배지 (`src/components/ui.tsx`)
 
@@ -156,24 +160,28 @@ Card만 옅은 그림자를 씁니다: `0 1px 2px rgba(17,20,24,.04), 0 4px 16px
 - 새로고침·뒤로·경고·체크·멈춤·편집·열쇠, 그리고 체크박스 모양 상태 `StateIcon`(통과 채운 초록 원+체크 · 진행 파란 테두리+점 · 멈춤 빨강 · 대기 빈 원 · 해당 없음 줄).
 - 버튼 글자는 아이콘을 뺀 '새로고침'·'지금 확인'(접근성 이름도 같음).
 
-### 작업 카드 tone (`tone` 함수)
+### 작업 상태 배지 (`tone` 함수, PM 브리핑 '결정 필요' 줄)
 
-| 상태 | 테두리·바탕 |
+| 상태 | 배지 |
 | --- | --- |
-| 막힘 (`blocked`) | `border-danger/50 bg-danger/10` |
-| 반영 승인 대기 (`awaiting_merge`) | `border-warn/50 bg-warn/10` |
-| 보류 (`held`) | `border-border bg-bg-raised` |
-| 완료 (`done`) | `border-ok/30` |
-| 그 밖 (진행 중 등) | `border-accent/40` |
+| 막힘 (`blocked`) | `bg-danger/10 text-danger` |
+| 반영 승인 대기 (`awaiting_merge`) | `bg-warn/10 text-warn` |
+| 보류 (`held`) | `bg-unknown/10 text-text-muted` |
+| 완료 (`done`) | `bg-ok/10 text-ok` |
+| 그 밖 (진행 중 등) | `bg-accent-dim text-accent` |
 
 ### 계획 감사 배지 (`BADGE_TONE`)
 
-- ok `bg-ok/10 text-ok`, warn `bg-warn/10 text-warn`, danger `bg-danger/10 text-danger`, muted `bg-current/10 text-text-muted`. 글자는 '감사 OK 2/3'처럼 기호 없이, 아이콘은 SVG.
+- ok `bg-ok/10 text-ok`, warn `bg-warn/10 text-warn`, danger `bg-danger/10 text-danger`, muted `bg-unknown/10 text-text-muted`. 글자는 '감사 OK 2/3'처럼 기호 없이, 아이콘은 SVG.
 
-### Buttons
+### Buttons (`src/components/ui.tsx`)
 
-- 기본: `min-h-11 rounded-lg border border-border px-3 text-xs|text-sm`. 확인 단계(승인): `bg-warn/15 text-warn font-semibold`.
-- 스위치: `role="switch"`, `aria-checked`, `min-h-11 min-w-20 rounded-full`, 켜짐 `bg-accent text-white`, 꺼짐 `bg-border text-text-muted`.
+- 아이콘 버튼 `ICON_BUTTON`: 40px 정사각 `rounded-xl border border-border bg-bg-card`, 아이콘 18px, 이름은 `aria-label`. 누르는 영역은 `after:-inset-0.5`로 44px.
+- 진한 버튼 `PRIMARY_BUTTON`: `h-10 rounded-xl bg-text px-3.5 text-[13px] font-[650] text-white` ('PM에게 말하기', 로그인).
+- 기본 `BUTTON`: `min-h-11 rounded-xl border border-border bg-bg-card px-3 text-[13px] font-semibold`. 확인 단계(승인): `bg-warn/15 text-warn font-semibold`.
+- 링크는 `text-accent font-semibold`(밑줄 없음).
+- 입력칸 `FIELD`: `rounded-xl border border-border bg-bg`. 결과 메시지 `STATUS_BOX`: `rounded-xl border border-border bg-bg-card`.
+- 스위치: `role="switch"`, `aria-checked`, `min-h-11 min-w-20 rounded-full`, 켜짐 `bg-accent text-white`, 꺼짐 `bg-bg text-text-muted ring-1 ring-border`.
 - 비활성: `disabled:opacity-50`.
 
 ### Navigation — 하단 탭 (`src/components/BottomNav.tsx`)
@@ -204,7 +212,4 @@ Card만 옅은 그림자를 씁니다: `0 1px 2px rgba(17,20,24,.04), 0 4px 16px
 - **Don't** 새 색 토큰이나 코드에 박은 색을 만들지 않습니다.
 - **Don't** 단계별 다른 색, 지하철 노선, 카드 안 카드, 한쪽 테두리 강조, 그라데이션 글자, 유니코드·이모지 아이콘을 쓰지 않습니다.
 - **Don't** `text.faint`를 글자 본문에 쓰지 않습니다.
-
-## 남은 일
-
-프로젝트 탭의 구성(남은 할 일 중심)은 시안대로 다음 스텝에서 바꿉니다. 이 문서의 구성 설명은 그때 갱신합니다.
+- **Don't** 구조 탭 도표(`pre`)를 한글 글리프가 없는 고정폭 글꼴만으로 두지 않습니다. 고정폭 뒤에 Pretendard를 대체 글꼴로 둡니다.

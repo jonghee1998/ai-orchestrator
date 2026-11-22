@@ -1,5 +1,7 @@
 // '구조' 탭: 오케스트레이터 아키텍처와 붙어 있는 보조 도구(ECC, Impeccable, claudex, Playwright) 설명. 정적 내용.
-import { Card, PageTitle } from "@/components/ui";
+import { CARD_TITLE, Card, PageTitle } from "@/components/ui";
+
+const H2 = "px-1 text-lg font-[750] tracking-[-0.02em]";
 
 const DIAGRAM = `사용자 (폰)
  │ 요청
@@ -96,39 +98,44 @@ export function LiveArchitectureScreen() {
       <PageTitle title="구조" subtitle="오케스트레이터가 일하는 방식과 붙어 있는 도구" />
 
       <section aria-label="아키텍처" className="space-y-2">
-        <h2 className="text-lg font-semibold">아키텍처</h2>
+        <h2 className={H2}>아키텍처</h2>
         <Card>
-          <pre className="overflow-x-auto text-[11px] leading-[1.35] text-text-muted" data-testid="arch-diagram">{DIAGRAM}</pre>
+          <pre className="overflow-x-auto text-[11px] leading-[1.45] text-text" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Pretendard Variable", Pretendard, monospace' }} data-testid="arch-diagram">{DIAGRAM}</pre>
         </Card>
-        <Card className="space-y-2">
-          {FLOW.map(([k, v], i) => (
-            <p key={k} className="text-sm"><span className="font-semibold">{i + 1}. {k}</span> <span className="text-text-muted">— {v}</span></p>
-          ))}
+        <Card className="py-1.5">
+          <ol>
+            {FLOW.map(([k, v], i) => (
+              <li key={k} className={`flex gap-2 py-3 text-sm ${i ? "border-t border-border" : ""}`}>
+                <span className="w-3.5 shrink-0 text-[13px] font-semibold tabular-nums text-text-muted">{i + 1}</span>
+                <p className="min-w-0"><span className="font-bold">{k}</span> <span className="text-text-muted">— {v}</span></p>
+              </li>
+            ))}
+          </ol>
         </Card>
       </section>
 
       <section aria-label="역할" className="space-y-2">
-        <h2 className="text-lg font-semibold">누가 무엇을</h2>
-        <Card className="space-y-1.5">
-          {MODELS.map(([k, v]) => (
-            <p key={k} className="text-sm"><span className="font-semibold">{k}</span> <span className="text-text-muted">· {v}</span></p>
+        <h2 className={H2}>누가 무엇을</h2>
+        <Card className="py-1.5">
+          {MODELS.map(([k, v], i) => (
+            <p key={k} className={`py-3 text-sm ${i ? "border-t border-border" : ""}`}><span className="font-bold">{k}</span> <span className="text-text-muted">· {v}</span></p>
           ))}
         </Card>
       </section>
 
       <section aria-label="보조 도구" className="space-y-2">
-        <h2 className="text-lg font-semibold">보조 도구</h2>
+        <h2 className={H2}>보조 도구</h2>
         {TOOLS.map((t) => (
           <Card key={t.name} className="space-y-2">
             <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <p className="font-semibold">{t.name}</p>
-              <span className="text-xs text-accent">{t.where}</span>
+              <h3 className={CARD_TITLE}>{t.name}</h3>
+              <span className="text-xs font-semibold text-accent">{t.where}</span>
             </div>
             <p className="text-sm text-text-muted">{t.what}</p>
-            <ul className="list-disc space-y-1 pl-5 text-sm">
+            <ul className="list-disc space-y-1 pl-5 text-sm marker:text-text-faint">
               {t.how.map((h) => <li key={h}>{h}</li>)}
             </ul>
-            <p className="break-all text-[11px] text-text-muted">{t.files}</p>
+            <p className="break-all border-t border-border pt-2.5 text-[11px] text-text-muted">{t.files}</p>
           </Card>
         ))}
       </section>

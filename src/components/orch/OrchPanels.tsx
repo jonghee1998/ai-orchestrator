@@ -2,10 +2,10 @@
 // Orchestrator engine panels for the live mobile tabs (프로젝트 / AI 팀 / PM 브리핑).
 // Data: GET /api/orch. Switch changes: POST /api/orch (admin session + CSRF) → GitHub repository variables.
 import { useRef, useState } from "react";
-import { Card } from "@/components/ui";
+import { BUTTON, CARD_TITLE, Card, FIELD, ICON_BUTTON, PRIMARY_BUTTON, PageTitle, ROW, STATUS_BOX } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
-import { formatKst, formatKstTime } from "@/lib/time/kst";
+import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
@@ -21,12 +21,13 @@ export function useOrch() {
   });
 }
 
+/** 작업 상태 배지 색 (같은 상태 = 같은 상태색). 카드 안 한 줄이므로 테두리 대신 배지로 표시한다. */
 const tone = (r: OrchRun) =>
-  r.status === "blocked" ? "border-danger/50 bg-danger/10"
-  : r.status === "awaiting_merge" ? "border-warn/50 bg-warn/10"
-  : r.held ? "border-border bg-bg-raised"
-  : r.status === "done" ? "border-ok/30"
-  : "border-accent/40";
+  r.status === "blocked" ? "bg-danger/10 text-danger"
+  : r.status === "awaiting_merge" ? "bg-warn/10 text-warn"
+  : r.held ? "bg-unknown/10 text-text-muted"
+  : r.status === "done" ? "bg-ok/10 text-ok"
+  : "bg-accent-dim text-accent";
 const short = (repo: string) => repo.split("/")[1] ?? repo;
 
 function StateNote({ kind }: { kind: string }) {
@@ -43,12 +44,12 @@ function StateNote({ kind }: { kind: string }) {
 function RunCard({ r }: { r: OrchRun }) {
   const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${r.step && !["done", "awaiting_merge", "finalizing"].includes(r.status) ? ` · 지금 ${r.step}번` : ""}`;
   return (
-    <a href={r.url} target="_blank" rel="noreferrer" className={`block rounded-xl border p-3 ${tone(r)}`} data-testid={`orch-run-${short(r.repo)}-${r.number}`}>
+    <a href={r.url} target="_blank" rel="noreferrer" className={`block ${ROW} text-sm`} data-testid={`orch-run-${short(r.repo)}-${r.number}`}>
       <div className="flex items-start justify-between gap-2">
-        <p className="break-words font-medium">{r.goal}</p>
-        <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs">{r.statusLabel}</span>
+        <p className="min-w-0 break-words font-semibold">{r.goal}</p>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${tone(r)}`}>{r.statusLabel}</span>
       </div>
-      <p className="mt-1 text-xs text-text-muted">{short(r.repo)} #{r.number} · {stepText}{r.retries ? ` · 수정 ${r.retries}회` : ""}</p>
+      <p className="mt-[3px] text-xs tabular-nums text-text-muted">{short(r.repo)} #{r.number} · {stepText}{r.retries ? ` · 수정 ${r.retries}회` : ""}</p>
       {r.held && <p className="mt-1 text-xs text-warn"><PauseIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />{r.held}</p>}
       {r.reason && <p className="mt-1 break-words text-xs text-danger"><StopIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />{r.reason}</p>}
       <p className="mt-1 text-xs">다음 · {r.next}</p>
@@ -305,7 +306,7 @@ function ProjectCard({ v }: { v: RepoView }) {
 }
 
 /** 프로젝트 탭: 프로젝트마다 남은 할 일 · 4칸(검토·계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 4개(접고 펼 수 있음). */
-export function OrchRunsPanel() {
+export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
   const { state, reload, error } = useOrch();
   const latest = useRef({ state, error }); latest.current = { state, error };
   const [busy, setBusy] = useState(false);
@@ -322,16 +323,22 @@ export function OrchRunsPanel() {
     } catch { setFailed(true); }
     finally { setBusy(false); }
   }
+  const meta = updatedAt !== null ? `방금 갱신 ${formatKstTime(updatedAt)}`
+    : state.kind === "ok" && state.data.generatedAt ? `${formatKstShort(state.data.generatedAt)} 갱신`
+    : "실제 GitHub 기록 기준";
   return (
-    <section aria-label="자동 진행 작업" className="space-y-2" data-testid="orch-runs">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-text-muted">자동 진행 작업</h2>
-        <button type="button" onClick={refresh} disabled={busy} data-testid="orch-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "불러오는 중…" : <span className="inline-flex items-center gap-1.5"><RefreshIcon className="h-3.5 w-3.5" />새로고침</span>}</button>
-      </div>
-      {updatedAt !== null && <p className="text-[11px] text-text-muted" data-testid="orch-refreshed">방금 갱신 {formatKstTime(updatedAt)}</p>}
-      {failed && <p role="status" className="text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
-      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
-    </section>
+    <>
+      <PageTitle title="AI Orchestrator" subtitle={meta} subtitleTestId={updatedAt !== null ? "orch-refreshed" : "orch-generated"} actions={<>
+        <button type="button" onClick={refresh} disabled={busy} aria-label="새로고침" aria-busy={busy} title={busy ? "불러오는 중…" : "새로고침"} data-testid="orch-refresh" className={ICON_BUTTON}>
+          <RefreshIcon className={`h-[18px] w-[18px] ${busy ? "motion-safe:animate-spin" : ""}`} />
+        </button>
+        {pmChatUrl && <a href={pmChatUrl} target="_blank" rel="noreferrer" className={PRIMARY_BUTTON}>PM에게 말하기</a>}
+      </>} />
+      <section aria-label="자동 진행 작업" className="space-y-3" data-testid="orch-runs">
+        {failed && <p role="status" className="px-1 text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
+        {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
+      </section>
+    </>
   );
 }
 
@@ -339,27 +346,27 @@ const BADGE_TONE: Record<PlanBadgeTone, string> = {
   ok: "bg-ok/10 text-ok",
   warn: "bg-warn/10 text-warn",
   danger: "bg-danger/10 text-danger",
-  muted: "bg-current/10 text-text-muted",
+  muted: "bg-unknown/10 text-text-muted",
 };
 
 function PlanCard({ p, canApprove, busy, armed, onArm, onApprove }: { p: PendingPlan; canApprove: boolean; busy: boolean; armed: boolean; onArm(): void; onApprove(): void }) {
   const badge = planReviewBadge(p.review);
   return (
-    <div className="rounded-xl border border-border p-3" data-testid={`orch-plan-${short(p.repo)}-${p.number}`}>
+    <div className={`${ROW} pb-1 text-sm`} data-testid={`orch-plan-${short(p.repo)}-${p.number}`}>
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 break-words font-medium">{p.goal}</p>
-        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ${BADGE_TONE[badge.tone]}`}>{badge.tone === "ok" ? <CheckIcon className="h-3 w-3" /> : badge.revise ? <EditIcon className="h-3 w-3" /> : badge.tone === "danger" ? <AlertIcon className="h-3 w-3" /> : null}{badge.text}</span>
+        <p className="min-w-0 break-words font-semibold">{p.goal}</p>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${BADGE_TONE[badge.tone]}`}>{badge.tone === "ok" ? <CheckIcon className="h-3 w-3" /> : badge.revise ? <EditIcon className="h-3 w-3" /> : badge.tone === "danger" ? <AlertIcon className="h-3 w-3" /> : null}{badge.text}</span>
       </div>
-      <p className="mt-1 text-xs text-text-muted">{short(p.repo)} #{p.number} · 스텝 {p.steps}개</p>
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <p className="mt-[3px] text-xs tabular-nums text-text-muted">{short(p.repo)} #{p.number} · 스텝 {p.steps}개</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         {canApprove && (
           <button type="button" disabled={busy} onClick={armed ? onApprove : onArm}
-            className={`min-h-11 rounded-lg px-3 text-sm font-semibold disabled:opacity-50 ${armed ? "bg-warn/15 text-warn" : "border border-border"}`}>
+            className={armed ? "inline-flex min-h-11 items-center rounded-xl bg-warn/15 px-3 text-[13px] font-semibold text-warn disabled:opacity-50" : BUTTON}>
             {busy ? "승인 중…" : armed ? "정말 시작할까요? 승인" : "승인"}
           </button>
         )}
         {canApprove && badge.revise && <span className="text-xs text-warn">감사에서 수정 필요 상태입니다</span>}
-        <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-xs underline">계획 보기</a>
+        <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-[13px] font-semibold text-accent">계획 보기</a>
       </div>
     </div>
   );
@@ -389,34 +396,43 @@ export function OrchPlansPanel() {
     finally { setBusy(null); setArmed(null); }
   }
 
-  const status = msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>;
+  const status = msg && <p role="status" className={STATUS_BOX}>{msg}</p>;
   const errorLines = errors.map((v) => <p key={v.repo} className="text-xs text-danger">{short(v.repo)} 계획 불러오기 실패 · {v.plansError}</p>);
-  if (!plans.length) return <div className="space-y-2" data-testid="orch-plans">{status}{errorLines}<p className="text-sm text-text-muted">승인 대기 계획 없음</p></div>;
+  if (!plans.length) return <Card><div className="space-y-2" data-testid="orch-plans">{status}{errorLines}<p className="text-sm text-text-muted">승인 대기 계획 없음</p></div></Card>;
   return (
-    <section aria-label="승인 대기 계획" className="space-y-2" data-testid="orch-plans">
-      <h2 className="text-sm font-semibold text-text-muted">승인 대기 계획 · {plans.length}</h2>
-      {status}
-      {errorLines}
-      {plans.map((p) => {
-        const key = `${p.repo}#${p.number}`;
-        return <PlanCard key={key} p={p} canApprove={canApprove} busy={busy !== null} armed={armed === key} onArm={() => { setArmed(key); setMsg(null); }} onApprove={() => approve(p)} />;
-      })}
-      {!canApprove && <p className="text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 승인할 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 승인할 수 없습니다."}</p>}
-    </section>
+    <Card>
+      <section aria-label="승인 대기 계획" className="space-y-2" data-testid="orch-plans">
+        <h2 className={CARD_TITLE}>승인 대기 계획 <span className="font-medium tabular-nums text-text-muted">· {plans.length}</span></h2>
+        {status}
+        {errorLines}
+        <div>
+          {plans.map((p) => {
+            const key = `${p.repo}#${p.number}`;
+            return <PlanCard key={key} p={p} canApprove={canApprove} busy={busy !== null} armed={armed === key} onArm={() => { setArmed(key); setMsg(null); }} onApprove={() => approve(p)} />;
+          })}
+        </div>
+        {!canApprove && <p className="text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 승인할 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 승인할 수 없습니다."}</p>}
+      </section>
+    </Card>
   );
 }
+
+/** 카드 밖 구역 제목 (AI 사용량 · AI ON/OFF). */
+const SECTION_TITLE = "px-1 text-lg font-[750] tracking-[-0.02em]";
 
 /** PM 브리핑 탭: 사용자 판단이 필요한 작업만. */
 export function OrchDecisionsPanel() {
   const { state } = useOrch();
-  if (state.kind !== "ok") return <section aria-label="엔진 결정 필요" className="space-y-2"><h2 className="text-sm font-semibold text-text-muted">엔진 · 결정 필요</h2><Card><StateNote kind={state.kind} /></Card></section>;
+  if (state.kind !== "ok") return <Card><section aria-label="엔진 결정 필요" className="space-y-2"><h2 className={CARD_TITLE}>엔진 · 결정 필요</h2><StateNote kind={state.kind} /></section></Card>;
   const runs = state.data.repos.flatMap((v) => v.runs).filter((r) => r.needsUser || r.held);
   return (
-    <section aria-label="엔진 결정 필요" className="space-y-2" data-testid="orch-decisions">
-      <h2 className="text-sm font-semibold text-text-muted">엔진 · 결정 필요 · {runs.filter((r) => r.needsUser).length}</h2>
-      {runs.map((r) => <RunCard key={`${r.repo}#${r.number}`} r={r} />)}
-      {!runs.length && <p className="text-sm text-text-muted">없음 — 모든 작업이 자동으로 진행 중입니다.</p>}
-    </section>
+    <Card>
+      <section aria-label="엔진 결정 필요" data-testid="orch-decisions">
+        <h2 className={CARD_TITLE}>엔진 · 결정 필요 <span className="font-medium tabular-nums text-text-muted">· {runs.filter((r) => r.needsUser).length}</span></h2>
+        {runs.length > 0 && <div className="mt-2 -mb-3">{runs.map((r) => <RunCard key={`${r.repo}#${r.number}`} r={r} />)}</div>}
+        {!runs.length && <p className="mt-2 text-sm text-text-muted">없음 — 모든 작업이 자동으로 진행 중입니다.</p>}
+      </section>
+    </Card>
   );
 }
 
@@ -448,33 +464,33 @@ export function OrchSwitchesPanel() {
 
   return (
     <section aria-label="엔진 ON/OFF" className="space-y-2" data-testid="orch-switches">
-      <h2 className="text-lg font-semibold">AI ON/OFF</h2>
-      <p className="text-xs text-text-muted">끄면 새 작업만 막고, 이미 실행 중인 작업은 끝까지 진행합니다. GitHub 저장소 변수에 저장되어 이 앱이 꺼져 있어도 지켜집니다.</p>
-      {msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>}
+      <h2 className={SECTION_TITLE}>AI ON/OFF</h2>
+      <p className="px-1 text-xs text-text-muted">끄면 새 작업만 막고, 이미 실행 중인 작업은 끝까지 진행합니다. GitHub 저장소 변수에 저장되어 이 앱이 꺼져 있어도 지켜집니다.</p>
+      {msg && <p role="status" className={STATUS_BOX}>{msg}</p>}
       {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => (
-        <Card key={v.repo} className="space-y-3">
-          <p className="font-semibold">{short(v.repo)}</p>
-          {!v.switches ? <p className="text-xs text-danger">스위치를 읽지 못했습니다 · {v.switchesError}</p> : <>
+        <Card key={v.repo}>
+          <h3 className={CARD_TITLE}>{short(v.repo)}</h3>
+          {!v.switches ? <p className="mt-2 text-xs text-danger">스위치를 읽지 못했습니다 · {v.switchesError}</p> : <div className="mt-2">
             {FLAG_KEYS.map((k) => {
               const on = v.switches![k];
               const label = k === "paused" ? (on ? "정지됨" : "운영 중") : on ? "ON" : "OFF";
               const active = k === "paused" ? !on : on;
               return (
-                <div key={k} className="flex items-center justify-between gap-3">
-                  <div><p className="text-sm">{FLAG_TEXT[k].name}</p>{!active && FLAG_TEXT[k].off && <p className="text-xs text-text-muted">꺼짐 · {FLAG_TEXT[k].off}</p>}</div>
+                <div key={k} className={`flex items-center justify-between gap-3 ${ROW} py-2`}>
+                  <div className="min-w-0"><p className="text-sm font-medium">{FLAG_TEXT[k].name}</p>{!active && FLAG_TEXT[k].off && <p className="mt-[3px] text-xs text-text-muted">꺼짐 · {FLAG_TEXT[k].off}</p>}</div>
                   <button role="switch" aria-checked={active} aria-label={`${short(v.repo)} ${FLAG_TEXT[k].name}`} disabled={!canEdit || busy !== null}
                     onClick={() => change(v.repo, k, !on)}
-                    className={`min-h-11 min-w-20 shrink-0 rounded-full px-3 text-sm font-semibold disabled:opacity-50 ${active ? "bg-accent text-white" : "bg-border text-text-muted"}`}>
+                    className={`min-h-11 min-w-20 shrink-0 rounded-full px-3 text-[13px] font-semibold disabled:opacity-50 ${active ? "bg-accent text-white" : "bg-bg text-text-muted ring-1 ring-inset ring-border"}`}>
                     {busy === `${v.repo}:${k}` ? "…" : label}
                   </button>
                 </div>
               );
             })}
             <WindowEditor repo={v.repo} value={v.switches.window} disabled={!canEdit || busy !== null} onSave={(w) => change(v.repo, "window", w)} />
-          </>}
+          </div>}
         </Card>
       ))}
-      {state.kind === "ok" && !canEdit && <p className="text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 바꿀 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 읽기만 가능합니다."}</p>}
+      {state.kind === "ok" && !canEdit && <p className="px-1 text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 바꿀 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 읽기만 가능합니다."}</p>}
     </section>
   );
 }
@@ -482,12 +498,12 @@ export function OrchSwitchesPanel() {
 function WindowEditor({ repo, value, disabled, onSave }: { repo: string; value: string; disabled: boolean; onSave(v: string): void }) {
   const [w, setW] = useState(value);
   return (
-    <div className="space-y-1">
-      <label className="block text-sm" htmlFor={`win-${repo}`}>작업 시간대 (한국시간, 비우면 항상)</label>
+    <div className={`space-y-1.5 ${ROW} pb-0`}>
+      <label className="block text-sm font-medium" htmlFor={`win-${repo}`}>작업 시간대 (한국시간, 비우면 항상)</label>
       <div className="flex gap-2">
         <input id={`win-${repo}`} value={w} onChange={(e) => setW(e.target.value)} placeholder="08:00-24:00" inputMode="numeric"
-          className="min-h-11 flex-1 rounded-xl border border-border bg-bg-raised px-3 text-sm" />
-        <button disabled={disabled || w.trim() === value} onClick={() => onSave(w.trim())} className="min-h-11 rounded-xl border border-border px-3 text-sm disabled:opacity-50">저장</button>
+          className={`${FIELD} min-h-11 min-w-0 flex-1 tabular-nums`} />
+        <button disabled={disabled || w.trim() === value} onClick={() => onSave(w.trim())} className={BUTTON}>저장</button>
       </div>
     </div>
   );
@@ -499,12 +515,12 @@ function Bar({ label, w }: { label: string; w: UsageWindow | null }) {
   const color = p === null ? "bg-text-faint" : p >= 90 ? "bg-danger" : p >= 70 ? "bg-warn" : "bg-accent";
   return (
     <div className="space-y-1">
-      <div className="flex items-baseline justify-between text-sm">
-        <span>{label}</span>
-        <span className="font-semibold">{p === null ? "확인 불가" : `${p}% 사용 · ${left}% 남음`}</span>
+      <div className="flex items-baseline justify-between gap-2 text-sm">
+        <span className="text-text-muted">{label}</span>
+        <span className={`font-semibold tabular-nums ${p === null ? "text-text-muted" : ""}`}>{p === null ? "확인 불가" : `${p}% 사용 · ${left}% 남음`}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-border"><div className={`h-full ${color}`} style={{ width: `${Math.min(100, p ?? 0)}%` }} /></div>
-      <p className="text-[11px] text-text-muted">리셋 {w?.resetsAt ? formatKst(w.resetsAt) : "확인 불가"}</p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-border"><div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, p ?? 0)}%` }} /></div>
+      <p className="text-[11px] tabular-nums text-text-muted">리셋 {w?.resetsAt ? formatKst(w.resetsAt) : "확인 불가"}</p>
     </div>
   );
 }
@@ -515,7 +531,7 @@ export function OrchUsagePanel() {
   const session = useSession();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  if (state.kind !== "ok") return <section aria-label="AI 사용량" className="space-y-2"><h2 className="text-lg font-semibold">AI 사용량</h2><Card><StateNote kind={state.kind} /></Card></section>;
+  if (state.kind !== "ok") return <section aria-label="AI 사용량" className="space-y-2"><h2 className={SECTION_TITLE}>AI 사용량</h2><Card><StateNote kind={state.kind} /></Card></section>;
   const u = latestUsage(state.data.repos);
   const canRefresh = session.role === "admin" && state.data.canWrite;
 
@@ -534,25 +550,25 @@ export function OrchUsagePanel() {
   return (
     <section aria-label="AI 사용량" className="space-y-2" data-testid="orch-usage">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">AI 사용량</h2>
-        {canRefresh && <button type="button" onClick={refresh} disabled={busy} data-testid="usage-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "요청 중…" : <span className="inline-flex items-center gap-1.5"><RefreshIcon className="h-3.5 w-3.5" />지금 확인</span>}</button>}
+        <h2 className={SECTION_TITLE}>AI 사용량</h2>
+        {canRefresh && <button type="button" onClick={refresh} disabled={busy} data-testid="usage-refresh" className={BUTTON}>{busy ? "요청 중…" : <><RefreshIcon className="h-4 w-4" />지금 확인</>}</button>}
       </div>
-      {msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>}
-      {u && state.data.repos.some((r) => r.usageRefresh === "requested" || r.usageRefresh === "running") && <p className="text-[11px] text-text-muted" data-testid="usage-refreshing">값이 1시간 넘게 지나 새로 확인하는 중입니다. 1~2분 뒤 새로고침하면 반영됩니다.</p>}
+      {msg && <p role="status" className={STATUS_BOX}>{msg}</p>}
+      {u && state.data.repos.some((r) => r.usageRefresh === "requested" || r.usageRefresh === "running") && <p className="px-1 text-[11px] text-text-muted" data-testid="usage-refreshing">값이 1시간 넘게 지나 새로 확인하는 중입니다. 1~2분 뒤 새로고침하면 반영됩니다.</p>}
       {!u ? <Card><p className="text-sm text-text-muted">아직 사용량 기록이 없습니다. 엔진의 usage 작업이 처음 돌면 표시됩니다.</p></Card> : <>
         <Card className="space-y-3">
-          <p className="font-semibold">Claude <span className="text-xs font-normal text-text-muted">구독 전체 · 직접 대화 포함</span></p>
+          <h3 className={CARD_TITLE}>Claude <span className="text-xs font-normal tracking-normal text-text-muted">구독 전체 · 직접 대화 포함</span></h3>
           {u.claude ? <><Bar label="5시간" w={u.claude.fiveHour} /><Bar label="7일" w={u.claude.sevenDay} /></> : <p className="text-sm text-text-muted">확인 불가{u.claudeError ? ` · ${u.claudeError}` : ""}</p>}
-          <p className="text-[11px] text-text-muted">확인 {formatKst(u.claudeCheckedAt, "없음")}{u.claude && u.claudeError ? ` · 이번 확인: ${u.claudeError}` : ""}</p>
+          <p className="border-t border-border pt-2.5 text-[11px] tabular-nums text-text-muted">확인 {formatKst(u.claudeCheckedAt, "없음")}{u.claude && u.claudeError ? ` · 이번 확인: ${u.claudeError}` : ""}</p>
         </Card>
         <Card className="space-y-3">
           <div className="flex items-start justify-between gap-2">
-            <p className="font-semibold">Codex</p>
-            {u.codex.limited && <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs text-warn">한도 소진 · Opus 대체 검수</span>}
+            <h3 className={CARD_TITLE}>Codex</h3>
+            {u.codex.limited && <span className="rounded-full bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn">한도 소진 · Opus 대체 검수</span>}
           </div>
           {u.codex.fiveHour || u.codex.weekly ? <><Bar label="5시간" w={u.codex.fiveHour} /><Bar label="주간" w={u.codex.weekly} /></> : <p className="text-sm text-text-muted">사용률 확인 불가</p>}
-          {u.codex.needsLogin && <p className="rounded-lg border border-warn/50 bg-warn/10 p-2 text-xs text-warn"><KeyIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />폰 로그인 필요 — GitHub Actions → codex-login → Run workflow 후 표시되는 코드로 승인</p>}
-          <p className="text-[11px] text-text-muted">확인 {formatKst(u.codex.checkedAt, "없음")}{u.codex.error && !u.codex.needsLogin ? ` · 이번 조회: ${u.codex.error}` : ""}</p>
+          {u.codex.needsLogin && <p className="flex items-start gap-2 rounded-xl bg-warn/10 px-3.5 py-2.5 text-[13px] text-warn"><KeyIcon className="mt-0.5 h-4 w-4" /><span className="min-w-0">폰 로그인 필요 — GitHub Actions → codex-login → Run workflow 후 표시되는 코드로 승인</span></p>}
+          <p className="border-t border-border pt-2.5 text-[11px] tabular-nums text-text-muted">확인 {formatKst(u.codex.checkedAt, "없음")}{u.codex.error && !u.codex.needsLogin ? ` · 이번 조회: ${u.codex.error}` : ""}</p>
         </Card>
       </>}
     </section>
