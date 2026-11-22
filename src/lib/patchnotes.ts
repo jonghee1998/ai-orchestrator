@@ -5,6 +5,7 @@
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "1.21.5", date: "2026-11-22", title: "구조 탭 흐름도·배포 구조", items: ["아키텍처를 요청→배포 한 장 흐름도로(승인 1·2, PASS/FAIL, 자동 수정·중단, 반복)", "배포·비밀값 구조도 추가: 폰→Vercel→GitHub, 환경변수·Secrets·Variables 위치와 역할, Deploy Hook 배포", "비밀값 규칙 7가지"] },
   { version: "1.21.4", date: "2026-11-22", pr: 295, title: "추가 검토 분리·접기 표시", items: ["검토(아이디어)는 본 흐름과 따로: 칸은 계획·개발·통합 3개, 검토는 아래 '추가 검토'", "남은 할 일은 계획·개발·통합만 셈", "접고 펼 수 있는 줄마다 > 표시(펼치면 아래로)"] },
   { version: "1.21.3", date: "2026-11-22", pr: 294, title: "세부 과정 완료 표시", items: ["단계를 펼치면 끝난 과정은 체크, 지금은 파란 점, 남은 과정은 빈 원으로 표시", "작업이 없는 단계는 0/세부 개수로 표시하고 과정은 모두 완료로"] },
   { version: "1.21.2", date: "2026-11-22", pr: 293, title: "남은 과정 숫자 보정", items: ["지금 진행 중인 과정도 남은 것으로 셈 (예: 1.3에 있으면 검토 4/6)"] },
