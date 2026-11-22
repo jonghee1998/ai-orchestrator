@@ -232,7 +232,7 @@ rounded:
 5. **상태 글자색이 토큰 밖** — 위험·경고·정상 글자에 Tailwind 기본 색을 씁니다: `text-red-200`(오류·막힘 사유), `text-yellow-100`/`text-yellow-200`(보류·확인 단계·한도 소진), `text-green-200`(계획 감사 OK). 반면 `src/components/ui.tsx`의 배지는 `text-danger`/`text-warn`/`text-ok`를 씁니다 (`src/components/orch/OrchPanels.tsx`).
 6. **스위치·사용량 막대 색** — 켜짐 스위치 `bg-blue-500`, 막대 채움 `bg-blue-400`/`bg-yellow-400`/`bg-red-400`, 바탕 `bg-slate-700`/`bg-slate-600`. 같은 역할의 `accent`·`warn`·`danger`·`border`·`unknown` 토큰을 쓰지 않습니다. 같은 파일의 작업 진행 막대는 `bg-border` 바탕에 `bg-accent` 채움입니다 (`src/components/orch/OrchPanels.tsx`).
 7. **한도 소진 배지** — `bg-yellow-500/15 text-yellow-200`로, 다른 경고 배지(`bg-warn/15`·`bg-warn/20`)와 다릅니다 (`src/components/orch/OrchPanels.tsx`).
-8. **다른 화면의 경고·상태 색** — `src/components/ScopeNotice.tsx`는 `border-yellow-700/50 bg-yellow-900/20 text-yellow-100`, `src/components/overview/OverviewDashboard.tsx`는 점에 `bg-green-500`/`bg-yellow-500`/`bg-red-500`, 켜짐 배지에 `bg-green-900/40 text-green-200`을 씁니다.
+8. **다른 화면의 경고·상태 색** — 해당 없음 (해당 예전 화면은 2026-11-22 전체 정리에서 삭제됨).
 9. **쓰지 않는 토큰** — `border.subtle`(`#1e222a`), `accent.dim`(`#2b3a5c`)은 `tailwind.config.ts`에 있지만 `src`에서 쓰는 곳이 없습니다. `border.subtle`은 다른 바탕들과 달리 남색이 아닌 회색 계열입니다.
 10. **글자 단계 차이** — `text.muted`(`#9aa0ab`)와 `text.faint`(`#949ba8`)의 밝기가 거의 같아 두 단계가 눈으로 잘 구분되지 않습니다 (`tailwind.config.ts`).
 11. **둥근 모서리** — 계정 접기는 `rounded-2xl`(16px)이고 다른 카드는 `rounded-xl`(12px)입니다 (`src/components/workspace/Account.tsx`).

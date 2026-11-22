@@ -1,64 +1,35 @@
 # AI Orchestrator
 
-ChatGPT · Codex · Claude Code · Pickle을 하나의 **모바일 웹 대시보드**에서 관리하고,
-**GitHub를 중심으로** 작업을 배정·협업하는 개인 AI 오케스트레이션 시스템.
+계획 Issue를 스텝으로 나눠 AI가 구현·검수하는 GitHub 기반 오케스트레이터와, 그 진행 상황을 보는 모바일 상황판입니다.
+PM은 Claude, 구현은 Claude Sonnet/Opus, 독립 검수는 Codex(안 되면 Claude Opus), 시작 승인과 위험한 변경의 머지는 사용자가 합니다.
 
-> 현재 상태 (2026-11-21): **엔진 이전 중** — 작업 진행은 GitHub Actions 오케스트레이터(`scripts/orch/`)가 담당하고,
-> 이 앱은 진행 상황판으로 바뀝니다. 운영 방법은 **[운영 매뉴얼](docs/ORCH_MANUAL.md)**, 진행 추적은 #206.
+## 구조 한눈에
 
-## 에이전트 역할
-
-| 에이전트 | 역할 |
+| 위치 | 내용 |
 |---|---|
-| Claude (PM) | 요구사항 정리·계획 Issue 작성, 1시간마다 점검, 판단 필요 시 알림 |
-| Claude Sonnet / Opus | 스텝 단위 구현 (난이도·위험도에 따라 자동 선택, 반복 실패 시 Opus로 상향) |
-| Codex | 독립 검수 (기본). 쓸 수 없거나 OFF면 Claude Opus가 별도 세션에서 대체 검수 |
-| GitHub Actions | CI, 상태 전이, 스텝 PR 자동 머지, 위험도 판정 |
-| 사용자 | 시작 승인(`orch:go`), 위험한 변경의 최종 머지, 배포 |
+| `scripts/orch/` + `.github/workflows/` | 오케스트레이터 엔진 (계획 → 스텝 구현 → PR → 검수·CI → 머지) |
+| `src/app/` | 상황판 하단 5탭: 프로젝트·AI 팀·PM 브리핑·패치노트·구조, `/api/orch`, `/api/session` |
+| `src/lib/orch/`, `src/components/orch/` | 상황판 데이터(GitHub 읽기)와 화면 |
+| `src/lib/session/` | 관리자 1명 로그인 (비밀번호 해시, 세션·CSRF) |
+| `src/lib/patchnotes.ts`, `docs/roadmap.json` | 패치노트·로드맵 데이터 |
+| `scripts/screens/` | 화면 테스트 스크린샷 |
+| `.claude/`, `ecc/` | 보조 도구 (ECC·Impeccable) |
 
-각 AI는 저장소 변수 `ORCH_SONNET` / `ORCH_OPUS` / `ORCH_CODEX` / `ORCH_PAUSED` / `ORCH_WINDOW`로 끄고 켭니다 (매뉴얼 4장).
+## 주요 문서
 
-이전 방식(GPT PM, handoff coordinator)의 작업 기록은 `archived:pre-engine` 라벨과 `archive/pre-engine-2026-11-21` 브랜치에 보존되어 있습니다.
-
-## 기술 스택
-
-- Next.js 15 (App Router) + TypeScript
-- Tailwind CSS (모바일 우선 다크모드)
+- [docs/ORCH_MANUAL.md](docs/ORCH_MANUAL.md) — 운영 매뉴얼 (작업 시작, 역할, ON/OFF, 배포)
+- [CLAUDE.md](CLAUDE.md) — 구현 규칙 · [AGENTS.md](AGENTS.md) — 검수 지침
+- [docs/ADMIN_LOGIN.md](docs/ADMIN_LOGIN.md) — 관리자 로그인 설정
+- [docs/ECC.md](docs/ECC.md) — 보조 도구
+- [PRODUCT.md](PRODUCT.md) · [DESIGN.md](DESIGN.md) — 제품·디자인 기준
 
 ## 로컬 실행
 
 ```bash
-npm install
+npm ci
 npm run dev        # http://localhost:3000
-npm run typecheck  # 타입 검사
-npm run build      # 프로덕션 빌드
+npm test           # 테스트 (npm run typecheck, npm run build 도 CI 에서 실행)
+npm run screens    # 화면 스크린샷
 ```
 
-환경 변수는 `.env.example`를 참고해 `.env.local`에 작성합니다.
-토큰·API 키·인증정보는 **절대 저장소에 커밋하지 않습니다** (`.gitignore` 처리됨).
-
-관리자 아이디·비밀번호 최초 설정은 [docs/ADMIN_LOGIN.md](docs/ADMIN_LOGIN.md)를 참고합니다. 기본 계정은 없습니다.
-
-## 화면 구성
-
-- **홈** — 전체 상태 요약 (연결 에이전트, 진행 프로젝트, 열린 작업)
-- **프로젝트** — 프로젝트별 작업 목록·담당 에이전트·진행 상황
-- **에이전트** — 연결 상태, 사용 한도, 초기화 시각, 클라우드 실행 가능 여부
-- **작업** — GitHub Issue 기반 작업 큐
-- **활동** — 실행 로그 및 에이전트 간 협업 기록
-
-## 설계 원칙 (중요 제약)
-
-- 실제 연결되지 않은 에이전트를 **연결 완료로 표시하지 않습니다**. 기본값은 `연결 안 됨`.
-- 사용량·진행률을 **임의로 생성하지 않습니다**. 확인할 수 없으면 `unknown`으로 표시.
-- 샘플(데모)·시뮬레이션·테스트 모드: 2026-11-21 삭제됨(#94·#95 정리). 화면은 실제 데이터만 표시합니다.
-- 구독 기반 CLI 인증과 클라우드 자동 실행 가능 여부를 **구분**합니다.
-- 유료 API 사용, 외부 서비스 가입, 운영 배포는 **사용자 승인 후** 진행합니다.
-- 기존 `private_dashboard` 저장소는 수정하지 않습니다.
-
-## 문서
-
-- [AGENTS.md](./AGENTS.md) — 에이전트 역할·연동 규약·협업 원칙
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 시스템 구조와 설계 결정
-- [docs/ROADMAP.md](./docs/ROADMAP.md) — 단계별 로드맵
-- [docs/ISSUE36.md](./docs/ISSUE36.md) — PM 브랜치/SHA 고정, 구독 CLI 협업 인계와 실행 검증
+환경 변수는 `.env.example`을 보고 `.env.local`에 적습니다. 토큰·비밀번호는 저장소에 커밋하지 않습니다.

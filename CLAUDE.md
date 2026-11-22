@@ -12,7 +12,7 @@
 ## 이 저장소 추가 규칙
 
 - Next.js 15 + TypeScript. 코드를 바꾸면 `npm run typecheck`와 `npm test`를 둘 다 통과시킵니다 (CI는 `npm run build`도 실행합니다).
-- 인증(`src/lib/session`, `src/app/api/_auth.ts`, `src/lib/control/auth.ts`)과 DB 마이그레이션(`db/migrations`)은 지시에 명시된 경우에만 수정합니다.
+- 인증(`src/lib/session`, `src/app/api/_auth.ts`, `src/lib/control/auth.ts`)과 DB(지금은 없음, 새로 추가하는 것 포함)는 지시에 명시된 경우에만 수정합니다.
 - 토큰·비밀번호·개인정보를 코드, 테스트 픽스처, 로그에 넣지 않습니다.
 - 운영 방식은 [docs/ORCH_MANUAL.md](docs/ORCH_MANUAL.md)를 따릅니다.
 

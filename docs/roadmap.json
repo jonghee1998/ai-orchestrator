@@ -14,7 +14,7 @@
     {"id": "0.11", "title": "ECC·Impeccable·스킬", "status": "done", "note": "ECC 10 + Impeccable, 해시 고정", "ref": 215},
     {"id": "0.12", "title": "CI·테스트·화면 테스트", "status": "done", "note": "typecheck·test·build·screens", "ref": 237},
     {"id": "0.13", "title": "Vercel 배포", "status": "done", "note": "Deploy Hook, 11/22 첫 배포", "ref": 247},
-    {"id": "0.14", "title": "외부 서비스 연결", "status": "na", "note": "해당 없음(예전 Supabase 코드 정리 대상)"},
+    {"id": "0.14", "title": "외부 서비스 연결", "status": "na", "note": "해당 없음(예전 Supabase 코드 정리 완료)"},
     {"id": "0.15", "title": "모바일 알림", "status": "done", "note": "ntfy + PM 점검 알림"},
     {"id": "0.16", "title": "통합 상황판 연결", "status": "done", "note": "ORCH_REPOS·ORCH_GITHUB_TOKEN"},
     {"id": "0.17", "title": "사용량·시간·배포 정책", "status": "done", "note": "ON/OFF·시간대·10개 단위 배포"},
