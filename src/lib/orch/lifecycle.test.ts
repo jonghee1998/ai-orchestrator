@@ -166,11 +166,11 @@ test("boardNeedsUser: counts run items that need the user", () => {
   assert.equal(boardNeedsUser(col(4, [{}, { run: run({ needsUser: true }) }, { run: run({ needsUser: true, number: 2 }) }])), 2);
 });
 
-test("stageRemaining: stage sub count − K; stage 5 / bad id → null", () => {
-  assert.equal(stageRemaining("3.10"), 6);
-  assert.equal(stageRemaining("1.3"), 3);
-  assert.equal(stageRemaining("2.9"), 0);
-  assert.equal(stageRemaining("4.8"), 0);
+test("stageRemaining: stage sub count − K + 1 (current sub not done yet); stage 5 / bad id → null", () => {
+  assert.equal(stageRemaining("3.10"), 7);
+  assert.equal(stageRemaining("1.3"), 4);
+  assert.equal(stageRemaining("2.9"), 1);
+  assert.equal(stageRemaining("4.8"), 1);
   assert.equal(stageRemaining("5.1"), null);
   assert.equal(stageRemaining("x"), null);
   assert.equal(stageRemaining("3.17"), null);
@@ -179,33 +179,33 @@ test("stageRemaining: stage sub count − K; stage 5 / bad id → null", () => {
 
 test("totalRemaining: run / plan = stage remainder + later stages up to 4; idea = stage 1 remainder only", () => {
   assert.equal(TOTAL_PROCESS, 39);
-  assert.equal(totalRemaining("run", "3.10"), 14);
-  assert.equal(TOTAL_PROCESS - totalRemaining("run", "3.10")!, 25);
-  assert.equal(totalRemaining("plan", "2.8"), 1 + 16 + 8);
-  assert.equal(totalRemaining("run", "4.7"), 1);
-  assert.equal(totalRemaining("idea", "1.3"), 3);
-  assert.equal(totalRemaining("run", "1.3"), 3 + 9 + 16 + 8);
+  assert.equal(totalRemaining("run", "3.10"), 15);
+  assert.equal(TOTAL_PROCESS - totalRemaining("run", "3.10")!, 24);
+  assert.equal(totalRemaining("plan", "2.8"), 2 + 16 + 8);
+  assert.equal(totalRemaining("run", "4.7"), 2);
+  assert.equal(totalRemaining("idea", "1.3"), 4);
+  assert.equal(totalRemaining("run", "1.3"), 4 + 9 + 16 + 8);
   assert.equal(totalRemaining("run", "bad"), null);
 });
 
-test("itemProgress: 3.10 → 25 done, 14 left (개발 6 · 통합 8), bar fills 6/9/10/0 of 6/9/16/8", () => {
+test("itemProgress: 3.10 → 24 done, 15 left (개발 7 · 통합 8), bar fills 6/9/9/0 of 6/9/16/8", () => {
   const p = itemProgress("3.10")!;
-  assert.deepEqual([p.total, p.done, p.remaining, p.stageRemaining, p.title], [39, 25, 14, 6, "독립 검수"]);
-  assert.deepEqual(p.parts.map((x) => [x.n, x.title, x.count, x.done]), [[1, "검토", 6, 6], [2, "계획", 9, 9], [3, "개발", 16, 10], [4, "통합", 8, 0]]);
-  assert.deepEqual(p.left, [{ title: "개발", n: 6 }, { title: "통합", n: 8 }]);
-  // 2.9 시작 대기: 계획 안 남은 0 은 꼬리에서 뺀다
-  assert.deepEqual(itemProgress("2.9")!.left.map((x) => x.title), ["개발", "통합"]);
+  assert.deepEqual([p.total, p.done, p.remaining, p.stageRemaining, p.title], [39, 24, 15, 7, "독립 검수"]);
+  assert.deepEqual(p.parts.map((x) => [x.n, x.title, x.count, x.done]), [[1, "검토", 6, 6], [2, "계획", 9, 9], [3, "개발", 16, 9], [4, "통합", 8, 0]]);
+  assert.deepEqual(p.left, [{ title: "개발", n: 7 }, { title: "통합", n: 8 }]);
+  // 2.9 시작 대기: 계획 마지막 1개가 아직 남음
+  assert.deepEqual(itemProgress("2.9")!.left.map((x) => x.title), ["계획", "개발", "통합"]);
   assert.equal(itemProgress("5.2"), null);
 });
 
 test("columnRemaining: largest stage remainder in the column; no items → null", () => {
   assert.equal(columnRemaining(col(3, [])), null);
-  assert.equal(columnRemaining(col(3, [{ sub: "3.10" }, { sub: "3.7" }])), 9);
-  assert.equal(columnRemaining(col(1, [{ kind: "idea", sub: "1.3" }, { kind: "idea", sub: "1.5" }])), 3);
+  assert.equal(columnRemaining(col(3, [{ sub: "3.10" }, { sub: "3.7" }])), 10);
+  assert.equal(columnRemaining(col(1, [{ kind: "idea", sub: "1.3" }, { kind: "idea", sub: "1.5" }])), 4);
 });
 
 test("boardRemaining: sum of every item's total remainder; no items → null", () => {
   const b = stageBoard({ runs: [run({ number: 1, status: "reviewing" }), run({ number: 2, status: "awaiting_merge" })], plans: [plan(rv({ verdict: "OK" }))], ideas: [idea("collecting")] });
-  assert.equal(boardRemaining(b), 14 + 1 + 25 + 3);
+  assert.equal(boardRemaining(b), 15 + 2 + 26 + 4);
   assert.equal(boardRemaining(stageBoard({ runs: [run({ status: "done" })], plans: [], ideas: [] })), null);
 });
