@@ -12,26 +12,28 @@ export interface LifecycleSub {
 export interface LifecycleStep {
   n: LifecycleStage;
   title: string;
+  /** One-line summary shown on the stage-board row. */
+  desc: string;
   sub: LifecycleSub[];
 }
 
 const subs = (n: number, titles: string[]): LifecycleSub[] => titles.map((title, i) => ({ id: `${n}.${i + 1}`, title }));
 
 export const LIFECYCLE: readonly LifecycleStep[] = [
-  { n: 1, title: "검토", sub: subs(1, ["접수", "PM 분석", "Codex 평가", "의견 종합", "가치·우선순위", "개발 확정"]) },
+  { n: 1, title: "검토", desc: "아이디어를 PM·Codex가 평가하고 개발 여부를 정함", sub: subs(1, ["접수", "PM 분석", "Codex 평가", "의견 종합", "가치·우선순위", "개발 확정"]) },
   {
-    n: 2, title: "계획",
+    n: 2, title: "계획", desc: "범위·단계·완료 조건을 짜고 감사 후 사용자 승인",
     sub: subs(2, ["코드 분석", "범위 정의", "단계 분할", "완료 조건", "모델·반영 정책", "계획 감사", "재감사", "사용자 승인", "개발 시작"]),
   },
   {
-    n: 3, title: "개발",
+    n: 3, title: "개발", desc: "단계마다 구현 → 독립 검수 → CI → 반영",
     sub: subs(3, [
       "단계 확인", "AI 가용 확인", "모델 선택", "브랜치 준비", "코드 분석", "스킬 활용", "구현", "자체 검증",
       "PR 생성", "독립 검수", "CI", "종합 판정", "자동 수정", "재검수", "단계 반영", "다음 단계",
     ]),
   },
-  { n: 4, title: "통합", sub: subs(4, ["완료 확인", "최종 PR", "통합 CI", "충돌 처리", "위험도 판단", "완공 보고서", "반영·승인", "완료·알림"]) },
-  { n: 5, title: "배포", sub: subs(5, ["업데이트 집계", "배포 조건", "Vercel 배포", "상황판 갱신", "사용량 갱신", "PM 점검", "자동 복구", "결정 알림"]) },
+  { n: 4, title: "통합", desc: "최종 PR 통합 검사·충돌 처리 후 main 반영", sub: subs(4, ["완료 확인", "최종 PR", "통합 CI", "충돌 처리", "위험도 판단", "완공 보고서", "반영·승인", "완료·알림"]) },
+  { n: 5, title: "배포", desc: "반영된 작업을 10개마다 Vercel에 배포", sub: subs(5, ["업데이트 집계", "배포 조건", "Vercel 배포", "상황판 갱신", "사용량 갱신", "PM 점검", "자동 복구", "결정 알림"]) },
 ];
 
 export interface LifecyclePosition {

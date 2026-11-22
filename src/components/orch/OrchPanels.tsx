@@ -185,7 +185,21 @@ function BoardRow({ item, repo, done }: { item: BoardItem; repo: string; done: b
 
 const DONE_FIRST = 5;
 
-/** One stage row ('N 제목 · 개수'), collapsed by default (card height limit); empty rows are dimmed and show '없음'. */
+/** The stage's full process (LIFECYCLE subs); subs where an item sits now are highlighted. */
+function StageProcess({ n, at }: { n: number; at: Set<string> }) {
+  const step = LIFECYCLE[n - 1];
+  return (
+    <ol className="flex flex-wrap gap-1 text-[11px]" aria-label={`${step.title} 세부 과정`} data-testid={`orch-stage-process-${n}`}>
+      {step.sub.map((x) => (
+        <li key={x.id} className={`rounded px-1.5 py-0.5 ${at.has(x.id) ? "bg-accent/25 text-text font-semibold" : "bg-white/5 text-text-muted"}`}>
+          <span className="tabular-nums text-text-faint">{x.id}</span> {x.title}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** One stage row ('N 제목 · 설명 · 개수'), collapsed by default (card height limit); opening it shows the stage's process, then its items. */
 function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: string | null }) {
   const done = c.n === 5;
   const needs = boardNeedsUser(c);
@@ -193,15 +207,22 @@ function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: s
   const first = done ? c.items.slice(0, DONE_FIRST) : c.items;
   const rest = done ? c.items.slice(DONE_FIRST) : [];
   const empty = c.items.length === 0;
+  const at = new Set(done ? [] : c.items.map((i) => i.sub));
   return (
     <details className="rounded-lg border border-border px-2" data-testid={`orch-stage-${c.n}`}>
-      <summary className={`${SUMMARY} text-sm ${empty ? "text-text-faint" : ""}`}>
-        <span className={empty ? "" : "font-semibold"}>{c.n} {c.title}</span>
-        {needs > 0 && <span className="shrink-0 rounded-full bg-warn/20 px-2 py-0.5 text-[11px] text-yellow-100">확인 필요 {needs}</span>}
-        {counts && <span className="min-w-0 truncate text-[11px] text-text-muted" data-testid="orch-stage-deploy">배포 대기 {counts.pending} · 배포됨 {counts.deployed}</span>}
-        <span className="ml-auto shrink-0 tabular-nums"><span className="sr-only"> · </span>{c.items.length}</span>
+      <summary className={`${SUMMARY} text-sm`}>
+        <span className="flex min-w-0 flex-col">
+          <span className="flex items-center gap-2">
+            <span className="font-semibold">{c.n} {c.title}</span>
+            {needs > 0 && <span className="shrink-0 rounded-full bg-warn/20 px-2 py-0.5 text-[11px] text-yellow-100">확인 필요 {needs}</span>}
+            {counts && <span className="min-w-0 truncate text-[11px] text-text-muted" data-testid="orch-stage-deploy">배포 대기 {counts.pending} · 배포됨 {counts.deployed}</span>}
+          </span>
+          <span className="text-[11px] text-text-muted">{LIFECYCLE[c.n - 1].desc}</span>
+        </span>
+        <span className={`ml-auto shrink-0 tabular-nums ${empty ? "text-text-faint" : ""}`}><span className="sr-only"> · </span>{c.items.length}</span>
       </summary>
       <div className="space-y-1.5 pb-2">
+        <StageProcess n={c.n} at={at} />
         {done && deploy && <p className="text-[11px] text-text-faint" data-testid="orch-deploy">다음 배포까지 {deploy}</p>}
         {first.map((item) => <BoardRow key={item.key} item={item} repo={repo} done={done} />)}
         {rest.length > 0 && (
@@ -210,28 +231,7 @@ function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: s
             <div className="space-y-1.5">{rest.map((item) => <BoardRow key={item.key} item={item} repo={repo} done={done} />)}</div>
           </details>
         )}
-        {empty && <p className="text-xs text-text-faint">없음</p>}
-      </div>
-    </details>
-  );
-}
-
-/** '단계 설명': the full 1~5 stage definition (collapsed by default). */
-function LifecycleGuide() {
-  return (
-    <details data-testid="orch-stage-guide">
-      <summary className={`${SUMMARY} text-xs text-text-muted`}>
-        <span>단계 설명</span>
-      </summary>
-      <div className="space-y-2 pb-2 text-xs">
-        {LIFECYCLE.map((s) => (
-          <div key={s.n}>
-            <p className="font-semibold">{s.n} {s.title}</p>
-            <ul className="flex flex-wrap gap-x-3 gap-y-0.5 text-text-muted">
-              {s.sub.map((x) => <li key={x.id}><span className="tabular-nums text-text-faint">{x.id}</span> {x.title}</li>)}
-            </ul>
-          </div>
-        ))}
+        {empty && <p className="text-xs text-text-faint">지금 이 단계에 있는 작업 없음</p>}
       </div>
     </details>
   );
@@ -260,7 +260,6 @@ function ProjectCard({ v }: { v: RepoView }) {
             {v.plansError && <p className="text-xs text-red-200">계획 불러오기 실패 · {v.plansError}</p>}
             {v.ideasError && <p className="text-xs text-red-200">아이디어 불러오기 실패 · {v.ideasError}</p>}
             {board.map((c) => <StageRow key={c.n} c={c} repo={v.repo} deploy={deploy} />)}
-            <LifecycleGuide />
           </section>
           {!roadmapNote && <RoadmapRow n={6} title="확장" items={v.roadmap!.expansion} testid="orch-roadmap-expansion" />}
           <p className="text-xs"><Link href="/patch-notes" className="inline-flex min-h-11 items-center text-accent underline">작업 기록은 패치노트 탭</Link></p>
