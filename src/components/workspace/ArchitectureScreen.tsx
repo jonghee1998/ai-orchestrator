@@ -1,6 +1,7 @@
 // '구조' 탭: 오케스트레이터 아키텍처를 컨설팅 보고서 형식(요약 → 구조도 → 프로세스 → 역할 → 통제 → 자동 루틴 → 보조 도구)으로 설명합니다. 정적 내용.
 import type { ReactNode } from "react";
 import { CARD_TITLE, Card, PageTitle } from "@/components/ui";
+import { DEPLOY_SVG, FLOW_SVG } from "./archDiagrams";
 
 const KICKER = "text-[11px] font-semibold uppercase tracking-[0.08em] text-accent";
 const H2 = "text-lg font-[750] leading-snug tracking-[-0.02em]";
@@ -17,46 +18,26 @@ function Section({ no, kicker, title, children }: { no: string; kicker: string; 
   );
 }
 
-/** 사람이 결정하는 지점 표시 */
-function Gate({ children }: { children: ReactNode }) {
+function Legend({ items }: { items: [string, string][] }) {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-text px-2 py-0.5 text-[10.5px] font-semibold text-white">
-      <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 8.5l3 3 6-7" /></svg>
-      {children}
-    </span>
+    <p className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-text-muted">
+      {items.map(([c, t]) => (
+        <span key={t} className="inline-flex items-center gap-1">
+          <i aria-hidden="true" className={`inline-block h-2.5 w-2.5 rounded-[3px] ${c === "dash" ? "border border-dashed border-text-faint" : c}`} />{t}
+        </span>
+      ))}
+    </p>
   );
 }
 
-function Arrow({ label }: { label?: string }) {
-  return (
-    <div className="flex items-center gap-2 py-1 pl-[18px]" aria-hidden="true">
-      <svg viewBox="0 0 12 18" className="h-[18px] w-3 text-text-faint" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 1v15M2 12l4 4 4-4" /></svg>
-      {label && <span className="text-[11px] text-text-muted">{label}</span>}
-    </div>
-  );
-}
-
-/** 구조도의 한 층 */
-function Layer({ tag, title, desc, gate, children }: { tag: string; title: string; desc: string; gate?: string; children?: ReactNode }) {
-  return (
-    <div className="rounded-[18px] bg-bg-card px-4 py-3.5 shadow-[0_1px_2px_rgba(17,20,24,.04),0_4px_16px_rgba(17,20,24,.04)]">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">{tag}</p>
-          <p className="text-[15px] font-bold leading-snug">{title}</p>
-        </div>
-        {gate && <Gate>{gate}</Gate>}
-      </div>
-      <p className="mt-1 text-[12.5px] leading-relaxed text-text-muted">{desc}</p>
-      {children}
-    </div>
-  );
-}
-
-const STEP_LOOP: [string, string, string][] = [
-  ["구현", "Sonnet · Opus", "ECC · Impeccable"],
-  ["독립 검수", "Codex → Opus", "ECC 검수 에이전트"],
-  ["CI", "test · build · 화면", "Playwright"],
+const SECRET_RULES: [string, string][] = [
+  ["보관 위치", "토큰 · 비밀번호는 GitHub Secrets와 Vercel 환경변수에만. 코드 · 로그 · 테스트 · Issue에는 넣지 않음."],
+  ["다시 보기", "GitHub Secrets는 저장 후 값을 다시 볼 수 없음. 바꾸려면 새 값으로 덮어씀."],
+  ["비밀번호", "관리자 비밀번호는 원문이 아니라 해시(ADMIN_PASSWORD_HASH)만 저장."],
+  ["Codex 로그인", "로그인 정보는 CODEX_AUTH_KEY로 암호화해 Actions 캐시에 보관."],
+  ["배포 경로", "Vercel의 GitHub 자동 배포는 꺼 둠. deploy 워크플로가 Deploy Hook을 불러야만 배포."],
+  ["권한 분리", "상황판 토큰은 읽기 · 라벨 · 아이디어 · 사용량 확인까지만. 코드 푸시는 Actions의 BOT_PAT만."],
+  ["구현 AI", ".github · 엔진 파일을 고칠 수 없어 비밀값을 쓰는 워크플로를 바꾸지 못함."],
 ];
 
 const KPIS: [string, string][] = [
@@ -179,36 +160,29 @@ export function LiveArchitectureScreen() {
         </Card>
       </Section>
 
-      <Section no="02" kicker="아키텍처" title="다섯 개 층이 위에서 아래로 일을 넘깁니다">
-        <div data-testid="arch-diagram">
-            <Layer tag="채널" title="사용자 · 폰 상황판" desc="요청 · 아이디어 입력, 진행 확인, 승인. Vercel에서 실행되고 GitHub 기록을 실시간으로 읽음." />
-            <Arrow label="요청 · 아이디어" />
-            <Layer tag="기획" title="PM · Claude" desc="요청을 스텝 · 완료 기준 · 위험이 있는 계획 Issue로 정리. Codex가 감사하고 PM이 고침(최대 3회)." gate="승인 1" />
-            <Arrow label="orch:go" />
-            <Layer tag="엔진" title="오케스트레이터 · GitHub Actions" desc="스텝을 순서대로 맡기고 결과를 판정. 이벤트에 즉시 반응하고 20분마다 순찰.">
-              <div className="mt-2.5">
-                <p className="text-[11px] font-semibold text-text-muted">스텝마다 반복 · 실패하면 자동 수정 최대 3회</p>
-                {STEP_LOOP.map(([k, who, tool]) => (
-                  <div key={k} className="grid grid-cols-[4.5rem_1fr] gap-x-2 border-t border-border py-2 text-[12.5px] first-of-type:mt-1.5">
-                    <span className="font-bold">{k}</span>
-                    <span className="min-w-0">{who}<span className="block text-[11.5px] text-text-muted">+ {tool}</span></span>
-                  </div>
-                ))}
-              </div>
-            </Layer>
-            <Arrow label="모든 스텝 통과" />
-            <Layer tag="통합" title="최종 PR · 완공 보고서" desc="스텝을 합친 최종 PR에 결과 보고서. 패치노트 충돌은 자동 정리, 위험도를 판정." gate="승인 2">
-              <dl className="mt-2 grid grid-cols-[4.5rem_1fr] gap-x-2 border-t border-border pt-2 text-[12.5px]">
-                <dt className="font-bold">위험 낮음</dt><dd className="text-text-muted">자동 반영</dd>
-                <dt className="font-bold">위험 높음</dt><dd className="text-text-muted">사용자 승인 후 반영</dd>
-              </dl>
-            </Layer>
-            <Arrow label="main 반영" />
-            <Layer tag="전달" title="main → Vercel 운영 배포" desc="반영 10건마다 자동 배포(수동 즉시 배포 가능). 배포되면 이 상황판에 바로 보임." />
-        </div>
+      <Section no="02" kicker="아키텍처" title="요청에서 배포까지 한 흐름">
+        <Card>
+          <div data-testid="arch-diagram" dangerouslySetInnerHTML={{ __html: FLOW_SVG }} />
+          <Legend items={[["bg-text", "사람이 결정"], ["bg-ok", "통과"], ["bg-danger", "실패 · 멈춤"], ["dash", "반복"]]} />
+        </Card>
       </Section>
 
-      <Section no="03" kicker="프로세스" title="여섯 단계, 단계마다 산출물과 통제가 있습니다">
+      <Section no="03" kicker="배포 · 비밀값" title="비밀값은 GitHub와 Vercel 설정에만 있습니다">
+        <Card className="space-y-3">
+          <div data-testid="arch-deploy" dangerouslySetInnerHTML={{ __html: DEPLOY_SVG }} />
+          <Legend items={[["bg-text", "실행 위치"], ["bg-accent", "GitHub 접근 · 배포 호출"]]} />
+        </Card>
+        <Card className="py-1.5">
+          {SECRET_RULES.map(([k, v], i) => (
+            <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
+              <span className="font-bold">{k}</span>
+              <span className="text-text-muted">{v}</span>
+            </div>
+          ))}
+        </Card>
+      </Section>
+
+      <Section no="04" kicker="프로세스" title="여섯 단계, 단계마다 산출물과 통제가 있습니다">
         <Card className="py-1.5">
           <ol>
             {PROCESS.map((s, i) => (
@@ -227,7 +201,7 @@ export function LiveArchitectureScreen() {
         </Card>
       </Section>
 
-      <Section no="04" kicker="역할" title="누가 무엇을 하고, 무엇은 하지 않는지">
+      <Section no="05" kicker="역할" title="누가 무엇을 하고, 무엇은 하지 않는지">
         <Card className="py-1.5">
           {ROLES.map((r, i) => (
             <div key={r.who} className={`space-y-1 py-3 ${i ? "border-t border-border" : ""}`}>
@@ -241,7 +215,7 @@ export function LiveArchitectureScreen() {
         </Card>
       </Section>
 
-      <Section no="05" kicker="통제 장치" title="사고를 막는 일곱 가지 안전장치">
+      <Section no="06" kicker="통제 장치" title="사고를 막는 일곱 가지 안전장치">
         <Card className="py-1.5">
           {CONTROLS.map(([k, v], i) => (
             <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
@@ -252,7 +226,7 @@ export function LiveArchitectureScreen() {
         </Card>
       </Section>
 
-      <Section no="06" kicker="자동 루틴" title="PC가 꺼져 있어도 도는 것들">
+      <Section no="07" kicker="자동 루틴" title="PC가 꺼져 있어도 도는 것들">
         <Card className="py-1.5">
           {ROUTINES.map(([k, v], i) => (
             <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
@@ -263,7 +237,7 @@ export function LiveArchitectureScreen() {
         </Card>
       </Section>
 
-      <Section no="07" kicker="보조 도구" title="각 단계에 붙어 품질을 올리는 도구">
+      <Section no="08" kicker="보조 도구" title="각 단계에 붙어 품질을 올리는 도구">
         <div className="space-y-3">
           {TOOLS.map((t) => (
             <Card key={t.name} className="space-y-2">
