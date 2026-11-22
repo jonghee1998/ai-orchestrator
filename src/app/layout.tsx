@@ -13,6 +13,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // 아이폰 홈 표시줄 높이(safe-area)를 env() 로 받기 위해 cover
+  viewportFit: "cover",
   themeColor: "#F6F7F9",
 };
 
@@ -26,7 +28,7 @@ export default function RootLayout({
       <body>
         <div className="mx-auto flex min-h-dvh max-w-app flex-col">
           <AuthGate>
-          <main className="flex-1 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))]">{children}</main>
+          <main className="flex-1 px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))]">{children}</main>
           <BottomNav />
           </AuthGate>
         </div>

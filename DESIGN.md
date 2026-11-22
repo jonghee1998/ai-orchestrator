@@ -100,7 +100,7 @@ rounded:
 | 포커스 링 간격 | `outline-offset: 3px` | src/app/globals.css |
 | 스크롤바 | `scrollbar-color: #ECEEF1 #F6F7F9` | src/app/globals.css |
 | 접기 제목 높이 | `summary { min-height: 44px; }` | src/app/globals.css |
-| 하단 스크롤 여유 | `scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom))` | src/app/globals.css |
+| 하단 스크롤 여유 | `scroll-padding-bottom: calc(7rem + env(safe-area-inset-bottom))` | src/app/globals.css |
 | 가로 넘침 방지 | `overflow-wrap: anywhere` | src/app/globals.css |
 
 ### Named Rules
@@ -121,7 +121,7 @@ rounded:
 ## Layout
 
 - 한 열. `mx-auto max-w-app`(520px), `min-h-dvh`.
-- 본문 좌우 여백 `px-4`(16px), 위 `pt-[calc(1rem+env(safe-area-inset-top))]`, 아래 `pb-[calc(6rem+env(safe-area-inset-bottom))]`.
+- 본문 좌우 여백 `px-4`(16px), 위 `pt-[calc(1rem+env(safe-area-inset-top))]`, 아래 `pb-[calc(7rem+env(safe-area-inset-bottom))]`. 하단 탭은 `viewportFit: cover` + `pb-[calc(env(safe-area-inset-bottom)+12px)]` 로 아이폰 홈 표시줄 위에 둔다.
 - 세로 간격: 탭 화면 블록 사이 `space-y-4`, 카드 안 `space-y-2~3`.
 - Card 안쪽 여백 18px 16px. 작업·계획 항목 `p-3`.
 
