@@ -210,14 +210,15 @@ function ItemCard({ item, repo }: { item: BoardItem; repo: string }) {
 }
 
 /**
- * The stage's process (LIFECYCLE subs, 2 columns): subs every item has passed = filled dot, where an item sits now =
- * bold + '#번호' tag, the rest = hollow dot and muted text.
+ * The stage's process (LIFECYCLE subs, 2 columns): done = blue check, where an item sits now = blue dot + bold + '#번호' tag,
+ * still to do = hollow gray circle. A stage with no items has nothing left there, so every sub shows as done.
  */
 function StageProcess({ c }: { c: BoardColumn }) {
   const step = LIFECYCLE[c.n - 1];
   const at = new Map<string, number[]>();
   for (const i of c.items) at.set(i.sub, [...(at.get(i.sub) ?? []), itemNumber(i)]);
-  const passed = c.items.length ? Math.min(...c.items.map((i) => subK(i.sub))) : 0;
+  const empty = c.items.length === 0;
+  const passed = empty ? Infinity : Math.min(...c.items.map((i) => subK(i.sub)));
   return (
     <ol className="ml-[22px] mt-2.5 grid grid-flow-col grid-cols-2 gap-x-2.5" style={{ gridTemplateRows: `repeat(${Math.ceil(step.sub.length / 2)}, auto)` }}
       aria-label={`${step.title} 세부 과정`} data-testid={`orch-stage-process-${c.n}`}>
@@ -225,8 +226,14 @@ function StageProcess({ c }: { c: BoardColumn }) {
         const here = at.get(x.id);
         const done = !here && subK(x.id) < passed;
         return (
-          <li key={x.id} className={`relative py-[3px] pl-3.5 text-[12.5px] ${here ? "font-bold text-text" : done ? "text-text" : "text-text-muted"}`}>
-            <span aria-hidden="true" className={`absolute left-0 top-2 h-2 w-2 rounded-full border-2 border-accent ${here || done ? "bg-accent" : "bg-bg-card"}`} />
+          <li key={x.id} data-state={here ? "now" : done ? "done" : "todo"} className={`relative py-[3px] pl-[18px] text-[12.5px] ${here ? "font-bold text-text" : done ? "text-text-muted" : "text-text"}`}>
+            {done ? (
+              <svg aria-label="완료" role="img" viewBox="0 0 16 16" className="absolute left-0 top-[6px] h-3 w-3 text-accent" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8.5l3.2 3L13 4.5" /></svg>
+            ) : here ? (
+              <span aria-label="지금" role="img" className="absolute left-[1px] top-[7px] h-2.5 w-2.5 rounded-full bg-accent" />
+            ) : (
+              <span aria-label="남음" role="img" className="absolute left-[1px] top-[7px] h-2.5 w-2.5 rounded-full border-[1.5px] border-text-faint" />
+            )}
             <span className="text-[10.5px] font-normal tabular-nums text-text-muted">{x.id}</span> {x.title}
             {here?.map((n) => <span key={n} className="ml-[3px] rounded-md bg-accent px-[5px] py-px text-[10.5px] text-white">#{n}</span>)}
           </li>
@@ -253,20 +260,21 @@ function StageRow({ c, repo }: { c: BoardColumn; repo: string }) {
       <div className="pb-3">
         <p className="ml-[22px] text-xs text-text-muted">{LIFECYCLE[c.n - 1].desc}</p>
         <StageProcess c={c} />
+        {empty && <p className="ml-[22px] mt-2 text-xs text-text-muted">이 단계에서 남은 일 없음</p>}
         {c.items.map((item) => <ItemCard key={item.key} item={item} repo={repo} />)}
       </div>
     </details>
   );
 }
 
-/** Stage cell: big '남은 과정' (largest among its items) + small '/세부 개수'; no items → '–'. 0 and '–' are gray. */
+/** Stage cell: big '남은 과정' (largest among its items) + small '/세부 개수'; no items → 0 (nothing left there). 0 is gray. */
 function StageCell({ c }: { c: BoardColumn }) {
   const n = columnRemaining(c);
   return (
     <div className="rounded-xl bg-bg px-2 py-2.5" data-testid={`orch-cell-${c.n}`}>
       <span className="block text-xs text-text-muted">{c.title}</span>
       <b className={`text-xl font-bold tabular-nums ${n ? "text-text" : "text-text-faint"}`}>
-        {n ?? "–"}{n !== null && <small className="ml-0.5 text-[13px] font-medium text-text-faint">/{LIFECYCLE[c.n - 1].sub.length}</small>}
+        {n ?? 0}<small className="ml-0.5 text-[13px] font-medium text-text-faint">/{LIFECYCLE[c.n - 1].sub.length}</small>
       </b>
     </div>
   );
