@@ -93,7 +93,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["0 인프라", "작업 흐름", "1 검토", "2 계획", "3 개발", "4 통합", "5 완료", "단계 설명", "6 확장", "작업 기록은 패치노트 탭"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["0 인프라", "작업 흐름", "1 검토", "2 계획", "3 개발", "4 통합", "5 완료", "개발 여부를 정함", "Vercel에 배포", "6 확장", "작업 기록은 패치노트 탭"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
@@ -129,9 +129,9 @@ try {
       if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
     }
     if (t.name === "projects") {
-      // 기본 상태: 인프라·확장·다섯 칸·작업 항목·단계 설명 모두 접힘 (줄의 개수만 보임).
+      // 기본 상태: 인프라·확장·다섯 칸·작업 항목 모두 접힘 (줄의 개수만 보임).
       // 2·3·4 칸 펼침(743px)도, 확인 필요 칸만 펼침(635px)도 360x800 첫 카드 600px 를 넘어 우선순위 2 적용.
-      for (const hidden of ["로드맵시험 저장소", "확장시험 두번째 저장소", "알파공정 2단계 제목", "알파공정 3단계 확인항목", "독립 검수", "알림 모아보기", "승인 기다리는 시험 계획", "상황판 시험 작업", "끝난 시험 작업", "배포된 시험 작업", "다음 배포까지"]) {
+      for (const hidden of ["로드맵시험 저장소", "확장시험 두번째 저장소", "알파공정 2단계 제목", "알파공정 3단계 확인항목", "3.10 독립 검수", "알림 모아보기", "승인 기다리는 시험 계획", "상황판 시험 작업", "끝난 시험 작업", "배포된 시험 작업", "다음 배포까지"]) {
         if (await page.getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
       }
       if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
@@ -158,8 +158,10 @@ try {
       const mergeLine = ((await page.getByTestId("orch-stage-4").getByTestId("orch-run-orch-screens-12").locator(":scope > summary").textContent()) ?? "").replace(/\s+/g, " ");
       if (!mergeLine.includes("4.7 반영 승인 대기 · 승인 대기 시험 작업")) problems.push(`[projects] 4 통합 칸의 #12 항목이 '4.7 반영 승인 대기 · 승인 대기 시험 작업' 이 아님 (${mergeLine})`);
       if (!(await page.getByTestId("orch-plan-orch-screens-13").locator('a[href$="/issues/13"]').count())) problems.push("[projects] 계획(#13) 항목에 '#13' 링크가 없음");
-      // 단계 설명: 기본 접힘
-      if (await page.getByTestId("orch-stage-guide").evaluate((el) => el.open)) problems.push("[projects] '단계 설명' 이 기본 상태에서 펼쳐져 있음");
+      // 칸마다 한 줄 설명이 보임 (세부 과정은 칸을 펼쳐야 보임)
+      for (const d of ["개발 여부를 정함", "감사 후 사용자 승인", "독립 검수 → CI", "충돌 처리 후 main 반영", "Vercel에 배포"]) {
+        if (!(await page.getByText(d).first().isVisible())) problems.push(`[projects] 칸 설명 '${d}' 이 보이지 않음`);
+      }
       // 0 인프라 ✅ 1/3 (완료 1개 / 3개), 6 확장 0/1 (na 제외)
       const setupLine = (await page.getByTestId("orch-roadmap-setup").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
       if (!/0 인프라 ✅ 1\/3/.test(setupLine)) problems.push(`[projects] 인프라 줄이 '0 인프라 ✅ 1/3' 이 아님 (${setupLine})`);
@@ -211,10 +213,13 @@ try {
         if (!(await page.getByText(item).first().isVisible())) problems.push(`[projects] 인프라를 펼쳐도 '${item}' 이 안 보임`);
       }
       await expand(page.getByTestId("orch-roadmap-expansion").locator(":scope > summary"), "6.1 확장시험 두번째 저장소", "'6 확장'");
-      await expand(page.getByTestId("orch-stage-guide").locator(":scope > summary"), "독립 검수", "'단계 설명'");
       await expand(page.getByTestId("orch-stage-1").locator(":scope > summary"), "알림 모아보기", "'1 검토'");
       await expand(page.getByTestId("orch-stage-2").locator(":scope > summary"), "승인 기다리는 시험 계획", "'2 계획'");
       await expand(page.getByTestId("orch-stage-3").locator(":scope > summary"), "상황판 시험 작업", "'3 개발'");
+      // 세부 과정: 3 개발 16개, 지금 있는 3.7 은 강조
+      const proc3 = page.getByTestId("orch-stage-process-3").locator("li");
+      if ((await proc3.count()) !== 16) problems.push(`[projects] 3 개발 세부 과정이 16개가 아님 (${await proc3.count()})`);
+      if (!/font-semibold/.test((await proc3.nth(6).getAttribute("class")) ?? "")) problems.push("[projects] 3 개발 세부 과정에서 지금 위치(3.7 구현)가 강조되지 않음");
       await expand(page.getByTestId("orch-stage-4").locator(":scope > summary"), "4.7 반영 승인 대기 · 승인 대기 시험 작업", "'4 통합'");
       // 5 완료: 맨 위 '다음 배포까지 3/10', 끝난 작업 두 개가 날짜(요일 포함)·배포 대기/배포됨과 함께
       await expand(page.getByTestId("orch-stage-5").locator(":scope > summary"), "다음 배포까지 3/10", "'5 완료'");
