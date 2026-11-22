@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LIFECYCLE, ideaPosition, planPosition, runPosition } from "./lifecycle";
+import { LIFECYCLE, deployProgressText, flowEntries, ideaPosition, planPosition, runPosition } from "./lifecycle";
 import type { Idea, OrchRun, PendingPlan, RunStep } from "./model";
 
 const EXPECTED: Record<number, [string, string[]]> = {
@@ -83,4 +83,33 @@ test("ideaPosition: status mapping", () => {
   assert.deepEqual(ideaPosition(idea("done")), { stage: 1, sub: "1.5", label: "의견 완료" });
   assert.equal(ideaPosition(idea("stale")).sub, "1.2");
   assert.equal(ideaPosition(idea("weird" as Idea["status"])).sub, "1.2");
+});
+
+test("flowEntries: active runs, plans and ideas under review, ordered 5→1", () => {
+  const v = {
+    runs: [
+      run({ number: 1, status: "implementing", goal: "구현" }),
+      run({ number: 2, status: "awaiting_merge", goal: "반영" }),
+      run({ number: 3, status: "done", goal: "끝" }),
+      run({ number: 4, status: "cancelled", goal: "취소" }),
+      run({ number: 5, status: "reviewing", goal: "검수" }),
+    ],
+    plans: [plan(rv({ verdict: "OK" }))],
+    ideas: [idea("collecting"), { ...idea("done"), number: 6 }, { ...idea("codex_pending"), number: 7, closed: true }],
+  };
+  const e = flowEntries(v);
+  assert.deepEqual(e.map((x) => [x.kind, x.number, x.pos.sub]), [
+    ["run", 2, "4.7"], ["run", 5, "3.10"], ["run", 1, "3.7"], ["plan", 2, "2.8"], ["idea", 3, "1.3"],
+  ]);
+  assert.equal(e[2].goal, "구현");
+  assert.equal(e[4].goal, "t");
+  assert.equal(e[0].kind === "run" && e[0].run.number, 2);
+  assert.deepEqual(flowEntries({ runs: [], plans: [], ideas: [] }), []);
+});
+
+test("deployProgressText: min(pending, every)/every, hidden when unknown", () => {
+  assert.equal(deployProgressText(3, 10), "3/10");
+  assert.equal(deployProgressText(14, 10), "10/10");
+  assert.equal(deployProgressText(0, 5), "0/5");
+  assert.equal(deployProgressText(null, 10), null);
 });

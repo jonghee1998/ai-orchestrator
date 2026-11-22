@@ -107,3 +107,36 @@ export function ideaPosition(idea: Idea): LifecyclePosition {
       return pos("1.2", "분석 중");
   }
 }
+
+export type FlowEntry =
+  | { kind: "run"; key: string; number: number; url: string; goal: string; pos: LifecyclePosition; run: OrchRun }
+  | { kind: "plan" | "idea"; key: string; number: number; url: string; goal: string; pos: LifecyclePosition };
+
+const subRank = (p: LifecyclePosition) => Number(p.sub.split(".")[1] ?? 0);
+
+/**
+ * '작업 흐름' rows for one project: active runs (not done / cancelled), plans waiting for audit / approval and
+ * ideas still under review (open, not 'done'), ordered by position 5→1 (later sub first within a stage).
+ */
+export function flowEntries(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Idea[] }): FlowEntry[] {
+  const out: FlowEntry[] = [];
+  for (const run of v.runs ?? []) {
+    if (run.status === "done" || run.status === "cancelled") continue;
+    const p = runPosition(run);
+    if (p) out.push({ kind: "run", key: `run-${run.number}`, number: run.number, url: run.url, goal: run.goal, pos: p, run });
+  }
+  for (const p of v.plans ?? []) out.push({ kind: "plan", key: `plan-${p.number}`, number: p.number, url: p.url, goal: p.goal, pos: planPosition(p) });
+  for (const i of v.ideas ?? []) {
+    if (i.closed || i.status === "done") continue;
+    out.push({ kind: "idea", key: `idea-${i.number}`, number: i.number, url: i.url, goal: i.title, pos: ideaPosition(i) });
+  }
+  return out
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => b.e.pos.stage - a.e.pos.stage || subRank(b.e.pos) - subRank(a.e.pos) || a.i - b.i)
+    .map((x) => x.e);
+}
+
+/** '다음 배포까지' text: min(pending, every)/every; null (hidden) when the pending count is unknown. */
+export function deployProgressText(pending: number | null, every: number): string | null {
+  return pending === null ? null : `${Math.min(pending, every)}/${every}`;
+}

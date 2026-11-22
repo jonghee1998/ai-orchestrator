@@ -93,7 +93,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["상황판 시험 작업", "구현 중", "스텝 1/3 통과", "지금 2번", "알파공정 2단계 제목", "알파공정 2단계 확인항목", "반영 승인 대기"], forbid: ["설정되지 않았습니다"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["0 인프라", "작업 흐름", "3 개발", "상황판 시험 작업", "구현 중 · Step 2/3", "반영 승인 대기", "승인 기다리는 시험 계획", "알림 모아보기", "다음 배포까지 3/10", "6 확장", "작업 기록은 패치노트 탭"], forbid: ["설정되지 않았습니다", "끝난 시험 작업", "로드맵 없음", "로드맵 읽기 실패"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
@@ -129,10 +129,31 @@ try {
       if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
     }
     if (t.name === "projects") {
-      // 기본 상태: 현재 스텝은 펼침, 대기 스텝(3번)·끝난 작업은 접힘
-      if (await page.getByText("알파공정 3단계 확인항목").isVisible()) problems.push("[projects] 대기 스텝의 할 일이 기본 상태에서 보임");
-      if (await page.getByText("끝난 시험 작업").isVisible()) problems.push("[projects] 끝난 작업이 기본 상태에서 보임");
+      // 기본 상태: 인프라·작업 줄·흐름 보기·확장 모두 접힘
+      for (const hidden of ["로드맵시험 저장소", "확장시험 두번째 저장소", "알파공정 2단계 제목", "알파공정 3단계 확인항목", "독립 검수"]) {
+        if (await page.getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
+      }
       if (!(await page.getByText("진행 중 2개").first().isVisible())) problems.push("[projects] '진행 중 2개' 가 보이지 않음");
+      // implementing run(#11) 줄: 강조된 단계 칩이 '3 개발', 세부 위치 '3.7'
+      const runRow = page.getByTestId("orch-run-orch-screens-11");
+      const current = (await runRow.locator('[aria-current="step"]').allInnerTexts()).map((t) => t.trim());
+      if (current.join() !== "3 개발") problems.push(`[projects] #11 작업 줄의 강조 칩이 '3 개발' 이 아님 (${current.join(",")})`);
+      if (!/3\.7 구현 중/.test(await runRow.innerText())) problems.push("[projects] #11 작업 줄에 '3.7 구현 중' 이 없음");
+      // 0 인프라 ✅ 1/3 (완료 1개 / 3개), 6 확장 0/1 (na 제외)
+      const setupLine = (await page.getByTestId("orch-roadmap-setup").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
+      if (!/0 인프라 ✅ 1\/3/.test(setupLine)) problems.push(`[projects] 인프라 줄이 '0 인프라 ✅ 1/3' 이 아님 (${setupLine})`);
+      const expLine = (await page.getByTestId("orch-roadmap-expansion").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
+      if (!/6 확장 0\/1/.test(expLine)) problems.push(`[projects] 확장 줄이 '6 확장 0/1' 이 아님 (${expLine})`);
+      // 위치 순(5→1): 반영 승인 대기(4.7) → 구현 중(3.7) → 계획(2.8) → 아이디어(1.3)
+      const order = await page.getByTestId("orch-flow").locator('[data-testid^="orch-run-"], [data-testid^="orch-plan-"], [data-testid^="orch-idea-"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+      if (order.join() !== "orch-run-orch-screens-12,orch-run-orch-screens-11,orch-plan-orch-screens-13,orch-idea-orch-screens-22") problems.push(`[projects] 작업 흐름 순서가 5→1 이 아님 (${order.join(",")})`);
+      // 기본 상태 높이: 360x800 에서 첫 프로젝트 카드 600px 이하
+      await page.setViewportSize({ width: 360, height: 800 });
+      await page.waitForTimeout(150);
+      const cardH = await page.getByTestId("orch-project-orch-screens").evaluate((el) => (el.parentElement ?? el).getBoundingClientRect().height);
+      console.log(`projects: 첫 프로젝트 카드 높이 ${Math.round(cardH)}px (360x800, 모두 접힘)`);
+      if (cardH > 600) problems.push(`[projects] 360x800 에서 첫 프로젝트 카드 높이 ${Math.round(cardH)}px > 600px`);
+      await page.setViewportSize({ width: 390, height: 844 });
       // 'PM에게 말하기' 바로가기: 새 창 링크
       const pmLink = page.getByRole("link", { name: "PM에게 말하기" });
       if (!(await pmLink.isVisible())) problems.push("[projects] 'PM에게 말하기' 링크가 보이지 않음");
@@ -160,10 +181,23 @@ try {
     }
     await page.setViewportSize({ width: 390, height: 844 });
     if (t.name === "projects") {
-      // 펼친 상태: 끝난 작업 묶음 + 대기 스텝
-      await page.getByText("끝난 작업 1개").click();
-      try { await page.getByText("끝난 시험 작업").first().waitFor({ state: "visible", timeout: 5000 }); }
-      catch { problems.push("[projects] '끝난 작업 1개' 를 눌러도 '끝난 시험 작업' 이 안 보임"); }
+      // 펼친 상태: 인프라 항목 · 확장 항목 · 흐름 보기 · 작업 줄(현재 스텝은 펼침) · 대기 스텝
+      const expand = async (summary, shown, what) => {
+        await summary.click();
+        try { await page.getByText(shown).first().waitFor({ state: "visible", timeout: 5000 }); }
+        catch { problems.push(`[projects] ${what} 를 펼쳐도 '${shown}' 이 안 보임`); }
+      };
+      // ':scope > summary': 펼친 작업 줄 안에는 스텝 <summary> 도 있으므로 바로 아래 summary 만 고른다
+      await expand(page.getByTestId("orch-roadmap-setup").locator(":scope > summary"), "0.1 로드맵시험 저장소", "'0 인프라'");
+      for (const item of ["0.2 로드맵시험 배포", "0.3 로드맵시험 알림"]) {
+        if (!(await page.getByText(item).first().isVisible())) problems.push(`[projects] 인프라를 펼쳐도 '${item}' 이 안 보임`);
+      }
+      await expand(page.getByTestId("orch-roadmap-expansion").locator(":scope > summary"), "6.1 확장시험 두번째 저장소", "'6 확장'");
+      await expand(page.getByTestId("orch-lifecycle").locator(":scope > summary"), "독립 검수", "'흐름 보기'");
+      await expand(page.getByTestId("orch-run-orch-screens-11").locator(":scope > summary"), "알파공정 2단계 확인항목", "#11 작업 줄");
+      for (const text of ["스텝 1/3 통과", "지금 2번"]) {
+        if (!(await page.getByText(text).first().isVisible())) problems.push(`[projects] #11 작업 줄을 펼쳐도 '${text}' 이 안 보임`);
+      }
       await page.getByText("Step 3. 알파공정 3단계 제목").click();
       try { await page.getByText("알파공정 3단계 확인항목").waitFor({ state: "visible", timeout: 5000 }); }
       catch { problems.push("[projects] 대기 스텝을 눌러도 할 일이 안 보임"); }

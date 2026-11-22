@@ -56,6 +56,29 @@ export function githubFixtures(now) {
   const usageIssue = issue(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
   const variables = [{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
 
+  // 로드맵(docs/roadmap.json, contents API base64): 인프라 3개 + 확장 2개
+  const roadmap = {
+    version: 1,
+    setup: [
+      { id: "0.1", title: "로드맵시험 저장소", status: "done", note: "시험용 메모 · 아주 긴 설명이 들어가도 한 줄로 말줄임되어야 하는 메모 문구입니다" },
+      { id: "0.2", title: "로드맵시험 배포", status: "doing", note: null },
+      { id: "0.3", title: "로드맵시험 알림", status: "todo", note: null },
+    ],
+    expansion: [
+      { id: "6.1", title: "확장시험 두번째 저장소", status: "todo", note: null },
+      { id: "6.2", title: "확장시험 팀 공유", status: "na", note: "필요 없음" },
+    ],
+  };
+  const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap, null, 2)).toString("base64") };
+  // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 다음 배포까지 3/10
+  const sha = (n) => `${n}`.padStart(40, "0");
+  const compare = { status: "ahead", commits: [
+    { sha: sha(1), parents: [{ sha: sha(90) }] },
+    { sha: sha(2), parents: [{ sha: sha(1) }, { sha: sha(91) }] },
+    { sha: sha(3), parents: [{ sha: sha(2) }, { sha: sha(92) }] },
+    { sha: sha(4), parents: [{ sha: sha(3) }, { sha: sha(93) }] },
+  ] };
+
   /** @returns {{status:number, body:unknown} | null} */
   return (method, url) => {
     if (method !== "GET") return null; // the screens test is read-only; writes are reported as problems
@@ -72,6 +95,8 @@ export function githubFixtures(now) {
     const cm = /^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(p);
     if (cm && p.startsWith(`/repos/${REPO}/`)) return { status: 200, body: comments[cm[1]] ?? [] };
     if (p === `/repos/${REPO}/actions/variables`) return { status: 200, body: { total_count: variables.length, variables } };
+    if (p === `/repos/${REPO}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
+    if (p === `/repos/${REPO}/compare/prod-deployed...main`) return { status: 200, body: compare };
     if (p === `/repos/${REPO}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
     return null;
   };
