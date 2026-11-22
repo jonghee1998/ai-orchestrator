@@ -7,7 +7,9 @@ import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKst, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
-import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import Link from "next/link";
+import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { LIFECYCLE, deployProgressText, flowEntries, type FlowEntry } from "@/lib/orch/lifecycle";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
 
@@ -79,37 +81,165 @@ function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
   );
 }
 
+/** Run details (stage ③ row body): status, step progress, next action, steps → checks. */
 function RunDetails({ r }: { r: OrchRun }) {
   const showNow = !!r.step && !["done", "awaiting_merge", "finalizing"].includes(r.status) && r.steps.some((s) => s.state === "current");
   const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${showNow ? ` · 지금 ${r.step}번` : ""}`;
   const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
   return (
-    <details open={r.needsUser || !isEnded(r)} className={`rounded-xl border px-3 ${tone(r)}`} data-testid={`orch-run-${short(r.repo)}-${r.number}`}>
-      <summary className="min-h-11 cursor-pointer py-2">
-        <span className="flex items-start justify-between gap-2">
-          <span className="min-w-0 break-words font-medium">{r.goal}</span>
-          <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs">{r.statusLabel}</span>
-        </span>
-        <span className="mt-1 block text-xs text-text-muted">{stepText}{r.retries ? ` · 수정 ${r.retries}회` : ""}</span>
-        <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-border" role="progressbar" aria-label="통과한 스텝" aria-valuemin={0} aria-valuemax={r.total} aria-valuenow={r.passed}>
-          <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+    <div className="space-y-1 pb-3">
+      <p className="flex items-center justify-between gap-2 text-xs">
+        <span className="min-w-0 text-text-muted">{stepText}{r.retries ? ` · 수정 ${r.retries}회` : ""}</span>
+        <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5">{r.statusLabel}</span>
+      </p>
+      <span className="block h-1.5 overflow-hidden rounded-full bg-border" role="progressbar" aria-label="통과한 스텝" aria-valuemin={0} aria-valuemax={r.total} aria-valuenow={r.passed}>
+        <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+      </span>
+      <p className="text-xs"><a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline">#{r.number} 열기</a>{r.finalPr ? ` · 최종 PR #${r.finalPr}` : ""}</p>
+      {r.held && <p className="text-xs text-yellow-100">⏸️ {r.held}</p>}
+      {r.reason && <p className="break-words text-xs text-red-200">⛔ {r.reason}</p>}
+      <p className="text-xs">다음 · {r.next}</p>
+      {r.updatedAt && <p className="text-[11px] text-text-faint">갱신 {formatKst(r.updatedAt)}</p>}
+      <div className="space-y-1 pt-1">
+        {r.steps.map((s) => <StepDetails key={s.id} s={s} blocked={r.status === "blocked"} />)}
+      </div>
+    </div>
+  );
+}
+
+const ROADMAP_ICON: Record<RoadmapStatus, [string, string]> = { done: ["✅", "완료"], doing: ["🔄", "진행 중"], todo: ["⬜", "할 일"], na: ["➖", "해당 없음"] };
+
+/** Stage 0 (인프라) / 6 (확장) checklist row: '0 인프라 ✅ 완료/전체' + small bar, expands to one line per item. */
+function RoadmapRow({ n, title, items, testid }: { n: 0 | 6; title: string; items: RoadmapItem[]; testid: string }) {
+  const c = roadmapCount(items);
+  const allDone = c.total > 0 && c.done === c.total;
+  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+  return (
+    <details className="rounded-lg border border-border px-2" data-testid={testid}>
+      <summary className={`${SUMMARY} text-sm`}>
+        <span className="font-semibold">{n} {title}</span>
+        {allDone && n === 0 ? <span className="text-xs text-green-200">✅ 인프라 완료</span> : <span className="text-xs text-text-muted">{n === 0 ? "✅ " : ""}{c.text}</span>}
+        <span className="ml-auto block h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-border" role="progressbar" aria-label={`${title} 완료 항목`} aria-valuemin={0} aria-valuemax={c.total} aria-valuenow={c.done}>
+          <span className="block h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
         </span>
       </summary>
-      <div className="space-y-1 pb-3">
-        <p className="text-xs"><a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline">#{r.number} 열기</a>{r.finalPr ? ` · 최종 PR #${r.finalPr}` : ""}</p>
-        {r.held && <p className="text-xs text-yellow-100">⏸️ {r.held}</p>}
-        {r.reason && <p className="break-words text-xs text-red-200">⛔ {r.reason}</p>}
-        <p className="text-xs">다음 · {r.next}</p>
-        {r.updatedAt && <p className="text-[11px] text-text-faint">갱신 {formatKst(r.updatedAt)}</p>}
-        <div className="space-y-1 pt-1">
-          {r.steps.map((s) => <StepDetails key={s.id} s={s} blocked={r.status === "blocked"} />)}
-        </div>
+      <ul className="space-y-1 pb-2 text-xs">
+        {items.map((i) => (
+          <li key={i.id} className="min-w-0">
+            <p className="flex gap-1.5">
+              <span aria-label={ROADMAP_ICON[i.status][1]} role="img" className="shrink-0">{ROADMAP_ICON[i.status][0]}</span>
+              <span className="min-w-0 break-words"><span className="tabular-nums text-text-muted">{i.id}</span> {i.title}</span>
+            </p>
+            {i.note && <p className="truncate pl-6 text-[11px] text-text-faint" title={i.note}>{i.note}</p>}
+          </li>
+        ))}
+        {!items.length && <li className="text-text-faint">항목 없음</li>}
+      </ul>
+    </details>
+  );
+}
+
+/** '1 검토 · 2 계획 · 3 개발 · 4 통합 · 5 배포' chips with the current stage highlighted. */
+function StageChips({ stage }: { stage: number }) {
+  return (
+    <span className="flex flex-wrap gap-1" aria-label={`현재 ${stage}단계`}>
+      {LIFECYCLE.map((s) => (
+        <span key={s.n} aria-current={s.n === stage ? "step" : undefined}
+          className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none ${s.n === stage ? "bg-accent/20 font-semibold text-accent" : "text-text-faint"}`}>
+          {s.n} {s.title}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function FlowLine({ e }: { e: FlowEntry }) {
+  return (
+    <>
+      <StageChips stage={e.pos.stage} />
+      <span className="mt-1 block min-w-0 break-words text-xs"><span className="tabular-nums text-text-muted">{e.pos.sub}</span> {e.pos.label} · <span className="font-medium">{e.goal}</span></span>
+    </>
+  );
+}
+
+/** One '작업 흐름' row: a run expands to its steps; a plan / idea links to its Issue. */
+function FlowRow({ e, repo }: { e: FlowEntry; repo: string }) {
+  if (e.kind === "run") {
+    const r = e.run;
+    return (
+      <details className={`rounded-lg border px-2 ${tone(r)}`} data-testid={`orch-run-${short(repo)}-${r.number}`}>
+        <summary className="min-h-11 cursor-pointer py-1.5">
+          <FlowLine e={e} />
+          {r.needsUser && <span className="mt-1 inline-block rounded-full bg-warn/20 px-2 py-0.5 text-[11px] text-yellow-100">사용자 확인 필요</span>}
+        </summary>
+        <RunDetails r={r} />
+      </details>
+    );
+  }
+  return (
+    <a href={e.url} target="_blank" rel="noreferrer" className="block min-h-11 rounded-lg border border-border px-2 py-1.5" data-testid={`orch-${e.kind}-${short(repo)}-${e.number}`}>
+      <FlowLine e={e} />
+    </a>
+  );
+}
+
+/** '흐름 보기': the full 1~5 stage definition (collapsed by default). */
+function LifecycleGuide({ deploy }: { deploy: string | null }) {
+  return (
+    <details data-testid="orch-lifecycle">
+      <summary className={`${SUMMARY} text-xs text-text-muted`}>
+        <span>흐름 보기</span>
+        {deploy && <span className="ml-auto text-[11px] text-text-faint" data-testid="orch-deploy">다음 배포까지 {deploy}</span>}
+      </summary>
+      <div className="space-y-2 pb-2 text-xs">
+        {LIFECYCLE.map((s) => (
+          <div key={s.n}>
+            <p className="font-semibold">{s.n} {s.title}</p>
+            <ul className="flex flex-wrap gap-x-3 gap-y-0.5 text-text-muted">
+              {s.sub.map((x) => <li key={x.id}><span className="tabular-nums text-text-faint">{x.id}</span> {x.title}</li>)}
+            </ul>
+          </div>
+        ))}
       </div>
     </details>
   );
 }
 
-/** 프로젝트 탭: 저장소(프로젝트) → 작업 → 스텝 → 세부 할 일, 모두 접고 펼 수 있음. */
+function ProjectCard({ v }: { v: RepoView }) {
+  const active = v.runs.filter((r) => !isEnded(r));
+  const needs = v.runs.filter((r) => r.needsUser).length;
+  const flow = flowEntries(v);
+  const deploy = deployProgressText(v.deployPending ?? null, v.deployEvery ?? 10);
+  const roadmapNote = v.roadmapError ? `로드맵 읽기 실패 · ${v.roadmapError}` : !v.roadmap ? "로드맵 없음(docs/roadmap.json)" : null;
+  return (
+    <Card>
+      <details open data-testid={`orch-project-${short(v.repo)}`}>
+        <summary className={`${SUMMARY} flex-wrap`}>
+          <span className="font-semibold">{short(v.repo)}</span>
+          <span className="text-xs text-text-muted">진행 중 {active.length}개</span>
+          {needs > 0 && <span className="rounded-full bg-warn/20 px-2 py-0.5 text-xs">확인 필요 {needs}개</span>}
+        </summary>
+        <div className="space-y-2 pb-1">
+          {roadmapNote ? <p className={`text-xs ${v.roadmapError ? "text-red-200" : "text-text-faint"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
+            : <RoadmapRow n={0} title="인프라" items={v.roadmap!.setup} testid="orch-roadmap-setup" />}
+          <section aria-label="작업 흐름" className="space-y-1.5" data-testid="orch-flow">
+            <h3 className="text-sm font-semibold">작업 흐름</h3>
+            {v.runsError && <p className="text-xs text-red-200">작업 불러오기 실패 · {v.runsError}</p>}
+            {v.plansError && <p className="text-xs text-red-200">계획 불러오기 실패 · {v.plansError}</p>}
+            {v.ideasError && <p className="text-xs text-red-200">아이디어 불러오기 실패 · {v.ideasError}</p>}
+            {flow.map((e) => <FlowRow key={e.key} e={e} repo={v.repo} />)}
+            {!flow.length && !v.runsError && <p className="text-sm text-text-faint">진행 중인 작업 없음</p>}
+            <LifecycleGuide deploy={deploy} />
+          </section>
+          {!roadmapNote && <RoadmapRow n={6} title="확장" items={v.roadmap!.expansion} testid="orch-roadmap-expansion" />}
+          <p className="text-xs"><Link href="/patch-notes" className="inline-flex min-h-11 items-center text-accent underline">작업 기록은 패치노트 탭</Link></p>
+        </div>
+      </details>
+    </Card>
+  );
+}
+
+/** 프로젝트 탭: 프로젝트마다 0 인프라 · 작업 흐름(1~5) · 6 확장, 모두 접고 펼 수 있음. */
 export function OrchRunsPanel() {
   const { state, reload, error } = useOrch();
   const latest = useRef({ state, error }); latest.current = { state, error };
@@ -135,33 +265,7 @@ export function OrchRunsPanel() {
       </div>
       {updatedAt !== null && <p className="text-[11px] text-text-faint" data-testid="orch-refreshed">방금 갱신 {formatKstTime(updatedAt)}</p>}
       {failed && <p role="status" className="text-xs text-red-200">새로고침 실패 · 잠시 후 다시</p>}
-      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => {
-        const active = v.runs.filter((r) => !isEnded(r));
-        const ended = v.runs.filter(isEnded);
-        const needs = v.runs.filter((r) => r.needsUser).length;
-        return (
-          <Card key={v.repo}>
-            <details open data-testid={`orch-project-${short(v.repo)}`}>
-              <summary className={`${SUMMARY} flex-wrap`}>
-                <span className="font-semibold">{short(v.repo)}</span>
-                <span className="text-xs text-text-muted">진행 중 {active.length}개</span>
-                {needs > 0 && <span className="rounded-full bg-warn/20 px-2 py-0.5 text-xs">확인 필요 {needs}개</span>}
-              </summary>
-              <div className="space-y-2 pb-1">
-                {v.runsError && <p className="text-xs text-red-200">불러오기 실패 · {v.runsError}</p>}
-                {active.map((r) => <RunDetails key={r.number} r={r} />)}
-                {!active.length && !v.runsError && <p className="text-sm text-text-faint">진행 중인 작업 없음</p>}
-                {ended.length > 0 && (
-                  <details>
-                    <summary className={`${SUMMARY} text-sm text-text-muted`}>끝난 작업 {ended.length}개</summary>
-                    <div className="space-y-2 pb-1">{ended.map((r) => <RunDetails key={r.number} r={r} />)}</div>
-                  </details>
-                )}
-              </div>
-            </details>
-          </Card>
-        );
-      })}
+      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
     </section>
   );
 }
