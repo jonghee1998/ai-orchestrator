@@ -1,5 +1,4 @@
 {
-  "crons": [{ "path": "/api/reconcile", "schedule": "0 0 * * *" }],
   "git": {
     "deploymentEnabled": false
   }
