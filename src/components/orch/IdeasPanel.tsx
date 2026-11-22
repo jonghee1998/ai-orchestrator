@@ -5,6 +5,7 @@ import { useState } from "react";
 import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKstShort } from "@/lib/time/kst";
 import { defaultIdeaRepo, filterIdeas, ideaFilterChips, type Idea, type Opinion } from "@/lib/orch/model";
+import { BUTTON, CARD_TITLE, Card, FIELD, ROW } from "@/components/ui";
 import { useOrch } from "./OrchPanels";
 
 const short = (repo: string) => repo.split("/")[1] ?? repo;
@@ -12,7 +13,7 @@ const MAX_TITLE = 80;
 const MAX_MINE = 4000;
 
 const REC_TEXT = { now: "지금 하자", later: "나중에", hold: "보류" } as const;
-const REC_TONE = { now: "bg-ok/15 text-green-200", later: "bg-warn/20 text-yellow-100", hold: "bg-current/10 text-text-muted" } as const;
+const REC_TONE = { now: "bg-ok/10 text-ok", later: "bg-warn/10 text-warn", hold: "bg-unknown/10 text-text-muted" } as const;
 const LEVEL_TEXT = { high: "높음", medium: "보통", low: "낮음" } as const;
 const STATUS_NOTE: Record<Idea["status"], string | null> = {
   collecting: "의견 수집 중",
@@ -53,7 +54,7 @@ function OpinionTable({ claude, codex }: { claude: Opinion | null; codex: Opinio
                   <td className="py-1 pr-2">{o.effort}{o.steps ? ` · ${o.steps}스텝` : ""}</td>
                   <td className="py-1 pr-2">{LEVEL_TEXT[o.risk]}</td>
                   <td className="py-1">{REC_TEXT[o.recommend]}</td>
-                </> : <td colSpan={4} className="py-1 text-text-faint">의견 없음</td>}
+                </> : <td colSpan={4} className="py-1 text-text-muted">의견 없음</td>}
               </tr>
             ))}
           </tbody>
@@ -64,19 +65,27 @@ function OpinionTable({ claude, codex }: { claude: Opinion | null; codex: Opinio
   );
 }
 
+/** 아이디어 한 줄 (시안 '아이디어함'): 제목 · '날짜 · 상태' 한 줄 · 오른쪽 '#번호'(원문 링크), 그 아래 의견. */
 function IdeaCard({ i }: { i: Idea }) {
   const note = STATUS_NOTE[i.status];
   const r = i.review;
   return (
-    <article className={`rounded-xl border border-border p-3 ${i.closed ? "opacity-60" : ""}`} data-testid={`orch-idea-${short(i.repo)}-${i.number}`}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 break-words font-medium">{i.title}</p>
-        {i.closed && <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs text-text-muted">정리됨</span>}
+    <article className={`${ROW} ${i.closed ? "opacity-60" : ""}`} data-testid={`orch-idea-${short(i.repo)}-${i.number}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="break-words text-sm font-bold">{i.title}</p>
+          <p className="mt-[3px] text-xs tabular-nums text-text-muted">
+            {formatKstShort(i.createdAt)} · {short(i.repo)}
+            {note && <> · <span className={i.status === "stale" ? "text-warn" : ""}>{note}</span></>}
+            {i.closed && " · 정리됨"}
+          </p>
+        </div>
+        <a href={i.url} target="_blank" rel="noreferrer" aria-label={`#${i.number} 원문 보기`} title="원문 보기"
+          className="-my-2 inline-flex min-h-11 shrink-0 items-center text-[13px] font-semibold tabular-nums text-accent">#{i.number}</a>
       </div>
-      <p className="mt-1 text-xs text-text-muted">{formatKstShort(i.createdAt)}{` · ${short(i.repo)}`} · #{i.number}</p>
 
       <div className="mt-2 text-sm">
-        {!i.mine.trim() ? <p className="text-xs text-text-faint">내 의견 없음</p>
+        {!i.mine.trim() ? <p className="text-xs text-text-muted">내 의견 없음</p>
           : isLong(i.mine) ? (
             <details>
               <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-text-muted"><span className="shrink-0">내 의견</span><span className="min-w-0 truncate">{i.mine.split("\n")[0]}</span></summary>
@@ -85,24 +94,20 @@ function IdeaCard({ i }: { i: Idea }) {
           ) : <p className="whitespace-pre-wrap break-words"><span className="text-xs text-text-muted">내 의견 · </span>{i.mine}</p>}
       </div>
 
-      <div className="mt-2 space-y-2 border-t border-border pt-2">
-        {note && <p className="text-xs text-yellow-100">{note}</p>}
-        {r && (
-          <>
-            <div className="flex flex-wrap items-start gap-2">
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${REC_TONE[r.recommend]}`}>{REC_TEXT[r.recommend]}</span>
-              <p className="min-w-0 flex-1 break-words text-sm">{r.summary || "종합 의견 없음"}</p>
-            </div>
-            {r.agree && <p className="break-words text-xs"><span className="text-text-muted">같은 점 · </span>{r.agree}</p>}
-            {r.disagree && <p className="break-words text-xs"><span className="text-text-muted">다른 점 · </span>{r.disagree}</p>}
-            <details>
-              <summary className="flex min-h-11 cursor-pointer items-center text-xs text-text-muted">Claude·Codex 의견 표</summary>
-              <OpinionTable claude={r.claude} codex={r.codex} />
-            </details>
-          </>
-        )}
-        <a href={i.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-xs underline">원문 보기</a>
-      </div>
+      {r && (
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-wrap items-start gap-2">
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${REC_TONE[r.recommend]}`}>{REC_TEXT[r.recommend]}</span>
+            <p className="min-w-0 flex-1 break-words text-sm">{r.summary || "종합 의견 없음"}</p>
+          </div>
+          {r.agree && <p className="break-words text-xs"><span className="text-text-muted">같은 점 · </span>{r.agree}</p>}
+          {r.disagree && <p className="break-words text-xs"><span className="text-text-muted">다른 점 · </span>{r.disagree}</p>}
+          <details>
+            <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-accent">Claude·Codex 의견 표</summary>
+            <OpinionTable claude={r.claude} codex={r.codex} />
+          </details>
+        </div>
+      )}
     </article>
   );
 }
@@ -144,27 +149,27 @@ export function OrchIdeasPanel() {
     finally { setBusy(false); }
   }
 
-  const FIELD = "w-full rounded-xl border border-border bg-bg-raised px-3 text-sm";
   return (
+    <Card>
     <section aria-label="아이디어함" className="space-y-2" data-testid="orch-ideas">
-      <h2 className="text-sm font-semibold text-text-muted">아이디어함 · {total}</h2>
+      <h2 className={CARD_TITLE}>아이디어함 <span className="font-medium tabular-nums text-text-muted">· {total}</span></h2>
       {many && (
         <div className="flex flex-wrap gap-2" role="group" aria-label="프로젝트 필터">
           {ideaFilterChips(withIdeas).map((c) => {
             const on = c.repo === active;
             return (
               <button key={c.repo ?? "all"} type="button" aria-pressed={on} onClick={() => setFilter(c.repo)}
-                className={`min-h-11 rounded-full border px-3 text-xs ${on ? "border-accent/60 bg-accent/15 font-semibold" : "border-border text-text-muted"}`}>
+                className={`min-h-11 rounded-full px-3 text-xs tabular-nums ${on ? "bg-accent-dim font-semibold text-accent" : "bg-bg text-text-muted"}`}>
                 {c.repo === null ? "전체" : short(c.repo)} {c.count}
               </button>
             );
           })}
         </div>
       )}
-      {errors.map((v) => <p key={v.repo} className="text-xs text-red-200">{short(v.repo)} 아이디어 불러오기 실패 · {v.ideasError}</p>)}
+      {errors.map((v) => <p key={v.repo} className="text-xs text-danger">{short(v.repo)} 아이디어 불러오기 실패 · {v.ideasError}</p>)}
       {canWrite && (
-        <form onSubmit={submit} className="space-y-2 rounded-xl border border-border p-3" aria-label="아이디어 적기" data-testid="orch-idea-form">
-          <p className="text-sm font-medium">아이디어 적기</p>
+        <form onSubmit={submit} className="space-y-2 pb-3" aria-label="아이디어 적기" data-testid="orch-idea-form">
+          <p className="text-sm font-semibold">아이디어 적기</p>
           {many && (
             <div>
               <label htmlFor="idea-repo" className="block text-xs text-text-muted">프로젝트</label>
@@ -181,12 +186,13 @@ export function OrchIdeasPanel() {
             <label htmlFor="idea-mine" className="block text-xs text-text-muted">내 의견 ({MAX_MINE}자까지)</label>
             <textarea id="idea-mine" value={mine} maxLength={MAX_MINE} rows={4} onChange={(e) => setMine(e.target.value)} className={`${FIELD} py-2`} />
           </div>
-          <button type="submit" disabled={busy || !title.trim()} className="min-h-11 rounded-lg border border-border px-4 text-sm font-semibold disabled:opacity-50">{busy ? "등록 중…" : "등록"}</button>
-          {msg && <p role="status" className={`text-xs ${msg.ok ? "" : "text-red-200"}`}>{msg.text}</p>}
+          <button type="submit" disabled={busy || !title.trim()} className={`${BUTTON} px-4`}>{busy ? "등록 중…" : "등록"}</button>
+          {msg && <p role="status" className={`text-xs ${msg.ok ? "" : "text-danger"}`}>{msg.text}</p>}
         </form>
       )}
-      {shown.map((i) => <IdeaCard key={`${i.repo}#${i.number}`} i={i} />)}
-      {!shown.length && !errors.length && <p className="text-sm text-text-faint">아이디어 없음</p>}
+      {shown.length > 0 && <div className="-mb-3">{shown.map((i) => <IdeaCard key={`${i.repo}#${i.number}`} i={i} />)}</div>}
+      {!shown.length && !errors.length && <p className="text-sm text-text-muted">아이디어 없음</p>}
     </section>
+    </Card>
   );
 }

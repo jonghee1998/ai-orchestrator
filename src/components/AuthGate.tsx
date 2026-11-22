@@ -6,10 +6,10 @@ import { useSession } from "@/components/live/session";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const s = useSession();
-  if (s.status === "unknown") return <div className="flex min-h-dvh items-center justify-center text-sm text-text-faint" role="status" data-testid="auth-loading">세션 확인 중…</div>;
+  if (s.status === "unknown") return <div className="flex min-h-dvh items-center justify-center text-sm text-text-muted" role="status" data-testid="auth-loading">세션 확인 중…</div>;
   if (s.status !== "authed") return (
     <div className="mx-auto flex min-h-dvh max-w-app flex-col justify-center gap-4 px-4" data-testid="login-gate">
-      <h1 className="text-lg font-semibold">AI Orchestrator</h1>
+      <h1 className="px-1 text-[22px] font-[750] tracking-[-0.03em]">AI Orchestrator</h1>
       <LoginCard />
     </div>
   );

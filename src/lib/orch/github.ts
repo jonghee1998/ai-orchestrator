@@ -70,53 +70,19 @@ async function readRoadmap(f: Fetch, token: string, repo: string): Promise<Roadm
   return roadmap;
 }
 
-type CompareCommit = { parents?: unknown[]; commit?: { message?: unknown } } | null | undefined;
-
-/** One commit for prNumbersFromMessages: its message and whether it is a merge commit (parents > 1). */
-export type PrMessage = string | { message: string; merge: boolean };
+type CompareCommit = { parents?: unknown[] } | null | undefined;
 
 /**
- * PR numbers named in commit messages (first appearance order, no duplicates).
- * A merge commit's 'Merge pull request #N' wins; otherwise '(#N)' is taken from the subject (first line) only.
- * A bare string has unknown parents, so both forms are allowed.
+ * Merge commits (parents > 1) between tag prod-deployed and main. null when the tag is missing or the read fails.
+ * Approximation: deploy.yml counts `git rev-list --count --first-parent prod-deployed..HEAD`, which also counts
+ * direct (non-merge) commits on main and ignores merges inside merged branches; compare also caps at 250 commits.
  */
-export function prNumbersFromMessages(messages: PrMessage[]): number[] {
-  const out: number[] = [];
-  const add = (n: number) => {
-    if (Number.isSafeInteger(n) && n > 0 && !out.includes(n)) out.push(n);
-  };
-  for (const m of Array.isArray(messages) ? messages : []) {
-    const text = typeof m === "string" ? m : typeof m?.message === "string" ? m.message : "";
-    const merge = typeof m === "string" ? true : !!m?.merge;
-    const subject = text.split(/\r?\n/, 1)[0] ?? "";
-    const pr = merge ? /^Merge pull request #(\d+)\b/.exec(subject) : null;
-    if (pr) {
-      add(Number(pr[1]));
-      continue;
-    }
-    const squash = [...subject.matchAll(/\(#(\d+)\)/g)];
-    if (squash.length > 0) add(Number(squash[squash.length - 1][1]));
-  }
-  return out;
-}
-
-/**
- * Commits between tag prod-deployed and main. null when the tag is missing or the read fails.
- * count = merge commits (parents > 1). Approximation: deploy.yml counts `git rev-list --count --first-parent
- * prod-deployed..HEAD`, which also counts direct (non-merge) commits on main and ignores merges inside merged
- * branches; compare also caps at 250 commits. prs = PR numbers in those commits' messages (merged, not deployed).
- */
-async function readDeployPending(f: Fetch, token: string, repo: string): Promise<{ count: number; prs: number[] } | null> {
+async function readDeployPending(f: Fetch, token: string, repo: string): Promise<{ count: number } | null> {
   try {
     const j = (await call(f, token, "GET", `/repos/${repo}/compare/prod-deployed...main`)) as { commits?: CompareCommit[] } | null;
     if (!Array.isArray(j?.commits)) return null;
     const isMerge = (c: CompareCommit) => Array.isArray(c?.parents) && c.parents.length > 1;
-    const messages: PrMessage[] = [];
-    for (const c of j.commits) {
-      const message = c?.commit?.message;
-      if (typeof message === "string") messages.push({ message, merge: isMerge(c) });
-    }
-    return { count: j.commits.filter(isMerge).length, prs: prNumbersFromMessages(messages) };
+    return { count: j.commits.filter(isMerge).length };
   } catch {
     return null;
   }
@@ -179,7 +145,6 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     roadmapError: roadmap.status === "fulfilled" || roadmapMissing ? null
       : roadmap.reason instanceof RoadmapFormatError ? roadmap.reason.message : describe(roadmap.reason),
     deployPending: pending.status === "fulfilled" ? pending.value?.count ?? null : null,
-    pendingPrs: pending.status === "fulfilled" ? pending.value?.prs ?? null : null,
     deployEvery: sw.status === "fulfilled" ? sw.value.deployEvery : 10,
   };
 }

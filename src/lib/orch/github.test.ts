@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
 import Module from "node:module";
-import { approvePlan, createIdea, GitHubError, prNumbersFromMessages, readRepo } from "./github";
+import { approvePlan, createIdea, GitHubError, readRepo } from "./github";
 import { parsePlan, planHash, type PlanComment, type PlanIssue } from "./plans";
 import { cookieName, csrfToken, issueSession } from "../session/session";
 
@@ -227,26 +227,9 @@ test("route POST idea: validates repo/title/body (400), token (503), then create
   });
 });
 
-// ---------------------------------------------------------------- PR numbers not deployed yet
+// ---------------------------------------------------------------- changes not deployed yet
 
-test("prNumbersFromMessages: merge 'Merge pull request #N' and squash '(#N)' subjects, deduped, no number → skipped", () => {
-  const m = (message: string, merge: boolean) => ({ message, merge });
-  assert.deepEqual(prNumbersFromMessages([
-    m("Merge pull request #265 from o/orch/run-260\n\n[orch] 목표 (#999)", true),
-    m("[run #269] Step 3: 화면 (#272)", false),
-    m("[orch] 로드맵 보기 (#273)\n\n* Step 1 (#270)\n* Step 2 (#271)", false),
-    m("Merge pull request #265 from o/again", true),
-    m("[run #269] Step 3 again (#272)", false),
-    m("Merge pull request #7 from o/x", false), // not a merge commit → only '(#N)' counts, none here
-    m("fix typo", false),
-    m("Merge branch 'main' into feature", true),
-    m("", false),
-  ]), [265, 272, 273]);
-  assert.deepEqual(prNumbersFromMessages(["Merge pull request #5 from o/b", "x (#6)"]), [5, 6]);
-  assert.deepEqual(prNumbersFromMessages([]), []);
-});
-
-test("readRepo: pendingPrs from compare commits since prod-deployed; no tag / error → null", async () => {
+test("readRepo: deployPending from compare merge commits since prod-deployed; no tag / error → null; no pendingPrs field", async () => {
   const commits = [
     { parents: [{}, {}], commit: { message: "Merge pull request #12 from o/orch/run-10\n\n본문 (#99)" } },
     { parents: [{}], commit: { message: "[run #10] Step 1: 무언가 (#11)" } },
@@ -264,13 +247,12 @@ test("readRepo: pendingPrs from compare commits since prod-deployed; no tag / er
     return json(404, {});
   }) as typeof fetch;
   const ok = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { commits } }));
-  assert.deepEqual(ok.pendingPrs, [12, 11]);
   assert.equal(ok.deployPending, 2);
+  assert.ok(!("pendingPrs" in ok));
   const none = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { commits: [] } }));
-  assert.deepEqual(none.pendingPrs, []);
+  assert.equal(none.deployPending, 0);
   const noTag = await readRepo(REPO, ENV, fakeRepo({ status: 404, body: { message: "Not Found" } }));
-  assert.equal(noTag.pendingPrs, null);
   assert.equal(noTag.deployPending, null);
   const err = await readRepo(REPO, ENV, fakeRepo({ status: 500 }));
-  assert.equal(err.pendingPrs, null);
+  assert.equal(err.deployPending, null);
 });
