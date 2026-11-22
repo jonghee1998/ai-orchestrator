@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CURRENT_VERSION, PATCH_NOTES } from "./patchnotes";
+import { CURRENT_VERSION, PATCH_NOTES, groupByMajor } from "./patchnotes";
 
 const parse = (v: string) => v.split(".").map(Number);
 function cmp(a: string, b: string) {
@@ -30,4 +30,12 @@ test("current version and first/last entries", () => {
   assert.equal(PATCH_NOTES[PATCH_NOTES.length - 1].version, "1.0.0");
   // 항목 수는 고정하지 않는다: 새 릴리스마다 맨 앞에 추가된다.
   assert.ok(PATCH_NOTES.length >= 11);
+});
+
+test("groupByMajor: newest major first, every note kept in order", () => {
+  const g = groupByMajor(PATCH_NOTES);
+  assert.equal(g[0].major, Number(CURRENT_VERSION.split(".")[0]));
+  assert.deepEqual(g.map((x) => x.major), [...g.map((x) => x.major)].sort((a, b) => b - a));
+  assert.deepEqual(g.flatMap((x) => x.notes), PATCH_NOTES);
+  assert.deepEqual(groupByMajor([{ version: "2.0.0", date: "2026-01-01", title: "t", items: ["a"] }, { version: "1.2.0", date: "2026-01-01", title: "t", items: ["a"] }, { version: "1.0.0", date: "2026-01-01", title: "t", items: ["a"] }]).map((x) => [x.major, x.notes.length]), [[2, 1], [1, 2]]);
 });

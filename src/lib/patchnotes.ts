@@ -4,7 +4,20 @@
 
 export type PatchNote = { version: string; date: string; pr?: number; title: string; items: string[] };
 
+/** 큰 버전(첫 자리)별 묶음, 최신 먼저: [{ major: 2, notes: [...] }, { major: 1, notes: [...] }] */
+export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchNote[] }[] {
+  const out: { major: number; notes: PatchNote[] }[] = [];
+  for (const n of notes) {
+    const major = Number(n.version.split(".")[0]);
+    const last = out[out.length - 1];
+    if (last && last.major === major) last.notes.push(n);
+    else out.push({ major, notes: [n] });
+  }
+  return out;
+}
+
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.0.0", date: "2026-11-22", title: "상황판 2.0 — 새 디자인과 전체 흐름", items: ["밝은 화면·Pretendard·SVG 아이콘으로 5탭 전체 새 디자인", "프로젝트 탭: 계획·개발·통합 남은 과정, 세부 과정 완료 표시, 추가 검토(아이디어) 분리", "구조 탭: 요청→배포 한 장 흐름도와 배포·비밀값 구조도", "패치노트는 큰 버전(1.x, 2.x)별로 접고 펼침"] },
   { version: "1.21.5", date: "2026-11-22", pr: 296, title: "구조 탭 흐름도·배포 구조", items: ["아키텍처를 요청→배포 한 장 흐름도로(승인 1·2, PASS/FAIL, 자동 수정·중단, 반복)", "배포·비밀값 구조도 추가: 폰→Vercel→GitHub, 환경변수·Secrets·Variables 위치와 역할, Deploy Hook 배포", "비밀값 규칙 7가지"] },
   { version: "1.21.4", date: "2026-11-22", pr: 295, title: "추가 검토 분리·접기 표시", items: ["검토(아이디어)는 본 흐름과 따로: 칸은 계획·개발·통합 3개, 검토는 아래 '추가 검토'", "남은 할 일은 계획·개발·통합만 셈", "접고 펼 수 있는 줄마다 > 표시(펼치면 아래로)"] },
   { version: "1.21.3", date: "2026-11-22", pr: 294, title: "세부 과정 완료 표시", items: ["단계를 펼치면 끝난 과정은 체크, 지금은 파란 점, 남은 과정은 빈 원으로 표시", "작업이 없는 단계는 0/세부 개수로 표시하고 과정은 모두 완료로"] },
