@@ -1,4 +1,5 @@
 "use client";
+import { ChevronIcon } from "@/components/icons";
 // PM 브리핑 탭: 아이디어함. 일자·항목·내 의견·종합 의견(Claude+Codex)을 보여 주고, 관리자는 새 아이디어를 적을 수 있다.
 // Data: GET /api/orch (repo.ideas). 등록: POST /api/orch {action:'idea'} (admin session + CSRF) → '[idea] 항목' Issue.
 import { useState } from "react";
@@ -88,7 +89,7 @@ function IdeaCard({ i }: { i: Idea }) {
         {!i.mine.trim() ? <p className="text-xs text-text-muted">내 의견 없음</p>
           : isLong(i.mine) ? (
             <details>
-              <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-text-muted"><span className="shrink-0">내 의견</span><span className="min-w-0 truncate">{i.mine.split("\n")[0]}</span></summary>
+              <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-text-muted"><span className="shrink-0">내 의견</span><span className="min-w-0 flex-1 truncate">{i.mine.split("\n")[0]}</span><ChevronIcon className="h-4 w-4" /></summary>
               <p className="whitespace-pre-wrap break-words pb-2">{i.mine}</p>
             </details>
           ) : <p className="whitespace-pre-wrap break-words"><span className="text-xs text-text-muted">내 의견 · </span>{i.mine}</p>}
@@ -103,7 +104,7 @@ function IdeaCard({ i }: { i: Idea }) {
           {r.agree && <p className="break-words text-xs"><span className="text-text-muted">같은 점 · </span>{r.agree}</p>}
           {r.disagree && <p className="break-words text-xs"><span className="text-text-muted">다른 점 · </span>{r.disagree}</p>}
           <details>
-            <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-accent">Claude·Codex 의견 표</summary>
+            <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-accent">Claude·Codex 의견 표<ChevronIcon className="ml-0.5 h-3.5 w-3.5 text-accent" /></summary>
             <OpinionTable claude={r.claude} codex={r.codex} />
           </details>
         </div>
