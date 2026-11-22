@@ -4,7 +4,7 @@ import test from "node:test";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -20,11 +20,11 @@ async function hashPassword(password) {
 }
 async function server(extra = {}) {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "orch-login-smoke-"));
-  const password = random(), username = random(), token = random(), cron = random();
+  const password = random(), username = random(), token = random();
   const hash = await hashPassword(password);
   const socket = createServer(); socket.listen(0, "127.0.0.1"); await once(socket, "listening");
   const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
-  const env = { PATH: process.env.PATH, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1", ADMIN_USERNAME: username, ADMIN_PASSWORD_HASH: hash, CONTROL_ADMIN_TOKEN: token, CRON_SECRET: cron, RUN_STORE_PATH: path.join(tmp, "store.json"), ...extra };
+  const env = { PATH: process.env.PATH, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1", ADMIN_USERNAME: username, ADMIN_PASSWORD_HASH: hash, CONTROL_ADMIN_TOKEN: token, ...extra };
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(port)], { env, stdio: ["ignore", "pipe", "pipe"] });
   let log = ""; child.stdout.on("data", c => { log += c; }); child.stderr.on("data", c => { log += c; });
   const base = `http://127.0.0.1:${port}`;
@@ -48,13 +48,13 @@ async function server(extra = {}) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.ok(ready, "test server did not become ready");
-    return { request, base, close, tmp, password, username, token, cron, hash };
+    return { request, base, close, tmp, password, username, token, hash };
   } catch (e) { await close(); throw e; }
 }
 const post = (body, headers = {}) => ({ method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 const cookie = r => r.headers.get("set-cookie").split(";")[0];
 
-test("real HTTP: password login, browser/persistent session, logout/CSRF, reconcile authentication and rate limit", async () => {
+test("real HTTP: password login, browser/persistent session, logout/CSRF, /api/orch authentication and rate limit", async () => {
   const s = await server();
   try {
     const credentials = { username: s.username, password: s.password };
@@ -68,14 +68,15 @@ test("real HTTP: password login, browser/persistent session, logout/CSRF, reconc
     for (const secret of [s.password, s.token, s.hash]) assert.ok(!JSON.stringify(r.body).includes(secret) && !set.includes(secret));
     const h = { cookie: cookie(r), "x-csrf-token": r.body.csrfToken };
     assert.equal((await s.request("/api/session", { headers: h })).body.authenticated, true);
-    const before = await readFile(path.join(s.tmp, "store.json"), "utf8").catch(() => null);
-    assert.equal((await s.request("/api/reconcile", { headers: h })).status, 401);
-    assert.equal(await readFile(path.join(s.tmp, "store.json"), "utf8").catch(() => null), before, "cookie GET must not initialize or mutate store");
-    assert.equal((await s.request("/api/reconcile", post({}, { cookie: h.cookie }))).status, 403);
-    assert.equal((await s.request("/api/reconcile", post({}, { ...h, origin: "https://evil.example" }))).status, 403);
-    assert.equal((await s.request("/api/reconcile", post({}, h))).status, 200);
-    assert.equal((await s.request("/api/reconcile", { headers: { "x-admin-token": s.token } })).status, 200);
-    assert.equal((await s.request("/api/reconcile", { headers: { authorization: `Bearer ${s.cron}` } })).status, 200);
+    assert.equal((await s.request("/api/orch")).status, 401);
+    const orch = await s.request("/api/orch", { headers: { cookie: h.cookie } });
+    assert.equal(orch.status, 200); assert.equal(orch.body.mode, "unconfigured");
+    assert.equal((await s.request("/api/orch", post({}, { cookie: h.cookie }))).status, 403);
+    assert.equal((await s.request("/api/orch", post({}, { ...h, origin: "https://evil.example" }))).status, 403);
+    const authed = await s.request("/api/orch", post({}, h)); // passes auth+CSRF, then fails validation
+    assert.equal(authed.status, 400); assert.equal(authed.body.error, "unknown_repo");
+    const admin = await s.request("/api/orch", post({}, { "x-admin-token": s.token }));
+    assert.equal(admin.status, 400); assert.equal(admin.body.error, "unknown_repo");
     assert.equal((await s.request("/api/session", { method: "DELETE", headers: { cookie: h.cookie } })).status, 403);
     const out = await s.request("/api/session", { method: "DELETE", headers: h });
     assert.equal(out.status, 200); assert.ok(out.headers.get("set-cookie").includes("Max-Age=0"));
