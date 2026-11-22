@@ -1,13 +1,14 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
 //   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
-//           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments
+//           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments,
+//           docs/roadmap.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch);
 //           'orch:go' label on plan approval; one '[idea]' Issue per idea
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read and write, Variables read/write, Actions read/write).
 //   Issues: Read and write 필요(계획 승인·아이디어 등록), 토큰 주인이 저장소 소유자여야 등록한 아이디어가 화면에 보임
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
-import { USAGE_RETRY_MS, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type UsageRefresh, type UsageView } from "./model";
+import { USAGE_RETRY_MS, deployEveryFromVars, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -54,7 +55,34 @@ async function readRuns(f: Fetch, token: string, repo: string): Promise<OrchRun[
 
 async function readVars(f: Fetch, token: string, repo: string) {
   const j = (await call(f, token, "GET", `/repos/${repo}/actions/variables?per_page=30`)) as { variables?: { name: string; value: string }[] };
-  return switchesFromVars(j.variables ?? []);
+  const vars = Array.isArray(j?.variables) ? j.variables : [];
+  return { switches: switchesFromVars(vars), deployEvery: deployEveryFromVars(vars) };
+}
+
+export class RoadmapFormatError extends Error {}
+
+/** docs/roadmap.json on the default branch. Throws GitHubError (404 = no file) or RoadmapFormatError. */
+async function readRoadmap(f: Fetch, token: string, repo: string): Promise<Roadmap> {
+  const j = (await call(f, token, "GET", `/repos/${repo}/contents/docs/roadmap.json`)) as { content?: string; encoding?: string } | null;
+  if (typeof j?.content !== "string" || (j.encoding && j.encoding !== "base64")) throw new RoadmapFormatError("roadmap.json 내용 없음");
+  const roadmap = parseRoadmap(Buffer.from(j.content, "base64").toString("utf8"));
+  if (!roadmap) throw new RoadmapFormatError("roadmap.json 형식 오류");
+  return roadmap;
+}
+
+/**
+ * Merge commits (parents > 1) between tag prod-deployed and main. null when the tag is missing or the read fails.
+ * Approximation: deploy.yml counts `git rev-list --count --first-parent prod-deployed..HEAD`, which also counts
+ * direct (non-merge) commits on main and ignores merges inside merged branches; compare also caps at 250 commits.
+ */
+async function readDeployPending(f: Fetch, token: string, repo: string): Promise<number | null> {
+  try {
+    const j = (await call(f, token, "GET", `/repos/${repo}/compare/prod-deployed...main`)) as { commits?: { parents?: unknown[] }[] } | null;
+    if (!Array.isArray(j?.commits)) return null;
+    return j.commits.filter((c) => Array.isArray(c?.parents) && c.parents.length > 1).length;
+  } catch {
+    return null;
+  }
 }
 
 async function readUsageIssue(f: Fetch, token: string, repo: string): Promise<UsageView | null> {
@@ -93,20 +121,28 @@ export async function readIdeas(f: Fetch, token: string, repo: string): Promise<
 
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw, usage, plans, ideas] = await Promise.allSettled([
+  const [runs, sw, usage, plans, ideas, roadmap, pending] = await Promise.allSettled([
     readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo), readIdeas(f, token, repo),
+    readRoadmap(f, token, repo), readDeployPending(f, token, repo),
   ]);
+  // 404 = this project has no roadmap file (not an error). describe() lumps 403 and 404 together, so compare directly.
+  const roadmapMissing = roadmap.status === "rejected" && roadmap.reason instanceof GitHubError && roadmap.reason.status === 404;
   return {
     repo,
     usage: usage.status === "fulfilled" ? usage.value : null,
     runs: runs.status === "fulfilled" ? runs.value : [],
     runsError: runs.status === "rejected" ? describe(runs.reason) : null,
-    switches: sw.status === "fulfilled" ? sw.value : null,
+    switches: sw.status === "fulfilled" ? sw.value.switches : null,
     switchesError: sw.status === "rejected" ? describe(sw.reason) : null,
     plans: plans.status === "fulfilled" ? plans.value : [],
     plansError: plans.status === "rejected" ? describe(plans.reason) : null,
     ideas: ideas.status === "fulfilled" ? ideas.value : [],
     ideasError: ideas.status === "rejected" ? describe(ideas.reason) : null,
+    roadmap: roadmap.status === "fulfilled" ? roadmap.value : null,
+    roadmapError: roadmap.status === "fulfilled" || roadmapMissing ? null
+      : roadmap.reason instanceof RoadmapFormatError ? roadmap.reason.message : describe(roadmap.reason),
+    deployPending: pending.status === "fulfilled" ? pending.value : null,
+    deployEvery: sw.status === "fulfilled" ? sw.value.deployEvery : 10,
   };
 }
 

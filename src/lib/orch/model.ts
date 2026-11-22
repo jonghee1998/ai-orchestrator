@@ -40,6 +40,8 @@ export interface OrchRun {
   pr: number | null;
   finalPr: number | null;
   retries: number;
+  /** plan JSON max_retries (engine default 3). */
+  maxRetries: number;
   held: string | null;
   reason: string | null;
   updatedAt: string | null;
@@ -75,6 +77,9 @@ function parseJson(text: string | undefined): Json | null {
   if (!text) return null;
   try { return obj(JSON.parse(text)); } catch { return null; }
 }
+
+/** Same default as scripts/orch/core.mjs (DEFAULT_MAX_RETRIES = 3); missing, non-integer or negative → 3. */
+const maxRetriesOf = (v: unknown): number => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 3);
 
 /** Parse one run Issue. Returns null when the Issue is not an orchestrator plan. */
 export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
@@ -129,6 +134,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
     pr,
     finalPr,
     retries: num(st?.retries) ?? 0,
+    maxRetries: maxRetriesOf(plan.max_retries),
     held,
     reason,
     updatedAt: str(st?.updatedAt),
@@ -358,6 +364,13 @@ export interface RepoView {
   switchesError: string | null;
   runs: OrchRun[];
   runsError: string | null;
+  /** docs/roadmap.json; null = no file in this repo (404) or it could not be read (then roadmapError is set). */
+  roadmap: Roadmap | null;
+  roadmapError: string | null;
+  /** Merge commits on main since tag prod-deployed (approximation); null = no tag or read failed. */
+  deployPending: number | null;
+  /** ORCH_DEPLOY_EVERY (default 10). */
+  deployEvery: number;
 }
 
 /** Active runs first (needs-user first), then recent finished ones. */
@@ -381,4 +394,62 @@ export function filterIdeas(repos: { repo: string; ideas: Idea[] }[], repo: stri
 /** Repo preselected in the register form: the filtered one, else the first repo. */
 export function defaultIdeaRepo(repos: { repo: string }[], filter: string | null): string {
   return filter !== null && repos.some((v) => v.repo === filter) ? filter : (repos[0]?.repo ?? "");
+}
+
+// ---------------------------------------------------------------- roadmap (docs/roadmap.json: 0단계 setup, 6단계 expansion)
+
+export type RoadmapStatus = "done" | "doing" | "todo" | "na";
+export interface RoadmapItem {
+  id: string;
+  /** At most 24 chars. */
+  title: string;
+  status: RoadmapStatus;
+  /** At most 80 chars. */
+  note: string | null;
+  /** PR number or file path. */
+  ref: number | string | null;
+}
+export interface Roadmap { version: number; setup: RoadmapItem[]; expansion: RoadmapItem[] }
+
+export const ROADMAP_TITLE_MAX = 24;
+export const ROADMAP_NOTE_MAX = 80;
+const ROADMAP_STATUSES = new Set<string>(["done", "doing", "todo", "na"]);
+
+function roadmapItem(v: unknown): RoadmapItem | null {
+  const o = obj(v);
+  const id = str(o?.id);
+  const title = str(o?.title);
+  if (!o || !id || !title) return null;
+  const status = str(o.status);
+  const ref = typeof o.ref === "number" && Number.isInteger(o.ref) && o.ref > 0 ? o.ref : (str(o.ref)?.slice(0, 200) ?? null);
+  return {
+    id: id.slice(0, 10),
+    title: title.slice(0, ROADMAP_TITLE_MAX),
+    status: status && ROADMAP_STATUSES.has(status) ? (status as RoadmapStatus) : "todo",
+    note: str(o.note)?.slice(0, ROADMAP_NOTE_MAX) ?? null,
+    ref,
+  };
+}
+
+/** Parse docs/roadmap.json. Not a JSON object → null; malformed items skipped, long strings cut, unknown status → todo. */
+export function parseRoadmap(text: string | null | undefined): Roadmap | null {
+  const j = parseJson(text ?? undefined);
+  if (!j) return null;
+  const list = (v: unknown) => (Array.isArray(v) ? v : []).map(roadmapItem).filter((i): i is RoadmapItem => i !== null);
+  const version = num(j.version);
+  return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, setup: list(j.setup), expansion: list(j.expansion) };
+}
+
+/** Checklist progress. 'na' items are left out of the total; text = '완료/전체'. */
+export function roadmapCount(items: RoadmapItem[]): { done: number; doing: number; todo: number; total: number; text: string } {
+  const c = { done: 0, doing: 0, todo: 0 };
+  for (const i of items) if (i.status !== "na") c[i.status]++;
+  const total = c.done + c.doing + c.todo;
+  return { ...c, total, text: `${c.done}/${total}` };
+}
+
+/** ORCH_DEPLOY_EVERY as a positive integer (deploy.yml default 10); missing or odd values → 10. */
+export function deployEveryFromVars(vars: { name: string; value: string }[]): number {
+  const v = (vars.find((x) => x.name === "ORCH_DEPLOY_EVERY")?.value ?? "").trim();
+  return /^\d+$/.test(v) && Number(v) > 0 ? Number(v) : 10;
 }
