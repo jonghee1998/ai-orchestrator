@@ -70,7 +70,7 @@ jobs:
           prompt: ${{ steps.prep.outputs.prompt }}
           allowed_bots: "*"   # dispatched by the orchestrator (github-actions[bot]); workflow_dispatch needs write access anyway
           claude_args: >-
-            --max-turns 80
+            --max-turns 150
             ${{ steps.prep.outputs.model_args }}
             --allowedTools "Edit,Write,Read,Glob,Grep,LS,Skill,Task,Agent,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*)"
       - name: Summarize tool use (skills, sub-agents, verification commands)
