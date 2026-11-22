@@ -247,3 +247,16 @@ test("approveMessage: success, plan_changed and errors", () => {
   assert.equal(approveMessage(502, { error: "github_error", detail: "권한 없음 또는 저장소 없음" }).text, "승인 실패 · 권한 없음 또는 저장소 없음");
   assert.equal(approveMessage(500, null).ok, false);
 });
+
+test("parsePatchNotes: valid entries only, newest first; array or {notes}; nothing valid → null", async () => {
+  const { parsePatchNotes } = await import("./model");
+  const n = (version: string, extra = {}) => ({ version, date: "2026-11-22", title: "t", items: ["a"], ...extra });
+  const got = parsePatchNotes(JSON.stringify([n("1.2.0"), n("1.10.0", { pr: 5 }), { version: "x" }, n("2.0.0", { items: [] }), n("1.0.0", { pr: -1 })]))!;
+  assert.deepEqual(got.map((x) => x.version), ["1.10.0", "1.2.0", "1.0.0"]);
+  assert.equal(got[0].pr, 5);
+  assert.equal("pr" in got[2], false);
+  assert.deepEqual(parsePatchNotes(JSON.stringify({ notes: [n("0.1.0")] }))!.map((x) => x.version), ["0.1.0"]);
+  assert.equal(parsePatchNotes("not json"), null);
+  assert.equal(parsePatchNotes("[]"), null);
+  assert.equal(parsePatchNotes(JSON.stringify([{ version: "1.0.0" }])), null);
+});

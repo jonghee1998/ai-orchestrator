@@ -97,7 +97,7 @@ try {
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "배포 · 비밀값", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
-    { name: "patch-notes", path: "/patch-notes", nav: "패치노트", expect: [`v${CURRENT_VERSION}`, "v2.x", "v1.x", "새 디자인과 전체 흐름"], forbid: [] },
+    { name: "patch-notes", path: "/patch-notes", nav: "패치노트", expect: [`v${CURRENT_VERSION}`, "ai-orchestrator", "v2.x", "v1.x", "새 디자인과 전체 흐름"], forbid: [] },
   ];
   const navLabels = (await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
   for (const t of TABS) if (!navLabels.some((l) => l.includes(t.nav))) problems.push(`하단 탭에 '${t.nav}' 없음 (${navLabels.join(", ")})`);
@@ -142,7 +142,10 @@ try {
       if (!(await doneLink.isVisible()) || !/\/patch-notes$/.test((await doneLink.getAttribute("href")) ?? "")) problems.push("[projects] '완료 기록' 이 /patch-notes 로 가는 링크가 아님");
       // 남은 할 일 (fixtures, 지금 과정도 남은 것으로 셈, 아이디어는 '추가 검토'라 제외): 계획 #13 2.8→2+16+8=26, #11 3.7→10+8=18, #12 4.7→2 = 46
       const remain = await flat(card.getByTestId("orch-remaining"));
-      if (remain !== "남은 할 일 46과정 · 단계별") problems.push(`[projects] '남은 할 일 46과정 · 단계별' 이 아님 (${remain})`);
+      if (remain !== "남은 할 일 46과정 · 단계별 · 직접 할 일 2건") problems.push(`[projects] '남은 할 일 46과정 · 단계별 · 직접 할 일 2건' 이 아님 (${remain})`);
+      // 직접 할 일: 인프라 중 안 끝난 것(fixtures 0.2 진행 · 0.3 할 일), 확장은 넣지 않음
+      const todoText = await flat(card.getByTestId("orch-todo"));
+      if (!todoText.startsWith("직접 할 일 2") || !todoText.includes("0.2") || !todoText.includes("0.3") || todoText.includes("6.1")) problems.push(`[projects] '직접 할 일' 이 인프라 미완료 2건이 아님 (${todoText})`);
       // 3칸(계획·개발·통합): 단계 안 남은 과정(여럿이면 가장 많이 남은 값)/단계 세부 개수. 검토는 칸 없이 아래 '추가 검토'
       const CELLS = [[2, "계획2/9"], [3, "개발10/16"], [4, "통합2/8"]];
       for (const [n, want] of CELLS) {

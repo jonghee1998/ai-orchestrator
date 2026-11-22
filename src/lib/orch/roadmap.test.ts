@@ -73,7 +73,7 @@ test("docs/roadmap.json: passes parseRoadmap unchanged, setup 20 + expansion 5",
   const norm = (i: Record<string, unknown>) => ({ id: i.id, title: i.title, status: i.status, note: i.note ?? null, ref: i.ref ?? null });
   assert.deepEqual(r.setup, (raw.setup as Record<string, unknown>[]).map(norm));
   assert.deepEqual(r.expansion, (raw.expansion as Record<string, unknown>[]).map(norm));
-  assert.deepEqual(roadmapCount(r.setup), { done: 17, doing: 2, todo: 0, total: 19, text: "17/19" });
+  assert.deepEqual(roadmapCount(r.setup), { done: 16, doing: 3, todo: 0, total: 19, text: "16/19" });
   assert.deepEqual(roadmapCount(r.expansion).text, "0/5");
 });
 

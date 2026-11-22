@@ -1,3 +1,4 @@
+import type { PatchNote } from "@/lib/patchnotes";
 // Orchestrator engine (scripts/orch) → dashboard view model. Pure: no I/O.
 // Source of truth is the run Issue body: plan (first ```json block) + <!-- orch-state:v1 {...} --> marker.
 // ON/OFF switches are GitHub repository variables (ORCH_*), the same values the Actions engine reads.
@@ -371,6 +372,9 @@ export interface RepoView {
   deployPending: number | null;
   /** ORCH_DEPLOY_EVERY (default 10). */
   deployEvery: number;
+  /** docs/patchnotes.json (other projects' patch notes); null = no file (404) or unreadable (then patchNotesError). */
+  patchNotes?: PatchNote[] | null;
+  patchNotesError?: string | null;
 }
 
 /** Active runs first (needs-user first), then recent finished ones. */
@@ -438,6 +442,28 @@ export function parseRoadmap(text: string | null | undefined): Roadmap | null {
   const list = (v: unknown) => (Array.isArray(v) ? v : []).map(roadmapItem).filter((i): i is RoadmapItem => i !== null);
   const version = num(j.version);
   return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, setup: list(j.setup), expansion: list(j.expansion) };
+}
+
+/**
+ * docs/patchnotes.json → newest first, only well-formed entries ({version 'x.y.z', date 'YYYY-MM-DD', title, items[], pr?}).
+ * Accepts a bare array or { notes: [...] }. Not JSON / no valid entry → null.
+ */
+export function parsePatchNotes(text: string | null | undefined): PatchNote[] | null {
+  const raw = (() => { try { return JSON.parse(text ?? ""); } catch { return null; } })();
+  const arr: unknown[] | null = Array.isArray(raw) ? raw : raw && Array.isArray(raw.notes) ? raw.notes : null;
+  if (!arr) return null;
+  const ok = arr.flatMap((x) => {
+    const o = x as Record<string, unknown> | null;
+    if (!o || typeof o.version !== "string" || !/^\d+\.\d+\.\d+$/.test(o.version) || typeof o.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(o.date)
+      || typeof o.title !== "string" || !o.title.trim() || !Array.isArray(o.items)) return [];
+    const items = o.items.filter((i): i is string => typeof i === "string" && i.trim() !== "");
+    if (!items.length) return [];
+    const pr = typeof o.pr === "number" && Number.isInteger(o.pr) && o.pr > 0 ? o.pr : undefined;
+    return [{ version: o.version, date: o.date, title: o.title.trim(), items, ...(pr ? { pr } : {}) } as PatchNote];
+  });
+  if (!ok.length) return null;
+  const key = (v: string) => v.split(".").map((n) => n.padStart(6, "0")).join(".");
+  return ok.sort((a, b) => key(b.version).localeCompare(key(a.version)));
 }
 
 /** Checklist progress. 'na' items are left out of the total; text = '완료/전체'. */
