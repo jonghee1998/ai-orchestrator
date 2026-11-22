@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LIFECYCLE, deployProgressText, flowEntries, ideaPosition, planPosition, runPosition, stageBoard } from "./lifecycle";
+import { LIFECYCLE, boardDeployCounts, boardNeedsUser, deployProgressText, flowEntries, ideaPosition, planPosition, runPosition, stageBoard, type BoardColumn, type BoardItem } from "./lifecycle";
 import type { Idea, OrchRun, PendingPlan, RunStep } from "./model";
 
 const EXPECTED: Record<number, [string, string[]]> = {
@@ -182,4 +182,20 @@ test("stageBoard: columns newest first (null last); column 5 orders 배포 대�
   assert.deepEqual(b[4].items.map((i) => [i.key, i.deployed]), [
     ["run-13", false], ["run-11", false], ["run-10", true], ["run-14", true], ["run-12", null],
   ]);
+});
+
+const col = (n: 1 | 2 | 3 | 4 | 5, items: Partial<BoardItem>[]): BoardColumn => ({
+  n, title: (["검토", "계획", "개발", "통합", "완료"] as const)[n - 1],
+  items: items.map((x, i) => ({ kind: "run", key: `k${i}`, title: "t", url: "u", sub: "1.1", label: "", at: null, ...x })),
+});
+
+test("boardNeedsUser: counts run items that need the user", () => {
+  assert.equal(boardNeedsUser(col(4, [])), 0);
+  assert.equal(boardNeedsUser(col(3, [{}, { kind: "plan" }, { run: run({ needsUser: false }) }])), 0);
+  assert.equal(boardNeedsUser(col(4, [{}, { run: run({ needsUser: true }) }, { run: run({ needsUser: true, number: 2 }) }])), 2);
+});
+
+test("boardDeployCounts: 배포 대기 / 배포됨, unknown counted in neither", () => {
+  assert.deepEqual(boardDeployCounts(col(5, [{ deployed: false }, { deployed: true }, { deployed: true }, { deployed: null }, {}])), { pending: 1, deployed: 2 });
+  assert.deepEqual(boardDeployCounts(col(5, [])), { pending: 0, deployed: 0 });
 });

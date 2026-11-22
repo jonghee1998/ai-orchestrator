@@ -213,6 +213,20 @@ export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Id
   return cols;
 }
 
+/**
+ * Items in a stage-board row that need the user (shown as '확인 필요 N' on the row line).
+ * Rows all start collapsed: opening the 2·3·4 rows, or only rows needing the user, made the first project card
+ * taller than 600px at 360x800.
+ */
+export function boardNeedsUser(c: BoardColumn): number {
+  return c.items.filter((i) => !!i.run?.needsUser).length;
+}
+
+/** 5 완료 row note: done items merged but not deployed (pending) / deployed; unknown (null) counts in neither. */
+export function boardDeployCounts(c: BoardColumn): { pending: number; deployed: number } {
+  return { pending: c.items.filter((i) => i.deployed === false).length, deployed: c.items.filter((i) => i.deployed === true).length };
+}
+
 /** '다음 배포까지' text: min(pending, every)/every; null (hidden) when the pending count is unknown. */
 export function deployProgressText(pending: number | null, every: number): string | null {
   return pending === null ? null : `${Math.min(pending, every)}/${every}`;
