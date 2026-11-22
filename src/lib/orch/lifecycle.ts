@@ -149,41 +149,33 @@ export interface BoardItem {
   /** ISO time used for ordering (newest first); null sorts last. */
   at: string | null;
   run?: OrchRun;
-  /** Done runs only: true = deployed, false = merged but not deployed yet, null = unknown. */
-  deployed?: boolean | null;
   blocked?: boolean;
 }
 
-export type BoardTitle = "검토" | "계획" | "개발" | "통합" | "완료";
+export type BoardStage = 1 | 2 | 3 | 4;
+export type BoardTitle = "검토" | "계획" | "개발" | "통합";
 
 export interface BoardColumn {
-  n: LifecycleStage;
+  n: BoardStage;
   title: BoardTitle;
   items: BoardItem[];
 }
 
-const BOARD_TITLES: readonly BoardTitle[] = ["검토", "계획", "개발", "통합", "완료"];
+const BOARD_TITLES: readonly BoardTitle[] = ["검토", "계획", "개발", "통합"];
 
 const atMs = (at: string | null) => {
   const t = Date.parse(at ?? "");
   return Number.isFinite(t) ? t : -Infinity;
 };
-const deployRank = (d: boolean | null | undefined) => (d === false ? 0 : d === true ? 1 : 2);
-
-/** Deploy state of a done run from the PR numbers merged since prod-deployed (no time comparison). */
-function deployedOf(run: OrchRun, pendingPrs: number[] | null | undefined): boolean | null {
-  if (!Array.isArray(pendingPrs) || typeof run.finalPr !== "number") return null;
-  return !pendingPrs.includes(run.finalPr);
-}
 
 /**
- * Stage board (5 columns: 1 검토 … 5 완료). Open ideas, plans waiting for audit / approval, active and blocked runs
- * sit in their lifecycle stage; done runs go to 5 완료 with their deploy state; cancelled runs are left out.
- * Each column is newest first; column 5 puts 배포 대기 (false) first, then 배포됨, then 알 수 없음.
+ * Stage board (4 columns: 1 검토 … 4 통합). Open ideas, plans waiting for audit / approval, active and blocked runs
+ * sit in their lifecycle stage; done and cancelled runs are left out (finished work lives on the 패치노트 tab).
+ * Each column is newest first.
  */
-export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Idea[]; pendingPrs: number[] | null }): BoardColumn[] {
-  const cols: BoardColumn[] = BOARD_TITLES.map((title, i) => ({ n: (i + 1) as LifecycleStage, title, items: [] }));
-  const put = (stage: LifecycleStage, item: BoardItem) => cols[stage - 1].items.push(item);
+export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Idea[] }): BoardColumn[] {
+  const cols: BoardColumn[] = BOARD_TITLES.map((title, i) => ({ n: (i + 1) as BoardStage, title, items: [] }));
+  const put = (stage: LifecycleStage, item: BoardItem) => cols[stage - 1]?.items.push(item);
   for (const i of v.ideas ?? []) {
     if (!i || i.closed) continue;
     const p = ideaPosition(i);
@@ -195,24 +187,93 @@ export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Id
     put(p.stage, { kind: "plan", key: `plan-${pl.number}`, title: pl.goal, url: pl.url, sub: p.sub, label: p.label, at: pl.review?.at ?? null });
   }
   for (const run of v.runs ?? []) {
-    if (!run || run.status === "cancelled") continue;
-    const base = { kind: "run" as const, key: `run-${run.number}`, title: run.goal, url: run.url, at: run.updatedAt ?? null, run };
-    if (run.status === "done") {
-      // sub stays the engine's last lifecycle step (4.8 완료·알림); the column itself is 5 완료.
-      put(5, { ...base, sub: "4.8", label: "완료", deployed: deployedOf(run, v.pendingPrs) });
-      continue;
-    }
+    if (!run || run.status === "cancelled" || run.status === "done") continue;
     const p = runPosition(run);
     if (!p) continue;
-    put(p.stage, { ...base, sub: p.sub, label: p.label, ...(run.status === "blocked" ? { blocked: true } : {}) });
+    put(p.stage, {
+      kind: "run", key: `run-${run.number}`, title: run.goal, url: run.url, at: run.updatedAt ?? null, run,
+      sub: p.sub, label: p.label, ...(run.status === "blocked" ? { blocked: true } : {}),
+    });
   }
   for (const c of cols) {
     const ranked = c.items.map((item, i) => ({ item, i }));
-    ranked.sort((a, b) =>
-      (c.n === 5 ? deployRank(a.item.deployed) - deployRank(b.item.deployed) : 0) || atMs(b.item.at) - atMs(a.item.at) || a.i - b.i);
+    ranked.sort((a, b) => atMs(b.item.at) - atMs(a.item.at) || a.i - b.i);
     c.items = ranked.map((x) => x.item);
   }
   return cols;
+}
+
+/** Stages counted in '남은 과정' (5 배포 is left out). */
+const COUNTED: readonly LifecycleStep[] = LIFECYCLE.filter((s) => s.n <= 4);
+
+/** '전체 과정': 1 검토 6 + 2 계획 9 + 3 개발 16 + 4 통합 8 = 39. */
+export const TOTAL_PROCESS = COUNTED.reduce((n, s) => n + s.sub.length, 0);
+
+/** 'S.K' → [stage step, K] for stages 1~4 with 1 ≤ K ≤ sub count; otherwise null. */
+function parseSub(sub: string): [LifecycleStep, number] | null {
+  const m = /^(\d+)\.(\d+)$/.exec(String(sub ?? ""));
+  if (!m) return null;
+  const step = COUNTED.find((s) => s.n === Number(m[1]));
+  const k = Number(m[2]);
+  return step && k >= 1 && k <= step.sub.length ? [step, k] : null;
+}
+
+/** '단계 안 남은 과정' of a sub id: that stage's sub count − K (3.10 → 16−10 = 6). Stage 5 / bad id → null. */
+export function stageRemaining(sub: string): number | null {
+  const p = parseSub(sub);
+  return p ? p[0].sub.length - p[1] : null;
+}
+
+/**
+ * '전체 남은 과정'. Run / plan: the stage remainder + every later stage up to 4 (3.10 → 6 + 8 = 14).
+ * Idea: development is not decided yet, so only the 1 검토 remainder counts. Bad id → null.
+ */
+export function totalRemaining(kind: BoardItem["kind"], sub: string): number | null {
+  const p = parseSub(sub);
+  if (!p) return null;
+  const [step, k] = p;
+  const here = step.sub.length - k;
+  if (kind === "idea") return here;
+  return here + COUNTED.filter((s) => s.n > step.n).reduce((n, s) => n + s.sub.length, 0);
+}
+
+export interface ItemProgress {
+  total: number;
+  done: number;
+  remaining: number;
+  stageRemaining: number;
+  /** LIFECYCLE sub title at the current position, e.g. '독립 검수'. */
+  title: string;
+  /** One part per stage 1~4 (bar widths 6:9:16:8): how many of its subs are behind the item. */
+  parts: { n: number; title: string; count: number; done: number }[];
+  /** Stages still left, for '(개발 6 · 통합 8)'; zero parts left out. */
+  left: { title: string; n: number }[];
+}
+
+/** Whole-flow progress of a run / plan at a sub id (the current sub counts as done). Bad id / stage 5 → null. */
+export function itemProgress(sub: string): ItemProgress | null {
+  const p = parseSub(sub);
+  if (!p) return null;
+  const [step, k] = p;
+  const parts = COUNTED.map((s) => ({ n: s.n, title: s.title, count: s.sub.length, done: s.n < step.n ? s.sub.length : s.n === step.n ? k : 0 }));
+  const remaining = totalRemaining("run", sub)!;
+  return {
+    total: TOTAL_PROCESS, done: TOTAL_PROCESS - remaining, remaining, stageRemaining: step.sub.length - k, title: step.sub[k - 1].title, parts,
+    left: parts.map((x) => ({ title: x.title, n: x.count - x.done })).filter((x) => x.n > 0),
+  };
+}
+
+/** Big number in a stage cell: the largest '단계 안 남은 과정' among its items; no items → null ('–'). */
+export function columnRemaining(c: BoardColumn): number | null {
+  const ns = c.items.map((i) => stageRemaining(i.sub)).filter((n): n is number => n !== null);
+  return ns.length ? Math.max(...ns) : null;
+}
+
+/** '남은 할 일 N과정': sum of every board item's '전체 남은 과정'; no items → null ('남은 할 일 없음'). */
+export function boardRemaining(cols: BoardColumn[]): number | null {
+  const items = cols.flatMap((c) => c.items);
+  if (!items.length) return null;
+  return items.reduce((n, i) => n + (totalRemaining(i.kind, i.sub) ?? 0), 0);
 }
 
 /**
@@ -222,14 +283,4 @@ export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Id
  */
 export function boardNeedsUser(c: BoardColumn): number {
   return c.items.filter((i) => !!i.run?.needsUser).length;
-}
-
-/** 5 완료 row note: done items merged but not deployed (pending) / deployed; unknown (null) counts in neither. */
-export function boardDeployCounts(c: BoardColumn): { pending: number; deployed: number } {
-  return { pending: c.items.filter((i) => i.deployed === false).length, deployed: c.items.filter((i) => i.deployed === true).length };
-}
-
-/** '다음 배포까지' text: min(pending, every)/every; null (hidden) when the pending count is unknown. */
-export function deployProgressText(pending: number | null, every: number): string | null {
-  return pending === null ? null : `${Math.min(pending, every)}/${every}`;
 }

@@ -24,7 +24,7 @@ export function githubFixtures(now) {
     issue(12, "[plan] 승인 대기 시험 작업", `${plan("승인 대기 시험 작업")}\n${state({ status: "awaiting_merge", step: 2, passed: { 1: true, 2: true }, finalPr: 99, updatedAt: iso(10) })}`),
   ];
   const runsDone = [
-    // #10: finalPr 98 이 compare(prod-deployed...main) 에 있음 → 배포 대기. #9: finalPr 97 은 없음 → 배포됨.
+    // 끝난 작업 #10·#9: 프로젝트 탭에는 나오지 않는다(끝난 일은 패치노트 탭). 남은 할 일·4칸 셈에서도 빠진다.
     issue(10, "[plan] 끝난 시험 작업", `${plan("끝난 시험 작업", 1, "감마")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 98, updatedAt: iso(120) })}`, { state: "closed" }),
     issue(9, "[plan] 배포된 시험 작업", `${plan("배포된 시험 작업", 1, "엡실론")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 97, updatedAt: iso(60 * 26) })}`, { state: "closed" }),
   ];
@@ -72,8 +72,7 @@ export function githubFixtures(now) {
     ],
   };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap, null, 2)).toString("base64") };
-  // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 다음 배포까지 3/10.
-  // 커밋 메시지의 PR 번호(#98 = done run #10 의 finalPr) → #10 은 배포 대기, #9(finalPr 97) 는 배포됨.
+  // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 카드 머리 '배포 대기 3' (머지 커밋만 셈).
   const sha = (n) => `${n}`.padStart(40, "0");
   const compare = { status: "ahead", commits: [
     { sha: sha(1), parents: [{ sha: sha(90) }], commit: { message: "docs: 메모 정리" } },

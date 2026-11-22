@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LIFECYCLE, boardDeployCounts, boardNeedsUser, deployProgressText, flowEntries, ideaPosition, planPosition, runPosition, stageBoard, type BoardColumn, type BoardItem } from "./lifecycle";
+import { LIFECYCLE, TOTAL_PROCESS, boardNeedsUser, boardRemaining, columnRemaining, flowEntries, ideaPosition, itemProgress, planPosition, runPosition, stageBoard, stageRemaining, totalRemaining, type BoardColumn, type BoardItem } from "./lifecycle";
 import type { Idea, OrchRun, PendingPlan, RunStep } from "./model";
 
 const EXPECTED: Record<number, [string, string[]]> = {
@@ -107,14 +107,7 @@ test("flowEntries: active runs, plans and ideas under review, ordered 5→1", ()
   assert.deepEqual(flowEntries({ runs: [], plans: [], ideas: [] }), []);
 });
 
-test("deployProgressText: min(pending, every)/every, hidden when unknown", () => {
-  assert.equal(deployProgressText(3, 10), "3/10");
-  assert.equal(deployProgressText(14, 10), "10/10");
-  assert.equal(deployProgressText(0, 5), "0/5");
-  assert.equal(deployProgressText(null, 10), null);
-});
-
-test("stageBoard: 5 columns, items placed by stage; done → 5 완료, cancelled and closed ideas left out", () => {
+test("stageBoard: 4 columns, items placed by stage; done, cancelled and closed ideas left out", () => {
   const b = stageBoard({
     runs: [
       run({ number: 1, status: "implementing", goal: "구현", updatedAt: "2026-01-01T00:00:00Z" }),
@@ -126,13 +119,12 @@ test("stageBoard: 5 columns, items placed by stage; done → 5 완료, cancelled
     ],
     plans: [plan(rv({ verdict: "OK" }))],
     ideas: [idea("collecting"), { ...idea("done"), number: 7 }, { ...idea("codex_pending"), number: 8, closed: true }],
-    pendingPrs: [],
   });
-  assert.deepEqual(b.map((c) => [c.n, c.title]), [[1, "검토"], [2, "계획"], [3, "개발"], [4, "통합"], [5, "완료"]]);
+  assert.deepEqual(b.map((c) => [c.n, c.title]), [[1, "검토"], [2, "계획"], [3, "개발"], [4, "통합"]]);
   const keys = b.map((c) => c.items.map((i) => i.key).sort());
-  assert.deepEqual(keys, [["idea-3", "idea-7"], ["plan-2", "run-6"], ["run-1", "run-5"], ["run-2"], ["run-3"]]);
+  assert.deepEqual(keys, [["idea-3", "idea-7"], ["plan-2", "run-6"], ["run-1", "run-5"], ["run-2"]]);
   const all = b.flatMap((c) => c.items);
-  assert.ok(!all.some((i) => i.key === "run-4" || i.key === "idea-8"));
+  assert.ok(!all.some((i) => i.key === "run-3" || i.key === "run-4" || i.key === "idea-8"));
   const blocked = all.find((i) => i.key === "run-5")!;
   assert.equal(blocked.blocked, true);
   assert.equal(blocked.sub, "3.12");
@@ -143,49 +135,28 @@ test("stageBoard: 5 columns, items placed by stage; done → 5 완료, cancelled
   assert.deepEqual([p.kind, p.title, p.sub, p.label], ["plan", "g", "2.8", "승인 대기"]);
   const i3 = all.find((i) => i.key === "idea-3")!;
   assert.deepEqual([i3.kind, i3.title, i3.sub, i3.label], ["idea", "t", "1.3", "의견 수집 중"]);
-  const done = b[4].items[0];
-  assert.deepEqual([done.label, done.deployed, done.run?.number], ["완료", true, 3]);
-  assert.deepEqual(stageBoard({ runs: [], plans: [], ideas: [], pendingPrs: null }).map((c) => c.items.length), [0, 0, 0, 0, 0]);
+  assert.deepEqual(stageBoard({ runs: [], plans: [], ideas: [] }).map((c) => c.items.length), [0, 0, 0, 0]);
 });
 
-test("stageBoard: done run deploy state from pendingPrs (no time comparison)", () => {
-  const done = (number: number, finalPr: number | null) => run({ number, status: "done", finalPr, updatedAt: "2099-01-01T00:00:00Z" });
-  const runs = [done(1, 10), done(2, 20), done(3, null)];
-  const state = (pendingPrs: number[] | null) =>
-    Object.fromEntries(stageBoard({ runs, plans: [], ideas: [], pendingPrs })[4].items.map((i) => [i.key, i.deployed]));
-  assert.deepEqual(state([10]), { "run-1": false, "run-2": true, "run-3": null });
-  assert.deepEqual(state([]), { "run-1": true, "run-2": true, "run-3": null });
-  assert.deepEqual(state(null), { "run-1": null, "run-2": null, "run-3": null });
-});
-
-test("stageBoard: columns newest first (null last); column 5 orders 배포 대기 → 배포됨 → 알 수 없음", () => {
+test("stageBoard: columns newest first (null last)", () => {
   const b = stageBoard({
     runs: [
       run({ number: 1, status: "implementing", updatedAt: "2026-01-01T00:00:00Z" }),
       run({ number: 2, status: "reviewing", updatedAt: null }),
       run({ number: 3, status: "fixing", updatedAt: "2026-03-01T00:00:00Z" }),
-      run({ number: 10, status: "done", finalPr: 100, updatedAt: "2026-05-01T00:00:00Z" }), // deployed, newer
-      run({ number: 11, status: "done", finalPr: 110, updatedAt: "2026-01-01T00:00:00Z" }), // pending, older
-      run({ number: 12, status: "done", finalPr: null, updatedAt: "2026-06-01T00:00:00Z" }), // unknown, newest
-      run({ number: 13, status: "done", finalPr: 130, updatedAt: "2026-02-01T00:00:00Z" }), // pending, newer
-      run({ number: 14, status: "done", finalPr: 140, updatedAt: "2026-04-01T00:00:00Z" }), // deployed, older
     ],
     plans: [],
     ideas: [
       { ...idea("collecting"), number: 20, createdAt: "2026-01-01T00:00:00Z" },
       { ...idea("done"), number: 21, createdAt: "2026-01-01T00:00:00Z", review: { at: "2026-02-01T00:00:00Z" } as Idea["review"] },
     ],
-    pendingPrs: [110, 130],
   });
   assert.deepEqual(b[2].items.map((i) => i.key), ["run-3", "run-1", "run-2"]);
   assert.deepEqual(b[0].items.map((i) => i.key), ["idea-21", "idea-20"]);
-  assert.deepEqual(b[4].items.map((i) => [i.key, i.deployed]), [
-    ["run-13", false], ["run-11", false], ["run-10", true], ["run-14", true], ["run-12", null],
-  ]);
 });
 
-const col = (n: 1 | 2 | 3 | 4 | 5, items: Partial<BoardItem>[]): BoardColumn => ({
-  n, title: (["검토", "계획", "개발", "통합", "완료"] as const)[n - 1],
+const col = (n: 1 | 2 | 3 | 4, items: Partial<BoardItem>[]): BoardColumn => ({
+  n, title: (["검토", "계획", "개발", "통합"] as const)[n - 1],
   items: items.map((x, i) => ({ kind: "run", key: `k${i}`, title: "t", url: "u", sub: "1.1", label: "", at: null, ...x })),
 });
 
@@ -195,7 +166,46 @@ test("boardNeedsUser: counts run items that need the user", () => {
   assert.equal(boardNeedsUser(col(4, [{}, { run: run({ needsUser: true }) }, { run: run({ needsUser: true, number: 2 }) }])), 2);
 });
 
-test("boardDeployCounts: 배포 대기 / 배포됨, unknown counted in neither", () => {
-  assert.deepEqual(boardDeployCounts(col(5, [{ deployed: false }, { deployed: true }, { deployed: true }, { deployed: null }, {}])), { pending: 1, deployed: 2 });
-  assert.deepEqual(boardDeployCounts(col(5, [])), { pending: 0, deployed: 0 });
+test("stageRemaining: stage sub count − K; stage 5 / bad id → null", () => {
+  assert.equal(stageRemaining("3.10"), 6);
+  assert.equal(stageRemaining("1.3"), 3);
+  assert.equal(stageRemaining("2.9"), 0);
+  assert.equal(stageRemaining("4.8"), 0);
+  assert.equal(stageRemaining("5.1"), null);
+  assert.equal(stageRemaining("x"), null);
+  assert.equal(stageRemaining("3.17"), null);
+  assert.equal(stageRemaining("3.0"), null);
+});
+
+test("totalRemaining: run / plan = stage remainder + later stages up to 4; idea = stage 1 remainder only", () => {
+  assert.equal(TOTAL_PROCESS, 39);
+  assert.equal(totalRemaining("run", "3.10"), 14);
+  assert.equal(TOTAL_PROCESS - totalRemaining("run", "3.10")!, 25);
+  assert.equal(totalRemaining("plan", "2.8"), 1 + 16 + 8);
+  assert.equal(totalRemaining("run", "4.7"), 1);
+  assert.equal(totalRemaining("idea", "1.3"), 3);
+  assert.equal(totalRemaining("run", "1.3"), 3 + 9 + 16 + 8);
+  assert.equal(totalRemaining("run", "bad"), null);
+});
+
+test("itemProgress: 3.10 → 25 done, 14 left (개발 6 · 통합 8), bar fills 6/9/10/0 of 6/9/16/8", () => {
+  const p = itemProgress("3.10")!;
+  assert.deepEqual([p.total, p.done, p.remaining, p.stageRemaining, p.title], [39, 25, 14, 6, "독립 검수"]);
+  assert.deepEqual(p.parts.map((x) => [x.n, x.title, x.count, x.done]), [[1, "검토", 6, 6], [2, "계획", 9, 9], [3, "개발", 16, 10], [4, "통합", 8, 0]]);
+  assert.deepEqual(p.left, [{ title: "개발", n: 6 }, { title: "통합", n: 8 }]);
+  // 2.9 시작 대기: 계획 안 남은 0 은 꼬리에서 뺀다
+  assert.deepEqual(itemProgress("2.9")!.left.map((x) => x.title), ["개발", "통합"]);
+  assert.equal(itemProgress("5.2"), null);
+});
+
+test("columnRemaining: largest stage remainder in the column; no items → null", () => {
+  assert.equal(columnRemaining(col(3, [])), null);
+  assert.equal(columnRemaining(col(3, [{ sub: "3.10" }, { sub: "3.7" }])), 9);
+  assert.equal(columnRemaining(col(1, [{ kind: "idea", sub: "1.3" }, { kind: "idea", sub: "1.5" }])), 3);
+});
+
+test("boardRemaining: sum of every item's total remainder; no items → null", () => {
+  const b = stageBoard({ runs: [run({ number: 1, status: "reviewing" }), run({ number: 2, status: "awaiting_merge" })], plans: [plan(rv({ verdict: "OK" }))], ideas: [idea("collecting")] });
+  assert.equal(boardRemaining(b), 14 + 1 + 25 + 3);
+  assert.equal(boardRemaining(stageBoard({ runs: [run({ status: "done" })], plans: [], ideas: [] })), null);
 });

@@ -5,12 +5,12 @@ import { useRef, useState } from "react";
 import { Card } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
-import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
+import { formatKst, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
-import { AlertIcon, CheckIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
+import { AlertIcon, ArrowRightIcon, CheckIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
 import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
-import { LIFECYCLE, boardDeployCounts, boardNeedsUser, deployProgressText, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
+import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
 
@@ -57,7 +57,6 @@ function RunCard({ r }: { r: OrchRun }) {
   );
 }
 
-const isEnded = (r: OrchRun) => r.status === "done" || r.status === "cancelled";
 const SUMMARY = "flex min-h-11 cursor-pointer items-center gap-2 py-2";
 
 function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
@@ -82,7 +81,7 @@ function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
   );
 }
 
-/** Run details (stage ③ row body): status, step progress, next action, steps → checks. */
+/** Run details (item card '스텝 보기'): status, step progress, next action, steps → checks. */
 function RunDetails({ r }: { r: OrchRun }) {
   const showNow = !!r.step && !["done", "awaiting_merge", "finalizing"].includes(r.status) && r.steps.some((s) => s.state === "current");
   const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${showNow ? ` · 지금 ${r.step}번` : ""}`;
@@ -110,21 +109,12 @@ function RunDetails({ r }: { r: OrchRun }) {
 
 const ROADMAP_ICON: Record<RoadmapStatus, [StateKind, string]> = { done: ["done", "완료"], doing: ["doing", "진행 중"], todo: ["todo", "할 일"], na: ["na", "해당 없음"] };
 
-/** Stage 0 (인프라) / 6 (확장) checklist row: '0 인프라 완료/전체' + small bar, expands to one line per item. */
-function RoadmapRow({ n, title, items, testid }: { n: 0 | 6; title: string; items: RoadmapItem[]; testid: string }) {
-  const c = roadmapCount(items);
-  const allDone = c.total > 0 && c.done === c.total;
-  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+/** Roadmap checklist (펼친 '인프라 · 확장' 줄 안): one line per item. */
+function RoadmapList({ title, items, testid }: { title: string; items: RoadmapItem[]; testid: string }) {
   return (
-    <details className="rounded-lg border border-border px-2" data-testid={testid}>
-      <summary className={`${SUMMARY} text-sm`}>
-        <span className="font-semibold">{n} {title}</span>
-        {allDone && n === 0 ? <span className="inline-flex items-center gap-1 text-xs text-ok"><StateIcon kind="done" className="h-3.5 w-3.5" />인프라 완료</span> : <span className="inline-flex items-center gap-1 text-xs text-text-muted">{n === 0 && <StateIcon kind="done" className="h-3.5 w-3.5" />}{c.text}</span>}
-        <span className="ml-auto block h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-border" role="progressbar" aria-label={`${title} 완료 항목`} aria-valuemin={0} aria-valuemax={c.total} aria-valuenow={c.done}>
-          <span className="block h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
-        </span>
-      </summary>
-      <ul className="space-y-1 pb-2 text-xs">
+    <div className="pt-1" data-testid={testid}>
+      <p className="text-xs font-semibold">{title} <span className="font-normal tabular-nums text-text-muted">{roadmapCount(items).text}</span></p>
+      <ul className="space-y-1 py-1 text-xs">
         {items.map((i) => (
           <li key={i.id} className="min-w-0">
             <p className="flex gap-1.5">
@@ -136,141 +126,185 @@ function RoadmapRow({ n, title, items, testid }: { n: 0 | 6; title: string; item
         ))}
         {!items.length && <li className="text-text-muted">항목 없음</li>}
       </ul>
-    </details>
-  );
-}
-
-const DEPLOY_TEXT = (d: boolean | null | undefined) => (d === true ? "배포됨" : d === false ? "배포 대기" : "배포 확인 불가");
-
-/** One stage-board item line: '세부 id 상태 · 제목', or for 5 완료 '날짜 · 배포됨/배포 대기 · 제목'. */
-function ItemLine({ item, done }: { item: BoardItem; done: boolean }) {
-  return (
-    <span className="block min-w-0 break-words text-xs">
-      {item.blocked && <StopIcon className="mr-1 h-3.5 w-3.5 align-text-bottom text-danger" />}
-      {done ? (
-        <>
-          <span className="tabular-nums text-text-muted">{formatKstShort(item.at, "날짜 없음")}</span>
-          {" · "}
-          <span className={item.deployed === false ? "text-warn" : item.deployed === true ? "text-ok" : "text-text-muted"}>{DEPLOY_TEXT(item.deployed)}</span>
-        </>
-      ) : (
-        <><span className="tabular-nums text-text-muted">{item.sub}</span> <span className={item.blocked ? "text-danger" : undefined}>{item.label}</span></>
-      )}
-      {" · "}<span className="font-medium">{item.title}</span>
-    </span>
-  );
-}
-
-/** One item in a stage row: a run expands to its steps (RunDetails); a plan / idea shows its '#번호' Issue link. */
-function BoardRow({ item, repo, done }: { item: BoardItem; repo: string; done: boolean }) {
-  const r = item.run;
-  if (item.kind === "run" && r) {
-    return (
-      <details className={`rounded-lg border px-2 ${tone(r)}`} data-testid={`orch-run-${short(repo)}-${r.number}`}>
-        <summary className="flex min-h-11 cursor-pointer flex-col justify-center py-1.5">
-          <ItemLine item={item} done={done} />
-          {r.needsUser && <span className="mt-1 inline-block self-start rounded-full bg-warn/15 px-2 py-0.5 text-[11px] text-warn">사용자 확인 필요</span>}
-        </summary>
-        <RunDetails r={r} />
-      </details>
-    );
-  }
-  const number = Number(item.key.split("-")[1]);
-  return (
-    <div className="flex min-h-11 items-center gap-2 rounded-lg border border-border px-2" data-testid={`orch-${item.kind}-${short(repo)}-${number}`}>
-      <span className="min-w-0 flex-1 py-1.5"><ItemLine item={item} done={done} /></span>
-      <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 shrink-0 items-center text-xs text-accent underline">#{number}</a>
     </div>
   );
 }
 
-const DONE_FIRST = 5;
-
-/** The stage's full process (LIFECYCLE subs); subs where an item sits now are highlighted. */
-function StageProcess({ n, at }: { n: number; at: Set<string> }) {
-  const step = LIFECYCLE[n - 1];
+/** '인프라 a/b ─── 확장 c/d' 한 줄 (막대 = 인프라 완료 비율). 펼치면 두 체크리스트. */
+function RoadmapLine({ setup, expansion }: { setup: RoadmapItem[]; expansion: RoadmapItem[] }) {
+  const s = roadmapCount(setup);
+  const e = roadmapCount(expansion);
+  const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
   return (
-    <ol className="flex flex-wrap gap-1 text-[11px]" aria-label={`${step.title} 세부 과정`} data-testid={`orch-stage-process-${n}`}>
-      {step.sub.map((x) => (
-        <li key={x.id} className={`rounded px-1.5 py-0.5 ${at.has(x.id) ? "bg-accent-dim text-accent font-semibold" : "bg-bg text-text-muted"}`}>
-          <span className="tabular-nums text-text-muted">{x.id}</span> {x.title}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/** One stage row ('N 제목 · 설명 · 개수'), collapsed by default (card height limit); opening it shows the stage's process, then its items. */
-function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: string | null }) {
-  const done = c.n === 5;
-  const needs = boardNeedsUser(c);
-  const counts = done ? boardDeployCounts(c) : null;
-  const first = done ? c.items.slice(0, DONE_FIRST) : c.items;
-  const rest = done ? c.items.slice(DONE_FIRST) : [];
-  const empty = c.items.length === 0;
-  const at = new Set(done ? [] : c.items.map((i) => i.sub));
-  return (
-    <details className="rounded-lg border border-border px-2" data-testid={`orch-stage-${c.n}`}>
-      <summary className={`${SUMMARY} text-sm`}>
-        <span className="flex min-w-0 flex-col">
-          <span className="flex items-center gap-2">
-            <span className="font-semibold">{c.n} {c.title}</span>
-            {needs > 0 && <span className="shrink-0 rounded-full bg-warn/15 px-2 py-0.5 text-[11px] text-warn">확인 필요 {needs}</span>}
-            {counts && <span className="min-w-0 truncate text-[11px] text-text-muted" data-testid="orch-stage-deploy">배포 대기 {counts.pending} · 배포됨 {counts.deployed}</span>}
-          </span>
-          <span className="text-[11px] text-text-muted">{LIFECYCLE[c.n - 1].desc}</span>
-        </span>
-        <span className={`ml-auto shrink-0 tabular-nums ${empty ? "text-text-faint" : ""}`}><span className="sr-only"> · </span>{c.items.length}</span>
+    <details className="mt-2" data-testid="orch-roadmap">
+      <summary className="flex min-h-11 cursor-pointer items-center gap-2.5 text-[13px] text-text-muted">
+        <span className="shrink-0 tabular-nums"><b className="font-semibold text-text">인프라</b> {s.text}</span>{" "}
+        <span className="block h-1 flex-1 overflow-hidden rounded-sm bg-border" role="progressbar" aria-label="인프라 완료 항목" aria-valuemin={0} aria-valuemax={s.total} aria-valuenow={s.done}>
+          <span className="block h-full bg-text" style={{ width: `${pct}%` }} />
+        </span>{" "}
+        <span className="shrink-0 tabular-nums"><b className="font-semibold text-text">확장</b> {e.text}</span>
       </summary>
-      <div className="space-y-1.5 pb-2">
-        <StageProcess n={c.n} at={at} />
-        {done && deploy && <p className="text-[11px] text-text-muted" data-testid="orch-deploy">다음 배포까지 {deploy}</p>}
-        {first.map((item) => <BoardRow key={item.key} item={item} repo={repo} done={done} />)}
-        {rest.length > 0 && (
-          <details data-testid="orch-stage-more">
-            <summary className={`${SUMMARY} text-xs text-text-muted`}>더보기 ({rest.length})</summary>
-            <div className="space-y-1.5">{rest.map((item) => <BoardRow key={item.key} item={item} repo={repo} done={done} />)}</div>
-          </details>
-        )}
-        {empty && <p className="text-xs text-text-muted">지금 이 단계에 있는 작업 없음</p>}
+      <div className="pb-2">
+        <RoadmapList title="인프라" items={setup} testid="orch-roadmap-setup" />
+        <RoadmapList title="확장" items={expansion} testid="orch-roadmap-expansion" />
       </div>
     </details>
   );
 }
 
+const itemNumber = (item: BoardItem) => item.run?.number ?? Number(item.key.split("-")[1]);
+const subTitle = (sub: string) => LIFECYCLE.flatMap((s) => s.sub).find((x) => x.id === sub)?.title ?? "";
+const subK = (sub: string) => Number(sub.split(".")[1] ?? 0);
+
+/**
+ * One item in an open stage row (연한 파랑 카드): '#번호 제목' + 열기, '지금 S.K 세부이름 · Step k/N'.
+ * A run also shows the whole-flow bar (검토·계획·개발·통합 = 6:9:16:8), '전체 39과정 중 …' and its steps (RunDetails).
+ */
+function ItemCard({ item, repo }: { item: BoardItem; repo: string }) {
+  const r = item.run;
+  const number = itemNumber(item);
+  const step = r && typeof r.step === "number" && r.step > 0 ? `Step ${r.step}/${r.total}` : null;
+  const now = [`지금 ${item.sub} ${subTitle(item.sub)}`, r ? step : item.label].filter(Boolean).join(" · ");
+  const prog = r ? itemProgress(item.sub) : null;
+  const testid = r ? `orch-run-${short(repo)}-${r.number}` : `orch-${item.kind}-${short(repo)}-${number}`;
+  return (
+    <div className="ml-[22px] mt-2.5 rounded-xl bg-accent-dim px-3.5 py-3 text-sm" data-testid={testid}>
+      <div className="flex items-start justify-between gap-2">
+        <b className="min-w-0 break-words font-semibold">#{number} {item.title}</b>
+        <a href={item.url} target="_blank" rel="noreferrer" className="-my-3 inline-flex min-h-11 shrink-0 items-center text-[13px] font-semibold text-accent">열기</a>
+      </div>
+      <p className="mt-[3px] text-xs tabular-nums text-text-muted">{now}</p>
+      {(r?.needsUser || item.blocked) && (
+        <p className="mt-1.5 flex flex-wrap gap-1.5">
+          {r?.needsUser && <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">사용자 확인 필요</span>}
+          {item.blocked && <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger"><StopIcon className="h-3 w-3" />멈춤</span>}
+        </p>
+      )}
+      {prog && (
+        <>
+          <div className="mt-2.5 grid gap-[3px]" style={{ gridTemplateColumns: prog.parts.map((p) => `${p.count}fr`).join(" ") }}
+            role="progressbar" aria-label="전체 과정" aria-valuemin={0} aria-valuemax={prog.total} aria-valuenow={prog.done}>
+            {prog.parts.map((p) => (
+              <span key={p.n} className="block h-1.5 overflow-hidden rounded-[3px] bg-[#D5DEEE]">
+                <span className="block h-full bg-accent" style={{ width: `${Math.round((p.done / p.count) * 100)}%` }} />
+              </span>
+            ))}
+          </div>
+          <div className="mt-[3px] grid gap-[3px] text-[10.5px] text-text-muted" style={{ gridTemplateColumns: prog.parts.map((p) => `${p.count}fr`).join(" ") }} aria-hidden="true">
+            {prog.parts.map((p) => <span key={p.n}>{p.title}</span>)}
+          </div>
+          <p className="mt-[3px] text-xs font-semibold tabular-nums" data-testid="orch-item-total">
+            전체 {prog.total}과정 중 {prog.done} 완료 · 남은 {prog.remaining}{prog.left.length ? ` (${prog.left.map((x) => `${x.title} ${x.n}`).join(" · ")})` : ""}
+          </p>
+        </>
+      )}
+      {r && (
+        <details className="mt-1" data-testid={`orch-run-steps-${short(repo)}-${r.number}`}>
+          <summary className={`${SUMMARY} text-xs font-semibold text-accent`}>스텝 보기</summary>
+          <RunDetails r={r} />
+        </details>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The stage's process (LIFECYCLE subs, 2 columns): subs every item has passed = filled dot, where an item sits now =
+ * bold + '#번호' tag, the rest = hollow dot and muted text.
+ */
+function StageProcess({ c }: { c: BoardColumn }) {
+  const step = LIFECYCLE[c.n - 1];
+  const at = new Map<string, number[]>();
+  for (const i of c.items) at.set(i.sub, [...(at.get(i.sub) ?? []), itemNumber(i)]);
+  const passed = c.items.length ? Math.min(...c.items.map((i) => subK(i.sub))) : 0;
+  return (
+    <ol className="ml-[22px] mt-2.5 grid grid-flow-col grid-cols-2 gap-x-2.5" style={{ gridTemplateRows: `repeat(${Math.ceil(step.sub.length / 2)}, auto)` }}
+      aria-label={`${step.title} 세부 과정`} data-testid={`orch-stage-process-${c.n}`}>
+      {step.sub.map((x) => {
+        const here = at.get(x.id);
+        const done = !here && subK(x.id) < passed;
+        return (
+          <li key={x.id} className={`relative py-[3px] pl-3.5 text-[12.5px] ${here ? "font-bold text-text" : done ? "text-text" : "text-text-muted"}`}>
+            <span aria-hidden="true" className={`absolute left-0 top-2 h-2 w-2 rounded-full border-2 border-accent ${here || done ? "bg-accent" : "bg-bg-card"}`} />
+            <span className="text-[10.5px] font-normal tabular-nums text-text-muted">{x.id}</span> {x.title}
+            {here?.map((n) => <span key={n} className="ml-[3px] rounded-md bg-accent px-[5px] py-px text-[10.5px] text-white">#{n}</span>)}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** One stage row ('번호 단계 · #번호 상태 · 개수'), collapsed by default (card height limit); opening it shows desc, process, items. */
+function StageRow({ c, repo }: { c: BoardColumn; repo: string }) {
+  const needs = boardNeedsUser(c);
+  const empty = c.items.length === 0;
+  const note = empty ? "지금 없음" : `${c.items.map((i) => `#${itemNumber(i)}`).join(" · ")} ${c.items[0].label}`;
+  return (
+    <details className="group border-t border-border" data-testid={`orch-stage-${c.n}`}>
+      <summary className="flex min-h-11 cursor-pointer items-baseline gap-2 py-[13px] text-[15px]">
+        <span className="w-3.5 shrink-0 text-[13px] font-semibold tabular-nums text-text-muted">{c.n}</span>{" "}
+        <b className="shrink-0 font-bold">{c.title}</b>{" "}
+        <small className="min-w-0 truncate text-xs text-text-muted group-open:hidden">{note}</small>{" "}
+        {needs > 0 && <span className="shrink-0 self-center rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn">확인 필요 {needs}</span>}
+        <span className={`ml-auto shrink-0 tabular-nums ${empty ? "font-medium text-text-faint" : "font-bold"}`}><span className="sr-only"> · </span>{c.items.length}</span>
+      </summary>
+      <div className="pb-3">
+        <p className="ml-[22px] text-xs text-text-muted">{LIFECYCLE[c.n - 1].desc}</p>
+        <StageProcess c={c} />
+        {c.items.map((item) => <ItemCard key={item.key} item={item} repo={repo} />)}
+      </div>
+    </details>
+  );
+}
+
+/** Stage cell: big '남은 과정' (largest among its items) + small '/세부 개수'; no items → '–'. 0 and '–' are gray. */
+function StageCell({ c }: { c: BoardColumn }) {
+  const n = columnRemaining(c);
+  return (
+    <div className="rounded-xl bg-bg px-2 py-2.5" data-testid={`orch-cell-${c.n}`}>
+      <span className="block text-xs text-text-muted">{c.title}</span>
+      <b className={`text-xl font-bold tabular-nums ${n ? "text-text" : "text-text-faint"}`}>
+        {n ?? "–"}{n !== null && <small className="ml-0.5 text-[13px] font-medium text-text-faint">/{LIFECYCLE[c.n - 1].sub.length}</small>}
+      </b>
+    </div>
+  );
+}
+
 function ProjectCard({ v }: { v: RepoView }) {
-  const active = v.runs.filter((r) => !isEnded(r));
-  const needs = v.runs.filter((r) => r.needsUser).length;
-  const board = stageBoard({ runs: v.runs, plans: v.plans ?? [], ideas: v.ideas ?? [], pendingPrs: v.pendingPrs ?? null });
-  const deploy = deployProgressText(v.deployPending ?? null, v.deployEvery ?? 10);
+  const board = stageBoard({ runs: v.runs, plans: v.plans ?? [], ideas: v.ideas ?? [] });
+  const left = boardRemaining(board);
   const roadmapNote = v.roadmapError ? `로드맵 읽기 실패 · ${v.roadmapError}` : !v.roadmap ? "로드맵 없음(docs/roadmap.json)" : null;
   return (
     <Card>
-      <details open data-testid={`orch-project-${short(v.repo)}`}>
-        <summary className={`${SUMMARY} flex-wrap`}>
-          <span className="font-semibold">{short(v.repo)}</span>
-          <span className="text-xs text-text-muted">진행 중 {active.length}개</span>
-          {needs > 0 && <span className="rounded-full bg-warn/20 px-2 py-0.5 text-xs">확인 필요 {needs}개</span>}
-        </summary>
-        <div className="space-y-2 pb-1">
-          {roadmapNote ? <p className={`text-xs ${v.roadmapError ? "text-danger" : "text-text-muted"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
-            : <RoadmapRow n={0} title="인프라" items={v.roadmap!.setup} testid="orch-roadmap-setup" />}
-          <section aria-label="작업 흐름" className="space-y-1.5" data-testid="orch-flow">
-            <h3 className="text-sm font-semibold">작업 흐름</h3>
-            {v.runsError && <p className="text-xs text-danger">작업 불러오기 실패 · {v.runsError}</p>}
-            {v.plansError && <p className="text-xs text-danger">계획 불러오기 실패 · {v.plansError}</p>}
-            {v.ideasError && <p className="text-xs text-danger">아이디어 불러오기 실패 · {v.ideasError}</p>}
-            {board.map((c) => <StageRow key={c.n} c={c} repo={v.repo} deploy={deploy} />)}
-          </section>
-          {!roadmapNote && <RoadmapRow n={6} title="확장" items={v.roadmap!.expansion} testid="orch-roadmap-expansion" />}
-          <p className="text-xs"><Link href="/patch-notes" className="inline-flex min-h-11 items-center text-accent underline">작업 기록은 패치노트 탭</Link></p>
+      <section aria-label={`${short(v.repo)} 작업`} data-testid={`orch-project-${short(v.repo)}`}>
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="min-w-0 truncate text-lg font-bold tracking-[-0.02em]">{short(v.repo)}</h3>
+          <span className="shrink-0 text-xs tabular-nums text-text-muted" data-testid="orch-deploy-pending">
+            배포 대기 {v.deployPending ?? "?"} ·{" "}
+            <Link href="/patch-notes" className="-my-3 inline-flex min-h-11 items-center gap-0.5 text-accent">완료 기록<ArrowRightIcon className="h-3 w-3" /></Link>
+          </span>
         </div>
-      </details>
+        <p className="mt-3 text-[13px] tabular-nums text-text-muted" data-testid="orch-remaining">
+          {left === null ? "남은 할 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
+        </p>
+        <div className="mt-2 grid grid-cols-4 gap-1.5">
+          {board.map((c) => <StageCell key={c.n} c={c} />)}
+        </div>
+        {roadmapNote ? <p className={`mt-3 text-xs ${v.roadmapError ? "text-danger" : "text-text-muted"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
+          : <RoadmapLine setup={v.roadmap!.setup} expansion={v.roadmap!.expansion} />}
+        <section aria-label="작업 흐름" className="mt-2" data-testid="orch-flow">
+          {v.runsError && <p className="pb-1 text-xs text-danger">작업 불러오기 실패 · {v.runsError}</p>}
+          {v.plansError && <p className="pb-1 text-xs text-danger">계획 불러오기 실패 · {v.plansError}</p>}
+          {v.ideasError && <p className="pb-1 text-xs text-danger">아이디어 불러오기 실패 · {v.ideasError}</p>}
+          {board.map((c) => <StageRow key={c.n} c={c} repo={v.repo} />)}
+        </section>
+      </section>
     </Card>
   );
 }
 
-/** 프로젝트 탭: 프로젝트마다 0 인프라 · 작업 흐름(1~5) · 6 확장, 모두 접고 펼 수 있음. */
+/** 프로젝트 탭: 프로젝트마다 남은 할 일 · 4칸(검토·계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 4개(접고 펼 수 있음). */
 export function OrchRunsPanel() {
   const { state, reload, error } = useOrch();
   const latest = useRef({ state, error }); latest.current = { state, error };
