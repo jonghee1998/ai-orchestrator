@@ -140,11 +140,11 @@ try {
       if (!head.startsWith("배포 대기 3 · 완료 기록")) problems.push(`[projects] 카드 머리가 '배포 대기 3 · 완료 기록' 이 아님 (${head})`);
       const doneLink = card.getByRole("link", { name: "완료 기록" });
       if (!(await doneLink.isVisible()) || !/\/patch-notes$/.test((await doneLink.getAttribute("href")) ?? "")) problems.push("[projects] '완료 기록' 이 /patch-notes 로 가는 링크가 아님");
-      // 남은 할 일 (fixtures): 아이디어 #22 1.3→3 + #21 1.5→1, 계획 #13 2.8→1+16+8=25, #11 3.7→9+8=17, #12 4.7→1 = 47
+      // 남은 할 일 (fixtures, 지금 과정도 남은 것으로 셈): 아이디어 #22 1.3→4 + #21 1.5→2, 계획 #13 2.8→2+16+8=26, #11 3.7→10+8=18, #12 4.7→2 = 52
       const remain = await flat(card.getByTestId("orch-remaining"));
-      if (remain !== "남은 할 일 47과정 · 단계별") problems.push(`[projects] '남은 할 일 47과정 · 단계별' 이 아님 (${remain})`);
+      if (remain !== "남은 할 일 52과정 · 단계별") problems.push(`[projects] '남은 할 일 52과정 · 단계별' 이 아님 (${remain})`);
       // 4칸: 단계 안 남은 과정(여럿이면 가장 많이 남은 값)/단계 세부 개수
-      const CELLS = [[1, "검토3/6"], [2, "계획1/9"], [3, "개발9/16"], [4, "통합1/8"]];
+      const CELLS = [[1, "검토4/6"], [2, "계획2/9"], [3, "개발10/16"], [4, "통합2/8"]];
       for (const [n, want] of CELLS) {
         const got = (await flat(card.getByTestId(`orch-cell-${n}`))).replace(/ /g, "");
         if (got !== want) problems.push(`[projects] ${n}번 칸이 '${want}' 이 아님 (${got})`);
@@ -170,8 +170,8 @@ try {
       }
       // 작업 카드 (줄은 접혀 있으므로 textContent): '지금 S.K 세부이름 · Step k/N' 과 '전체 39과정 중 x 완료 · 남은 y (…)'
       const RUNS = [
-        [3, 11, "#11 상황판 시험 작업", "지금 3.7 구현 · Step 2/3", "전체 39과정 중 22 완료 · 남은 17 (개발 9 · 통합 8)"],
-        [4, 12, "#12 승인 대기 시험 작업", "지금 4.7 반영·승인 · Step 2/2", "전체 39과정 중 38 완료 · 남은 1 (통합 1)"],
+        [3, 11, "#11 상황판 시험 작업", "지금 3.7 구현 · Step 2/3", "전체 39과정 중 21 완료 · 남은 18 (개발 10 · 통합 8)"],
+        [4, 12, "#12 승인 대기 시험 작업", "지금 4.7 반영·승인 · Step 2/2", "전체 39과정 중 37 완료 · 남은 2 (통합 2)"],
       ];
       for (const [n, num, title, now, total] of RUNS) {
         const item = page.getByTestId(`orch-stage-${n}`).getByTestId(`orch-run-orch-screens-${num}`);
@@ -247,7 +247,7 @@ try {
       const proc3 = page.getByTestId("orch-stage-process-3").locator("li");
       if ((await proc3.count()) !== 16) problems.push(`[projects] 3 개발 세부 과정이 16개가 아님 (${await proc3.count()})`);
       if (!/font-bold/.test((await proc3.nth(6).getAttribute("class")) ?? "") || !((await proc3.nth(6).textContent()) ?? "").includes("#11")) problems.push("[projects] 3 개발 세부 과정에서 지금 위치(3.7 구현)가 굵게+'#11' 로 표시되지 않음");
-      if (!(await page.getByText("전체 39과정 중 22 완료").first().isVisible())) problems.push("[projects] 3 개발을 펼쳐도 #11 작업 카드의 '전체 39과정 중' 이 안 보임");
+      if (!(await page.getByText("전체 39과정 중 21 완료").first().isVisible())) problems.push("[projects] 3 개발을 펼쳐도 #11 작업 카드의 '전체 39과정 중' 이 안 보임");
       await expand(page.getByTestId("orch-stage-4").locator(":scope > summary"), "충돌 처리 후 main 반영", "'4 통합'");
       if (!(await page.getByTestId("orch-run-orch-screens-12").isVisible())) problems.push("[projects] 4 통합을 펼쳐도 #12 작업 카드가 안 보임");
       await expand(page.getByTestId("orch-run-steps-orch-screens-11").locator(":scope > summary"), "알파공정 2단계 확인항목", "#11 작업 카드의 '스텝 보기'");

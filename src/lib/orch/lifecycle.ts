@@ -218,21 +218,21 @@ function parseSub(sub: string): [LifecycleStep, number] | null {
   return step && k >= 1 && k <= step.sub.length ? [step, k] : null;
 }
 
-/** '단계 안 남은 과정' of a sub id: that stage's sub count − K (3.10 → 16−10 = 6). Stage 5 / bad id → null. */
+/** '단계 안 남은 과정' of a sub id: the current sub is not finished yet, so it counts — sub count − K + 1 (3.10 → 16−10+1 = 7, 1.3 → 4). Stage 5 / bad id → null. */
 export function stageRemaining(sub: string): number | null {
   const p = parseSub(sub);
-  return p ? p[0].sub.length - p[1] : null;
+  return p ? p[0].sub.length - p[1] + 1 : null;
 }
 
 /**
- * '전체 남은 과정'. Run / plan: the stage remainder + every later stage up to 4 (3.10 → 6 + 8 = 14).
+ * '전체 남은 과정'. Run / plan: the stage remainder (current sub included) + every later stage up to 4 (3.10 → 7 + 8 = 15).
  * Idea: development is not decided yet, so only the 1 검토 remainder counts. Bad id → null.
  */
 export function totalRemaining(kind: BoardItem["kind"], sub: string): number | null {
   const p = parseSub(sub);
   if (!p) return null;
   const [step, k] = p;
-  const here = step.sub.length - k;
+  const here = step.sub.length - k + 1;
   if (kind === "idea") return here;
   return here + COUNTED.filter((s) => s.n > step.n).reduce((n, s) => n + s.sub.length, 0);
 }
@@ -250,15 +250,15 @@ export interface ItemProgress {
   left: { title: string; n: number }[];
 }
 
-/** Whole-flow progress of a run / plan at a sub id (the current sub counts as done). Bad id / stage 5 → null. */
+/** Whole-flow progress of a run / plan at a sub id (the current sub is still in progress, so it is not done). Bad id / stage 5 → null. */
 export function itemProgress(sub: string): ItemProgress | null {
   const p = parseSub(sub);
   if (!p) return null;
   const [step, k] = p;
-  const parts = COUNTED.map((s) => ({ n: s.n, title: s.title, count: s.sub.length, done: s.n < step.n ? s.sub.length : s.n === step.n ? k : 0 }));
+  const parts = COUNTED.map((s) => ({ n: s.n, title: s.title, count: s.sub.length, done: s.n < step.n ? s.sub.length : s.n === step.n ? k - 1 : 0 }));
   const remaining = totalRemaining("run", sub)!;
   return {
-    total: TOTAL_PROCESS, done: TOTAL_PROCESS - remaining, remaining, stageRemaining: step.sub.length - k, title: step.sub[k - 1].title, parts,
+    total: TOTAL_PROCESS, done: TOTAL_PROCESS - remaining, remaining, stageRemaining: step.sub.length - k + 1, title: step.sub[k - 1].title, parts,
     left: parts.map((x) => ({ title: x.title, n: x.count - x.done })).filter((x) => x.n > 0),
   };
 }
