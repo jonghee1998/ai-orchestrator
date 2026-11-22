@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LIFECYCLE, deployProgressText, flowEntries, ideaPosition, planPosition, runPosition } from "./lifecycle";
+import { LIFECYCLE, deployProgressText, flowEntries, ideaPosition, planPosition, runPosition, stageBoard } from "./lifecycle";
 import type { Idea, OrchRun, PendingPlan, RunStep } from "./model";
 
 const EXPECTED: Record<number, [string, string[]]> = {
@@ -112,4 +112,74 @@ test("deployProgressText: min(pending, every)/every, hidden when unknown", () =>
   assert.equal(deployProgressText(14, 10), "10/10");
   assert.equal(deployProgressText(0, 5), "0/5");
   assert.equal(deployProgressText(null, 10), null);
+});
+
+test("stageBoard: 5 columns, items placed by stage; done → 5 완료, cancelled and closed ideas left out", () => {
+  const b = stageBoard({
+    runs: [
+      run({ number: 1, status: "implementing", goal: "구현", updatedAt: "2026-01-01T00:00:00Z" }),
+      run({ number: 2, status: "awaiting_merge", goal: "반영" }),
+      run({ number: 3, status: "done", goal: "끝", finalPr: 30 }),
+      run({ number: 4, status: "cancelled", goal: "취소" }),
+      run({ number: 5, status: "blocked", goal: "멈춤" }),
+      run({ number: 6, status: "waiting", goal: "대기" }),
+    ],
+    plans: [plan(rv({ verdict: "OK" }))],
+    ideas: [idea("collecting"), { ...idea("done"), number: 7 }, { ...idea("codex_pending"), number: 8, closed: true }],
+    pendingPrs: [],
+  });
+  assert.deepEqual(b.map((c) => [c.n, c.title]), [[1, "검토"], [2, "계획"], [3, "개발"], [4, "통합"], [5, "완료"]]);
+  const keys = b.map((c) => c.items.map((i) => i.key).sort());
+  assert.deepEqual(keys, [["idea-3", "idea-7"], ["plan-2", "run-6"], ["run-1", "run-5"], ["run-2"], ["run-3"]]);
+  const all = b.flatMap((c) => c.items);
+  assert.ok(!all.some((i) => i.key === "run-4" || i.key === "idea-8"));
+  const blocked = all.find((i) => i.key === "run-5")!;
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.sub, "3.12");
+  const r1 = all.find((i) => i.key === "run-1")!;
+  assert.equal(r1.blocked, undefined);
+  assert.deepEqual([r1.kind, r1.title, r1.sub, r1.label, r1.at, r1.run?.number], ["run", "구현", "3.7", "구현 중 · Step 2/3", "2026-01-01T00:00:00Z", 1]);
+  const p = all.find((i) => i.key === "plan-2")!;
+  assert.deepEqual([p.kind, p.title, p.sub, p.label], ["plan", "g", "2.8", "승인 대기"]);
+  const i3 = all.find((i) => i.key === "idea-3")!;
+  assert.deepEqual([i3.kind, i3.title, i3.sub, i3.label], ["idea", "t", "1.3", "의견 수집 중"]);
+  const done = b[4].items[0];
+  assert.deepEqual([done.label, done.deployed, done.run?.number], ["완료", true, 3]);
+  assert.deepEqual(stageBoard({ runs: [], plans: [], ideas: [], pendingPrs: null }).map((c) => c.items.length), [0, 0, 0, 0, 0]);
+});
+
+test("stageBoard: done run deploy state from pendingPrs (no time comparison)", () => {
+  const done = (number: number, finalPr: number | null) => run({ number, status: "done", finalPr, updatedAt: "2099-01-01T00:00:00Z" });
+  const runs = [done(1, 10), done(2, 20), done(3, null)];
+  const state = (pendingPrs: number[] | null) =>
+    Object.fromEntries(stageBoard({ runs, plans: [], ideas: [], pendingPrs })[4].items.map((i) => [i.key, i.deployed]));
+  assert.deepEqual(state([10]), { "run-1": false, "run-2": true, "run-3": null });
+  assert.deepEqual(state([]), { "run-1": true, "run-2": true, "run-3": null });
+  assert.deepEqual(state(null), { "run-1": null, "run-2": null, "run-3": null });
+});
+
+test("stageBoard: columns newest first (null last); column 5 orders 배포 대기 → 배포됨 → 알 수 없음", () => {
+  const b = stageBoard({
+    runs: [
+      run({ number: 1, status: "implementing", updatedAt: "2026-01-01T00:00:00Z" }),
+      run({ number: 2, status: "reviewing", updatedAt: null }),
+      run({ number: 3, status: "fixing", updatedAt: "2026-03-01T00:00:00Z" }),
+      run({ number: 10, status: "done", finalPr: 100, updatedAt: "2026-05-01T00:00:00Z" }), // deployed, newer
+      run({ number: 11, status: "done", finalPr: 110, updatedAt: "2026-01-01T00:00:00Z" }), // pending, older
+      run({ number: 12, status: "done", finalPr: null, updatedAt: "2026-06-01T00:00:00Z" }), // unknown, newest
+      run({ number: 13, status: "done", finalPr: 130, updatedAt: "2026-02-01T00:00:00Z" }), // pending, newer
+      run({ number: 14, status: "done", finalPr: 140, updatedAt: "2026-04-01T00:00:00Z" }), // deployed, older
+    ],
+    plans: [],
+    ideas: [
+      { ...idea("collecting"), number: 20, createdAt: "2026-01-01T00:00:00Z" },
+      { ...idea("done"), number: 21, createdAt: "2026-01-01T00:00:00Z", review: { at: "2026-02-01T00:00:00Z" } as Idea["review"] },
+    ],
+    pendingPrs: [110, 130],
+  });
+  assert.deepEqual(b[2].items.map((i) => i.key), ["run-3", "run-1", "run-2"]);
+  assert.deepEqual(b[0].items.map((i) => i.key), ["idea-21", "idea-20"]);
+  assert.deepEqual(b[4].items.map((i) => [i.key, i.deployed]), [
+    ["run-13", false], ["run-11", false], ["run-10", true], ["run-14", true], ["run-12", null],
+  ]);
 });
