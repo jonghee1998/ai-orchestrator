@@ -6,20 +6,46 @@ import type {
   TaskStatus,
 } from "@/lib/types";
 
+/** 탭 머리 (시안 header): 제목 22px 굵게 + 아래 12px 회색 한 줄(갱신 시각·부제), 오른쪽에 버튼(actions). */
 export function PageTitle({
   title,
   subtitle,
+  actions,
+  subtitleTestId,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
+  actions?: React.ReactNode;
+  subtitleTestId?: string;
 }) {
   return (
-    <header className="mb-4">
-      <h1 className="text-[22px] font-bold tracking-[-0.03em]">{title}</h1>
-      {subtitle && <p className="mt-1 text-sm text-text-muted">{subtitle}</p>}
+    <header className="mb-4 flex items-center justify-between gap-2 pt-1">
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-[750] tracking-[-0.03em]">{title}</h1>
+        {subtitle && <p className="mt-[3px] text-xs tabular-nums text-text-muted" data-testid={subtitleTestId}>{subtitle}</p>}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
     </header>
   );
 }
+
+/** 40px 정사각 아이콘 버튼 (흰 바탕·테두리). 누르는 영역은 바깥으로 2px 넓혀 44px. 이름은 aria-label. */
+export const ICON_BUTTON =
+  "relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-bg-card text-text after:absolute after:-inset-0.5 after:content-[''] disabled:opacity-50";
+/** 진한 바탕 흰 글자 버튼 (시안 'PM에게 말하기'). */
+export const PRIMARY_BUTTON =
+  "relative inline-flex h-10 items-center rounded-xl bg-text px-3.5 text-[13px] font-[650] text-white after:absolute after:-inset-0.5 after:content-[''] disabled:opacity-50";
+/** 흰 바탕 테두리 글자 버튼 (보조 동작). */
+export const BUTTON =
+  "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-border bg-bg-card px-3 text-[13px] font-semibold text-text disabled:opacity-50";
+/** 카드 제목 (시안 .ph h2 / 아이디어함 h4). */
+export const CARD_TITLE = "text-base font-[750] tracking-[-0.02em]";
+/** 카드 안 목록 한 줄: 위쪽 줄 구분선 하나. */
+export const ROW = "border-t border-border py-3";
+/** 결과 메시지 상자 (흰 카드 위·바탕 위 어디서든 보이도록 테두리 한 줄). */
+export const STATUS_BOX = "rounded-xl border border-border bg-bg-card px-3.5 py-2.5 text-[13px]";
+/** 입력칸: 회색 바탕 + 테두리 한 줄. */
+export const FIELD = "w-full rounded-xl border border-border bg-bg px-3 text-sm";
 
 export function Card({
   children,
