@@ -1,14 +1,15 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
 //   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
 //           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments,
-//           docs/roadmap.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
+//           docs/roadmap.json · docs/patchnotes.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch);
 //           'orch:go' label on plan approval; one '[idea]' Issue per idea
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read and write, Variables read/write, Actions read/write).
 //   Issues: Read and write 필요(계획 승인·아이디어 등록), 토큰 주인이 저장소 소유자여야 등록한 아이디어가 화면에 보임
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
-import { USAGE_RETRY_MS, deployEveryFromVars, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView } from "./model";
+import type { PatchNote } from "@/lib/patchnotes";
+import { USAGE_RETRY_MS, deployEveryFromVars, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -60,6 +61,16 @@ async function readVars(f: Fetch, token: string, repo: string) {
 }
 
 export class RoadmapFormatError extends Error {}
+export class PatchNotesFormatError extends Error {}
+
+/** docs/patchnotes.json on the default branch (other projects). Throws GitHubError (404 = no file) or PatchNotesFormatError. */
+async function readPatchNotes(f: Fetch, token: string, repo: string): Promise<PatchNote[]> {
+  const j = (await call(f, token, "GET", `/repos/${repo}/contents/docs/patchnotes.json`)) as { content?: string; encoding?: string } | null;
+  if (typeof j?.content !== "string" || (j.encoding && j.encoding !== "base64")) throw new PatchNotesFormatError("patchnotes.json 내용 없음");
+  const notes = parsePatchNotes(Buffer.from(j.content, "base64").toString("utf8"));
+  if (!notes) throw new PatchNotesFormatError("patchnotes.json 형식 오류");
+  return notes;
+}
 
 /** docs/roadmap.json on the default branch. Throws GitHubError (404 = no file) or RoadmapFormatError. */
 async function readRoadmap(f: Fetch, token: string, repo: string): Promise<Roadmap> {
@@ -124,10 +135,11 @@ export async function readIdeas(f: Fetch, token: string, repo: string): Promise<
 
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw, usage, plans, ideas, roadmap, pending] = await Promise.allSettled([
+  const [runs, sw, usage, plans, ideas, roadmap, pending, notes] = await Promise.allSettled([
     readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo), readIdeas(f, token, repo),
-    readRoadmap(f, token, repo), readDeployPending(f, token, repo),
+    readRoadmap(f, token, repo), readDeployPending(f, token, repo), readPatchNotes(f, token, repo),
   ]);
+  const notesMissing = notes.status === "rejected" && notes.reason instanceof GitHubError && notes.reason.status === 404;
   // 404 = this project has no roadmap file (not an error). describe() lumps 403 and 404 together, so compare directly.
   const roadmapMissing = roadmap.status === "rejected" && roadmap.reason instanceof GitHubError && roadmap.reason.status === 404;
   return {
@@ -146,6 +158,9 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
       : roadmap.reason instanceof RoadmapFormatError ? roadmap.reason.message : describe(roadmap.reason),
     deployPending: pending.status === "fulfilled" ? pending.value?.count ?? null : null,
     deployEvery: sw.status === "fulfilled" ? sw.value.deployEvery : 10,
+    patchNotes: notes.status === "fulfilled" ? notes.value : null,
+    patchNotesError: notes.status === "fulfilled" || notesMissing ? null
+      : notes.reason instanceof PatchNotesFormatError ? notes.reason.message : describe(notes.reason),
   };
 }
 

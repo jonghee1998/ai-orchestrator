@@ -289,6 +289,8 @@ function ProjectCard({ v }: { v: RepoView }) {
   const flow = board.filter((c) => c.n > 1);
   const review = board[0];
   const left = boardRemaining(flow);
+  // 직접 할 일: 인프라 체크리스트 중 아직 안 끝난 것 (사람이 확인·설정할 항목, 확장은 제외)
+  const todo = (v.roadmap?.setup ?? []).filter((i) => i.status === "doing" || i.status === "todo");
   const roadmapNote = v.roadmapError ? `로드맵 읽기 실패 · ${v.roadmapError}` : !v.roadmap ? "로드맵 없음(docs/roadmap.json)" : null;
   return (
     <Card>
@@ -301,11 +303,25 @@ function ProjectCard({ v }: { v: RepoView }) {
           </span>
         </div>
         <p className="mt-3 text-[13px] tabular-nums text-text-muted" data-testid="orch-remaining">
-          {left === null ? "남은 할 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
+          {left === null ? "개발 남은 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
+          {todo.length > 0 && <> · 직접 할 일 <b className="font-semibold text-text">{todo.length}건</b></>}
         </p>
         <div className="mt-2 grid grid-cols-3 gap-1.5">
           {flow.map((c) => <StageCell key={c.n} c={c} />)}
         </div>
+        {todo.length > 0 && (
+          <div className="mt-3 rounded-xl bg-warn/10 px-3 py-2" data-testid="orch-todo">
+            <p className="text-xs font-semibold text-warn">직접 할 일 {todo.length}</p>
+            <ul className="mt-1 space-y-1">
+              {todo.map((i) => (
+                <li key={i.id} className="grid grid-cols-[0.875rem_1fr] gap-x-1.5 text-[12.5px]">
+                  <span aria-hidden="true" className="mt-[5px] h-2.5 w-2.5 rounded-full border-[1.5px] border-warn" />
+                  <span className="min-w-0"><span className="tabular-nums text-text-muted">{i.id}</span> {i.title}{i.note && <span className="block text-[11.5px] text-text-muted">{i.note}</span>}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {roadmapNote ? <p className={`mt-3 text-xs ${v.roadmapError ? "text-danger" : "text-text-muted"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
           : <RoadmapLine setup={v.roadmap!.setup} expansion={v.roadmap!.expansion} />}
         <section aria-label="작업 흐름" className="mt-2" data-testid="orch-flow">
