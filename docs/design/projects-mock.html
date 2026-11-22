@@ -1,0 +1,60 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:390px;font-family:Pretendard,sans-serif;background:#F6F7F9;color:#111418;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+.num{font-variant-numeric:tabular-nums}
+header{padding:20px 20px 8px;display:flex;justify-content:space-between;align-items:center}
+h1{font-size:22px;font-weight:750;letter-spacing:-.03em} .meta{font-size:12px;color:#6B7380;margin-top:3px}
+.hb{display:flex;gap:6px}
+.ib{width:40px;height:40px;border-radius:12px;background:#FFFFFF;border:1px solid #ECEEF1;display:flex;align-items:center;justify-content:center;color:#111418}
+.ib svg{width:18px;height:18px}
+.pm{height:40px;padding:0 14px;border-radius:12px;background:#111418;color:#fff;font-size:13px;font-weight:650;display:flex;align-items:center}
+.notice{margin:10px 16px 0;padding:11px 14px;border-radius:12px;background:#FFF6E0;color:#7A5300;font-size:13px;display:flex;gap:8px;align-items:center}
+.notice svg{width:16px;height:16px;flex:none}
+.card{margin:12px 16px 0;background:#FFFFFF;border-radius:18px;padding:18px 16px;box-shadow:0 1px 2px rgba(17,20,24,.04),0 4px 16px rgba(17,20,24,.04)}
+.ph{display:flex;justify-content:space-between;align-items:baseline} .ph h2{font-size:18px;font-weight:750;letter-spacing:-.02em} .ph span{font-size:12px;color:#6B7380}
+.mini{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:13px;color:#6B7380}
+.mini b{color:#111418;font-weight:650}
+.track{flex:1;height:4px;border-radius:2px;background:#ECEEF1;overflow:hidden} .track i{display:block;height:100%;background:#111418}
+.nav{display:flex;justify-content:space-around;padding:10px 0 24px;margin-top:28px;background:#FFFFFF;border-top:1px solid #ECEEF1}
+.nav a{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;min-width:56px} .nav svg{width:22px;height:22px}
+.ideas h4{font-size:16px;font-weight:750}
+.idea{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid #ECEEF1;font-size:14px} .idea:first-of-type{margin-top:8px}
+.idea small{display:block;color:#6B7380;font-size:12px;margin-top:3px} .idea a{color:#2563D9;font-weight:650;font-size:13px}
+.ex{font-size:10px;color:#6B7380;border:1px solid #ECEEF1;border-radius:4px;padding:0 4px;margin-left:5px;font-weight:500}
+.item{margin-top:10px;padding:12px 14px;border-radius:12px;background:#EEF3FD;font-size:14px}
+.item a{color:#2563D9;font-weight:650;font-size:13px} .item small{display:block;color:#6B7380;font-size:12px;margin-top:3px}
+
+.segs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:16px}
+.sg{background:#F6F7F9;border-radius:12px;padding:10px 8px} .sg span{display:block;font-size:12px;color:#6B7380} .sg b{font-size:20px;font-weight:750;color:#9AA1AC}
+.sg.on b{color:#111418} .sg b small{font-size:13px;font-weight:500;color:#9AA1AC;margin-left:2px} .sg em{display:block;font-style:normal;font-size:11px;color:#6B7380;margin-top:2px} .sg:not(.on) em{color:#9AA1AC}
+.jr{display:grid;grid-template-columns:6fr 9fr 16fr 8fr;gap:3px;margin-top:10px} .jr i{height:6px;border-radius:3px;background:#D5DEEE;overflow:hidden;display:block} .jr i b{display:block;height:100%;background:#2563D9}
+.jl{display:grid;grid-template-columns:6fr 9fr 16fr 8fr;gap:3px;font-size:10.5px;color:#6B7380;margin-top:3px}
+.tot{font-size:13px;color:#6B7380;margin-top:12px} .tot b{color:#111418}
+.segs{margin-top:8px!important}
+
+.route{display:flex;margin-top:18px} .rs{flex:1;position:relative;text-align:center}
+.rl{position:absolute;top:7px;left:0;right:0;height:4px} .rs:first-child .rl{left:50%} .rs:last-child .rl{right:50%}
+.rd{position:relative;width:18px;height:18px;border-radius:50%;border:3.5px solid;background:#fff;margin:0 auto}
+.rt{font-size:12px;color:#6B7380;margin-top:6px} .rc{font-size:20px;font-weight:750;margin-top:1px}
+.list{margin-top:14px}
+.r{border-top:1px solid #ECEEF1;padding:13px 0}
+.rh{display:flex;align-items:baseline;gap:8px;font-size:15px} .rh b{font-weight:700}
+.no{width:14px;color:#9AA1AC;font-size:13px;font-weight:600}
+.rh small{font-size:12px;color:#6B7380;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c{margin-left:auto;font-weight:700} .c.z{color:#9AA1AC;font-weight:500}
+.d{font-size:12px;color:#6B7380;margin:3px 0 0 22px}
+ul{list-style:none;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(8,auto);grid-auto-flow:column;column-gap:10px;margin:10px 0 0 22px}
+ul li{position:relative;font-size:12.5px;color:#9AA1AC;padding:3px 0 3px 14px}
+ul li i{position:absolute;left:0;top:8px;width:8px;height:8px;border-radius:50%;border:2px solid #2563D9;background:#fff}
+ul li.dn,ul li.cur{color:#111418} ul li.dn i,ul li.cur i{background:#2563D9}
+ul li span{font-size:10.5px;color:#9AA1AC}
+ul li.cur{font-weight:700} ul li em{font-style:normal;font-size:10.5px;color:#fff;background:#2563D9;border-radius:6px;padding:1px 5px;margin-left:3px}
+.item{margin-left:22px}
+</style></head><body><header><div><h1>AI Orchestrator</h1><div class="meta num">11-22(일) 16:50 KST 갱신</div></div><div class="hb"><div class="ib"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg></div><div class="pm">PM에게 말하기</div></div></header>
+<div class="notice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg><span><b>Codex 꺼짐</b> · 11/24(월) 09:52 이후 켜기</span></div><div class="card"><div class="ph"><h2>ai-orchestrator</h2><span class="num">배포 대기 0 · <a style="color:#2563D9">완료 기록 →</a></span></div>
+<p class="tot num">남은 할 일 <b>18과정</b> · 단계별</p>
+<div class="segs"><div class="sg on"><span>검토</span><b class="num">4<small>/6</small></b></div><div class="sg"><span>계획</span><b class="num">–<small></small></b></div><div class="sg on"><span>개발</span><b class="num">6<small>/16</small></b></div><div class="sg"><span>통합</span><b class="num">–<small></small></b></div></div>
+<div class="mini"><span><b>인프라</b> 17/19</span><div class="track"><i style="width:89%"></i></div><span><b>확장</b> 0/5</span></div>
+<div class="list"><div class="r"><div class="rh"><span class="no num">1</span><b>검토</b><small>#267 · #268 Codex 의견 대기</small><span class="c num ">2</span></div></div><div class="r"><div class="rh"><span class="no num">2</span><b>계획</b><small>지금 없음</small><span class="c num z">0</span></div></div><div class="r open"><div class="rh"><span class="no num">3</span><b>개발</b><span class="c num">1</span></div><p class="d">단계마다 구현 → 독립 검수 → CI → 반영</p><ul><li class="dn"><i></i><span class="num">3.1</span> 단계 확인</li><li class="dn"><i></i><span class="num">3.2</span> AI 가용 확인</li><li class="dn"><i></i><span class="num">3.3</span> 모델 선택</li><li class="dn"><i></i><span class="num">3.4</span> 브랜치 준비</li><li class="dn"><i></i><span class="num">3.5</span> 코드 분석</li><li class="dn"><i></i><span class="num">3.6</span> 스킬 활용</li><li class="dn"><i></i><span class="num">3.7</span> 구현</li><li class="dn"><i></i><span class="num">3.8</span> 자체 검증</li><li class="dn"><i></i><span class="num">3.9</span> PR 생성</li><li class="cur"><i></i><span class="num">3.10</span> 독립 검수 <em>#285</em></li><li class=""><i></i><span class="num">3.11</span> CI</li><li class=""><i></i><span class="num">3.12</span> 종합 판정</li><li class=""><i></i><span class="num">3.13</span> 자동 수정</li><li class=""><i></i><span class="num">3.14</span> 재검수</li><li class=""><i></i><span class="num">3.15</span> 단계 반영</li><li class=""><i></i><span class="num">3.16</span> 다음 단계</li></ul><div class="item"><div style="display:flex;justify-content:space-between"><b>#285 상황판 디자인 개편<span class="ex">예시</span></b><a>열기</a></div><small class="num">지금 3.10 독립 검수 · Step 2/4</small><div class="jr"><i><b style="width:100%"></b></i><i><b style="width:100%"></b></i><i><b style="width:62%"></b></i><i></i></div><div class="jl"><span>검토</span><span>계획</span><span>개발</span><span>통합</span></div><small class="num" style="color:#111418;font-weight:600">전체 39과정 중 25 완료 · 남은 14 (개발 6 · 통합 8)</small></div></div><div class="r"><div class="rh"><span class="no num">4</span><b>통합</b><small>지금 없음</small><span class="c num z">0</span></div></div></div></div><div class="card ideas"><h4>아이디어함</h4>
+<div class="idea"><span><b>프로젝트별 맞춤 스킬 찾기</b><small>11-22(일) · Codex 의견 대기</small></span><a>#267</a></div>
+<div class="idea"><span><b>상황판에 프로젝트별 사용 스킬 목록</b><small>11-22(일) · Codex 의견 대기</small></span><a>#268</a></div></div><nav class="nav"><a style="color:#111418"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h16M4 19h10"/></svg><span>프로젝트</span></a><a style="color:#9AA1AC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c1.2-3.6 4-5 7-5s5.8 1.4 7 5"/></svg><span>AI 팀</span></a><a style="color:#9AA1AC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v12H9l-4 4z"/></svg><span>PM 브리핑</span></a><a style="color:#9AA1AC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg><span>패치노트</span></a><a style="color:#9AA1AC"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/><path d="M7 10v4h7"/></svg><span>구조</span></a></nav></body></html>
