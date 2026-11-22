@@ -121,7 +121,7 @@ rounded:
 ## Layout
 
 - 한 열. `mx-auto max-w-app`(520px), `min-h-dvh`.
-- 본문 좌우 여백 `px-4`(16px), 위 `pt-[calc(1rem+env(safe-area-inset-top))]`, 아래 `pb-[calc(7rem+env(safe-area-inset-bottom))]`. 하단 탭은 `viewportFit: cover` + `pb-[calc(env(safe-area-inset-bottom)+12px)]` 로 아이폰 홈 표시줄 위에 둔다.
+- 본문 좌우 여백 `px-4`(16px), 위 `pt-[calc(1rem+env(safe-area-inset-top))]`, 아래 `pb-[calc(7rem+env(safe-area-inset-bottom))]`. 하단 탭은 `viewportFit: cover` + `pb-[max(6px,calc(env(safe-area-inset-bottom)-14px))]` 로 아이폰 홈 표시줄과 겹치지 않을 만큼만 올린다.
 - 세로 간격: 탭 화면 블록 사이 `space-y-4`, 카드 안 `space-y-2~3`.
 - Card 안쪽 여백 18px 16px. 작업·계획 항목 `p-3`.
 

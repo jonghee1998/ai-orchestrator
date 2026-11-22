@@ -40,7 +40,7 @@ export function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="주 메뉴" className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg-card pb-[calc(env(safe-area-inset-bottom)+12px)]">
+    <nav aria-label="주 메뉴" className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg-card pb-[max(6px,calc(env(safe-area-inset-bottom)-14px))]">
       <div className="mx-auto flex max-w-app items-stretch justify-around">
         {items.map((item) => {
           const active =
@@ -52,7 +52,7 @@ export function BottomNav() {
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={`min-h-[3.75rem] flex flex-1 flex-col items-center justify-center gap-1 pb-2 pt-3 text-[11px] transition-colors ${
+              className={`min-h-14 flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] transition-colors ${
                 active ? "font-bold text-text" : "font-medium text-text-muted hover:text-text"
               }`}
             >

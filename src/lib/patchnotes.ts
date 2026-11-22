@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.1.2", date: "2026-11-23", pr: 300, title: "하단 탭 높이 조정", items: ["2.1.1에서 너무 올라간 하단 탭을 홈 표시줄과 겹치지 않을 만큼만 올리도록 낮춤"] },
   { version: "2.1.1", date: "2026-11-23", pr: 299, title: "하단 탭 위로", items: ["아이폰 홈 표시줄 위로 하단 탭을 올리고 누르는 영역을 키움"] },
   { version: "2.1.0", date: "2026-11-22", pr: 298, title: "직접 할 일·프로젝트별 패치노트", items: ["프로젝트 탭에 '직접 할 일': 인프라 중 안 끝난 항목(브랜치 보호 확인·Codex 켜기·보안 점검표)", "패치노트를 프로젝트별로 선택해 보기, 다른 저장소는 docs/patchnotes.json 을 읽음"] },
   { version: "2.0.0", date: "2026-11-22", pr: 297, title: "상황판 2.0 — 새 디자인과 전체 흐름", items: ["밝은 화면·Pretendard·SVG 아이콘으로 5탭 전체 새 디자인", "프로젝트 탭: 계획·개발·통합 남은 과정, 세부 과정 완료 표시, 추가 검토(아이디어) 분리", "구조 탭: 요청→배포 한 장 흐름도와 배포·비밀값 구조도", "패치노트는 큰 버전(1.x, 2.x)별로 접고 펼침"] },
