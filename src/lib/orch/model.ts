@@ -369,6 +369,8 @@ export interface RepoView {
   roadmapError: string | null;
   /** Merge commits on main since tag prod-deployed (approximation); null = no tag or read failed. */
   deployPending: number | null;
+  /** PR numbers in commit messages on main since tag prod-deployed (merged, not deployed yet); null = no tag or read failed. */
+  pendingPrs: number[] | null;
   /** ORCH_DEPLOY_EVERY (default 10). */
   deployEvery: number;
 }

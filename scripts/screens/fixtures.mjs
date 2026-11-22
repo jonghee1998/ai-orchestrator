@@ -24,7 +24,9 @@ export function githubFixtures(now) {
     issue(12, "[plan] 승인 대기 시험 작업", `${plan("승인 대기 시험 작업")}\n${state({ status: "awaiting_merge", step: 2, passed: { 1: true, 2: true }, finalPr: 99, updatedAt: iso(10) })}`),
   ];
   const runsDone = [
+    // #10: finalPr 98 이 compare(prod-deployed...main) 에 있음 → 배포 대기. #9: finalPr 97 은 없음 → 배포됨.
     issue(10, "[plan] 끝난 시험 작업", `${plan("끝난 시험 작업", 1, "감마")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 98, updatedAt: iso(120) })}`, { state: "closed" }),
+    issue(9, "[plan] 배포된 시험 작업", `${plan("배포된 시험 작업", 1, "엡실론")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 97, updatedAt: iso(60 * 26) })}`, { state: "closed" }),
   ];
   // 승인 대기 계획: 라벨 없음 + 소유자 작성 + 감사 OK 2/3 (마커 hash = 실제 planHash → stale 아님)
   const pendingBody = plan("승인 기다리는 시험 계획", 2, "델타");
@@ -70,13 +72,14 @@ export function githubFixtures(now) {
     ],
   };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap, null, 2)).toString("base64") };
-  // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 다음 배포까지 3/10
+  // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 다음 배포까지 3/10.
+  // 커밋 메시지의 PR 번호(#98 = done run #10 의 finalPr) → #10 은 배포 대기, #9(finalPr 97) 는 배포됨.
   const sha = (n) => `${n}`.padStart(40, "0");
   const compare = { status: "ahead", commits: [
-    { sha: sha(1), parents: [{ sha: sha(90) }] },
-    { sha: sha(2), parents: [{ sha: sha(1) }, { sha: sha(91) }] },
-    { sha: sha(3), parents: [{ sha: sha(2) }, { sha: sha(92) }] },
-    { sha: sha(4), parents: [{ sha: sha(3) }, { sha: sha(93) }] },
+    { sha: sha(1), parents: [{ sha: sha(90) }], commit: { message: "docs: 메모 정리" } },
+    { sha: sha(2), parents: [{ sha: sha(1) }, { sha: sha(91) }], commit: { message: "Merge pull request #98 from example/orch/run-10\n\n끝난 시험 작업" } },
+    { sha: sha(3), parents: [{ sha: sha(2) }, { sha: sha(92) }], commit: { message: "Merge pull request #95 from example/topic-a" } },
+    { sha: sha(4), parents: [{ sha: sha(3) }, { sha: sha(93) }], commit: { message: "Merge pull request #96 from example/topic-b" } },
   ] };
 
   /** @returns {{status:number, body:unknown} | null} */
