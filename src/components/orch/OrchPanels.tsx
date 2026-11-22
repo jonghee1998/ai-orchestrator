@@ -168,7 +168,7 @@ function FlowRow({ e, repo }: { e: FlowEntry; repo: string }) {
     const r = e.run;
     return (
       <details className={`rounded-lg border px-2 ${tone(r)}`} data-testid={`orch-run-${short(repo)}-${r.number}`}>
-        <summary className="min-h-11 cursor-pointer py-1.5">
+        <summary className="flex min-h-11 cursor-pointer flex-col items-start py-1.5">
           <FlowLine e={e} />
           {r.needsUser && <span className="mt-1 inline-block rounded-full bg-warn/20 px-2 py-0.5 text-[11px] text-yellow-100">사용자 확인 필요</span>}
         </summary>

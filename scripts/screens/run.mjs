@@ -140,9 +140,9 @@ try {
       if (current.join() !== "3 개발") problems.push(`[projects] #11 작업 줄의 강조 칩이 '3 개발' 이 아님 (${current.join(",")})`);
       if (!/3\.7 구현 중/.test(await runRow.innerText())) problems.push("[projects] #11 작업 줄에 '3.7 구현 중' 이 없음");
       // 0 인프라 ✅ 1/3 (완료 1개 / 3개), 6 확장 0/1 (na 제외)
-      const setupLine = (await page.getByTestId("orch-roadmap-setup").locator("summary").innerText()).replace(/\s+/g, " ");
+      const setupLine = (await page.getByTestId("orch-roadmap-setup").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
       if (!/0 인프라 ✅ 1\/3/.test(setupLine)) problems.push(`[projects] 인프라 줄이 '0 인프라 ✅ 1/3' 이 아님 (${setupLine})`);
-      const expLine = (await page.getByTestId("orch-roadmap-expansion").locator("summary").innerText()).replace(/\s+/g, " ");
+      const expLine = (await page.getByTestId("orch-roadmap-expansion").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
       if (!/6 확장 0\/1/.test(expLine)) problems.push(`[projects] 확장 줄이 '6 확장 0/1' 이 아님 (${expLine})`);
       // 위치 순(5→1): 반영 승인 대기(4.7) → 구현 중(3.7) → 계획(2.8) → 아이디어(1.3)
       const order = await page.getByTestId("orch-flow").locator('[data-testid^="orch-run-"], [data-testid^="orch-plan-"], [data-testid^="orch-idea-"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
@@ -187,13 +187,14 @@ try {
         try { await page.getByText(shown).first().waitFor({ state: "visible", timeout: 5000 }); }
         catch { problems.push(`[projects] ${what} 를 펼쳐도 '${shown}' 이 안 보임`); }
       };
-      await expand(page.getByTestId("orch-roadmap-setup").locator("summary"), "0.1 로드맵시험 저장소", "'0 인프라'");
+      // ':scope > summary': 펼친 작업 줄 안에는 스텝 <summary> 도 있으므로 바로 아래 summary 만 고른다
+      await expand(page.getByTestId("orch-roadmap-setup").locator(":scope > summary"), "0.1 로드맵시험 저장소", "'0 인프라'");
       for (const item of ["0.2 로드맵시험 배포", "0.3 로드맵시험 알림"]) {
         if (!(await page.getByText(item).first().isVisible())) problems.push(`[projects] 인프라를 펼쳐도 '${item}' 이 안 보임`);
       }
-      await expand(page.getByTestId("orch-roadmap-expansion").locator("summary"), "6.1 확장시험 두번째 저장소", "'6 확장'");
-      await expand(page.getByTestId("orch-lifecycle").locator("summary"), "독립 검수", "'흐름 보기'");
-      await expand(page.getByTestId("orch-run-orch-screens-11").locator("summary"), "알파공정 2단계 확인항목", "#11 작업 줄");
+      await expand(page.getByTestId("orch-roadmap-expansion").locator(":scope > summary"), "6.1 확장시험 두번째 저장소", "'6 확장'");
+      await expand(page.getByTestId("orch-lifecycle").locator(":scope > summary"), "독립 검수", "'흐름 보기'");
+      await expand(page.getByTestId("orch-run-orch-screens-11").locator(":scope > summary"), "알파공정 2단계 확인항목", "#11 작업 줄");
       for (const text of ["스텝 1/3 통과", "지금 2번"]) {
         if (!(await page.getByText(text).first().isVisible())) problems.push(`[projects] #11 작업 줄을 펼쳐도 '${text}' 이 안 보임`);
       }
