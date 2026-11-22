@@ -1,144 +1,289 @@
-// '구조' 탭: 오케스트레이터 아키텍처와 붙어 있는 보조 도구(ECC, Impeccable, claudex, Playwright) 설명. 정적 내용.
+// '구조' 탭: 오케스트레이터 아키텍처를 컨설팅 보고서 형식(요약 → 구조도 → 프로세스 → 역할 → 통제 → 자동 루틴 → 보조 도구)으로 설명합니다. 정적 내용.
+import type { ReactNode } from "react";
 import { CARD_TITLE, Card, PageTitle } from "@/components/ui";
 
-const H2 = "px-1 text-lg font-[750] tracking-[-0.02em]";
+const KICKER = "text-[11px] font-semibold uppercase tracking-[0.08em] text-accent";
+const H2 = "text-lg font-[750] leading-snug tracking-[-0.02em]";
 
-const DIAGRAM = `사용자 (폰)
- │ 요청
- ▼
-▌PM · Claude ─ 계획 Issue 작성
- ▼
-▌계획 감사 (claudex) ─ Codex ⇄ PM, 최대 3회
- ▼ orch:go (사용자 승인)
-▌엔진 (GitHub Actions) ─ 이벤트·20분 순찰
- ▼ 스텝마다 반복
-┃ 구현  Sonnet/Opus    ← ECC · Impeccable
-┃  ↓ 스텝 PR
-┃ 검수  Codex → Opus   ← ECC 검수 에이전트
-┃ CI   test·build·화면 ← Playwright
-┃  ↺ 실패하면 수정 (최대 3회)
- ▼
-▌최종 PR + 완공 보고서
- ├ 위험 낮음 → 자동 반영
- └ 위험 높음 → 사용자 승인
- ▼
-▌main → Vercel 배포 → 이 상황판`;
+function Section({ no, kicker, title, children }: { no: string; kicker: string; title: string; children: ReactNode }) {
+  return (
+    <section aria-label={kicker} className="space-y-2.5">
+      <div className="px-1">
+        <p className={KICKER}><span className="tabular-nums">{no}</span> · {kicker}</p>
+        <h2 className={H2}>{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
 
-const FLOW: [string, string][] = [
-  ["요청", "사용자가 하고 싶은 일을 말하면 PM(Claude)이 스텝·완료 기준이 있는 계획 Issue를 씁니다."],
-  ["계획 감사", "승인 전에 Codex가 계획을 감사하고 PM이 고칩니다 (최대 3회)."],
-  ["승인", "사용자가 Issue에 orch:go 라벨을 붙이면 엔진이 시작합니다."],
-  ["스텝 반복", "구현 → 스텝 PR → 독립 검수 + CI. 실패하면 지적을 받아 최대 3회 자동 수정, 2회 실패 시 Opus로 승격."],
-  ["완공", "모든 스텝이 통과하면 최종 PR과 완공 보고서. 위험한 변경(로그인·DB·Actions 등)만 사용자 승인."],
-  ["관리", "ON/OFF·일시정지·작동 시간대는 AI 팀 탭에서. 끄면 새 작업만 막고 돌던 일은 마칩니다."],
+/** 사람이 결정하는 지점 표시 */
+function Gate({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-text px-2 py-0.5 text-[10.5px] font-semibold text-white">
+      <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 8.5l3 3 6-7" /></svg>
+      {children}
+    </span>
+  );
+}
+
+function Arrow({ label }: { label?: string }) {
+  return (
+    <div className="flex items-center gap-2 py-1 pl-[18px]" aria-hidden="true">
+      <svg viewBox="0 0 12 18" className="h-[18px] w-3 text-text-faint" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 1v15M2 12l4 4 4-4" /></svg>
+      {label && <span className="text-[11px] text-text-muted">{label}</span>}
+    </div>
+  );
+}
+
+/** 구조도의 한 층 */
+function Layer({ tag, title, desc, gate, children }: { tag: string; title: string; desc: string; gate?: string; children?: ReactNode }) {
+  return (
+    <div className="rounded-[18px] bg-bg-card px-4 py-3.5 shadow-[0_1px_2px_rgba(17,20,24,.04),0_4px_16px_rgba(17,20,24,.04)]">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-text-muted">{tag}</p>
+          <p className="text-[15px] font-bold leading-snug">{title}</p>
+        </div>
+        {gate && <Gate>{gate}</Gate>}
+      </div>
+      <p className="mt-1 text-[12.5px] leading-relaxed text-text-muted">{desc}</p>
+      {children}
+    </div>
+  );
+}
+
+const STEP_LOOP: [string, string, string][] = [
+  ["구현", "Sonnet · Opus", "ECC · Impeccable"],
+  ["독립 검수", "Codex → Opus", "ECC 검수 에이전트"],
+  ["CI", "test · build · 화면", "Playwright"],
 ];
 
-type Tool = { name: string; what: string; where: string; how: string[]; files: string };
+const KPIS: [string, string][] = [
+  ["2곳", "사람이 결정하는 지점 (계획 승인 · 위험 변경 반영)"],
+  ["3중", "자동 품질 확인 (독립 검수 · CI · 결과 화면)"],
+  ["0대", "켜 둘 서버 (GitHub Actions 위에서 동작)"],
+];
+
+type Stage = { name: string; owner: string; out: string; control: string };
+const PROCESS: Stage[] = [
+  { name: "아이디어", owner: "사용자 → Codex · PM", out: "의견 2개 + 종합 의견", control: "개발 여부는 사용자가 결정" },
+  { name: "계획", owner: "PM (Claude)", out: "계획 Issue (스텝 · 완료 기준 · 위험)", control: "계획 감사 최대 3회 (claudex)" },
+  { name: "승인", owner: "사용자", out: "orch:go", control: "감사 OK 뒤에만 승인 버튼" },
+  { name: "스텝 실행", owner: "엔진 → 구현 AI", out: "스텝 PR", control: "독립 검수 + CI, 실패 시 최대 3회 자동 수정 · 2회 실패 시 Opus 승격" },
+  { name: "통합", owner: "엔진", out: "최종 PR + 완공 보고서", control: "충돌 자동 정리(패치노트) · 위험 판정" },
+  { name: "반영 · 배포", owner: "엔진 / 사용자", out: "main 반영 → Vercel", control: "위험 낮음 자동 반영 · 높음 사용자 승인 · 10건마다 배포" },
+];
+
+type Role = { who: string; does: string; not: string };
+const ROLES: Role[] = [
+  { who: "사용자", does: "요청 · 아이디어, 계획 승인, 위험 변경 반영, 배포 실행", not: "코드 작성 · 검수" },
+  { who: "PM · Claude", does: "요청 정리, 계획 Issue 작성, 감사 반영, 진행 보고, 막힘 진단", not: "main 반영 · 스위치 변경 · 실행 생성" },
+  { who: "Claude Sonnet", does: "일반 구현 (기본)", not: ".github · 엔진 파일 수정" },
+  { who: "Claude Opus", does: "위험 작업 구현, 2회 실패 시 승격, Codex 대신 검수 · 감사", not: "자기 작업 검수" },
+  { who: "Codex", does: "독립 검수, 계획 감사, 아이디어 의견 (기본)", not: "구현" },
+  { who: "GitHub Actions", does: "엔진 · CI · 사용량 확인 · 배포 호출 (PC 꺼져도 동작)", not: "판단 (규칙대로만 실행)" },
+];
+
+const CONTROLS: [string, string][] = [
+  ["승인 게이트", "계획은 사용자 승인(orch:go) 뒤에만 실행. 로그인 · DB · Actions · 의존성 같은 위험 변경은 최종 반영도 사용자 승인."],
+  ["독립 검수", "만든 AI와 다른 AI(Codex, 없으면 Opus)가 검수. 검수 에이전트는 구현 단계에서 쓰지 않음."],
+  ["재시도 · 승격", "스텝마다 최대 3회 자동 수정, 2회 실패하면 Opus로 올림. 그래도 안 되면 멈추고 PM이 원인 보고."],
+  ["보호 파일", "구현 AI는 .github · scripts/orch(엔진)를 고칠 수 없음. 고치면 푸시가 거부됨."],
+  ["스위치", "Sonnet · Opus · Codex ON/OFF, 전체 일시정지, 작동 시간대. 끄면 새 작업만 막고 돌던 일은 마침."],
+  ["비밀 정보", "토큰 · 비밀번호는 GitHub · Vercel 비밀 설정에만. 코드 · 로그 · 테스트에 넣지 않음."],
+  ["작업 한도", "구현 1회당 150동작. 무한 반복을 막는 안전장치."],
+];
+
+const ROUTINES: [string, string][] = [
+  ["이벤트 즉시", "PR · 검수 · CI 결과가 나오면 엔진이 바로 다음 단계로"],
+  ["20분마다", "엔진 순찰: 멈춘 작업 재시도 · 상태판 갱신 · 최종 PR 충돌 확인"],
+  ["1시간마다", "PM 점검: 막힌 작업 원인 진단 후 Issue에 선택지 보고"],
+  ["사용량", "Claude · Codex 남은 사용량 자동 확인, 상황판에서 즉시 확인 가능"],
+  ["10건마다", "main에 10건 쌓이면 Vercel 운영 배포 (수동 즉시 배포도 가능)"],
+];
+
+type Tool = { name: string; role: string; where: string; how: string[]; files: string };
 const TOOLS: Tool[] = [
   {
-    name: "ECC (Everything Claude Code)",
-    what: "Claude Code용 스킬·에이전트 모음(2.2.3). 필요한 10개만 골라 원문 그대로 넣었습니다.",
-    where: "구현 · 검수 · 계획",
-    how: [
-      "구현: verification-loop로 끝내기 전 타입·테스트·빌드 자체 검증, tdd-workflow로 테스트 먼저",
-      "빌드 오류: build-error-resolver · react-build-resolver 보조 에이전트",
-      "검수(Opus 대체 시): code · security · typescript · react-reviewer",
-      "계획: planner · architect (PM 전용)",
-      "쓴 스킬·에이전트는 스텝 PR과 완공 보고서에 자동 기록",
-    ],
-    files: ".claude/skills, .claude/agents · ecc/ecc.lock.json",
-  },
-  {
-    name: "Impeccable",
-    what: "디자인 스킬(pbakaus, 4.10.0). 흔한 AI 화면 티를 막고 품질 하한을 강제합니다.",
-    where: "구현 (화면 스텝)",
-    how: [
-      "화면을 고치는 스텝에서 구현 Claude가 따름",
-      "상황판은 Operate 모드: 훑어보기·일관성·모바일 우선",
-      "고치기 직전 craft-floor(금지 항목) 확인, 기존 디자인 유지가 기본",
-    ],
-    files: ".claude/skills/impeccable · ecc/third-party.lock.json",
-  },
-  {
     name: "claudex 루프",
-    what: "Claude가 쓰고 Codex가 감사하는 계획 검토 루프. PM용입니다.",
-    where: "계획 (승인 전)",
+    role: "계획 감사",
+    where: "계획 · 승인 전",
     how: [
-      "[plan] Issue가 열리거나 계획이 바뀌면 자동 감사 (plan-review 워크플로)",
-      "코드 일치·스텝 분할·완료 기준·위험·모델 선택 점검 → Issue 댓글",
-      "최대 3라운드, orch:go를 붙이면 멈춤",
-      "Codex를 못 쓰면 Opus + planner·architect가 대신",
+      "[plan] Issue가 열리거나 계획이 바뀌면 자동 감사 (plan-review)",
+      "코드 일치 · 스텝 분할 · 완료 기준 · 위험 · 모델 선택 점검 → Issue 댓글",
+      "최대 3라운드, 승인하면 멈춤. Codex를 못 쓰면 Opus + planner · architect가 대신",
     ],
     files: ".github/workflows/plan-review.yml · scripts/orch/plan-review.mjs",
   },
   {
+    name: "아이디어 검토",
+    role: "의견 취합",
+    where: "아이디어 · 개발 전",
+    how: [
+      "상황판 아이디어함에 적으면 [idea] Issue 생성",
+      "Codex 의견 → Claude 의견 + 종합 의견을 Issue와 상황판에 표시",
+      "개발 확정은 사용자가 계획 요청으로",
+    ],
+    files: ".github/workflows/idea-review.yml · scripts/orch/idea-review.mjs",
+  },
+  {
+    name: "ECC (Everything Claude Code)",
+    role: "구현 · 검수 보조",
+    where: "구현 · 검수 · 계획",
+    how: [
+      "구현: verification-loop로 끝내기 전 타입 · 테스트 · 빌드 자체 검증, tdd-workflow로 테스트 먼저",
+      "빌드 오류: build-error-resolver · react-build-resolver",
+      "검수(Opus 대체 시): code · security · typescript · react-reviewer",
+      "계획: planner · architect (PM 전용) · 쓴 도구는 PR과 완공 보고서에 기록",
+    ],
+    files: ".claude/skills · .claude/agents · ecc/ecc.lock.json (2.2.3, 10개)",
+  },
+  {
+    name: "Impeccable",
+    role: "디자인 기준",
+    where: "구현 (화면 스텝)",
+    how: [
+      "화면 스텝에서 구현 AI가 따르는 디자인 스킬 (4.10.0)",
+      "상황판은 Operate 모드: 훑어보기 · 일관성 · 모바일 우선",
+      "고치기 직전 금지 항목(craft-floor) 확인, 기준은 DESIGN.md · 정답 시안",
+    ],
+    files: ".claude/skills/impeccable · ecc/third-party.lock.json · DESIGN.md",
+  },
+  {
     name: "Playwright",
-    what: "브라우저 자동화. 실제 앱을 띄워 결과 화면을 사람처럼 눌러 봅니다.",
+    role: "결과 화면 시험",
     where: "CI (모든 PR)",
     how: [
-      "실제 빌드 + 실제 로그인으로 탭을 폰 폭 360·390·430px로 열기",
-      "기대 문구·가로 넘침·페이지 오류·외부 요청 검사",
-      "스크린샷은 CI Artifacts → screens, 실패하면 자동 수정 루프로",
+      "실제 빌드 + 실제 로그인으로 5탭을 폰 폭 360 · 390 · 430px로 열기",
+      "기대 문구 · 가로 넘침 · 페이지 오류 · 배경 · 글꼴 검사",
+      "스크린샷은 CI Artifacts, 실패하면 자동 수정 루프로",
     ],
     files: "scripts/screens · .github/workflows/ci.yml (screens)",
   },
 ];
 
-const MODELS: [string, string][] = [
-  ["Claude (PM)", "요청 정리, 계획, 진행 보고"],
-  ["Claude Sonnet", "일반 구현 (기본)"],
-  ["Claude Opus", "위험한 구현, 2회 실패 시 승격, Codex 대신 검수·감사"],
-  ["Codex", "독립 검수, 계획 감사 (기본)"],
-  ["GitHub Actions", "엔진·CI·사용량 확인, PC가 꺼져도 동작"],
-];
-
 export function LiveArchitectureScreen() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-7">
       <PageTitle title="구조" subtitle="오케스트레이터가 일하는 방식과 붙어 있는 도구" />
 
-      <section aria-label="아키텍처" className="space-y-2">
-        <h2 className={H2}>아키텍처</h2>
-        <Card>
-          <pre className="overflow-x-auto text-[11px] leading-[1.45] text-text" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Pretendard Variable", Pretendard, monospace' }} data-testid="arch-diagram">{DIAGRAM}</pre>
+      <Section no="01" kicker="요약" title="사람은 요청과 승인만, 나머지는 GitHub 위의 AI 팀이 처리합니다">
+        <Card className="space-y-0 py-1.5">
+          {KPIS.map(([n, t], i) => (
+            <div key={n} className={`flex items-baseline gap-3 py-3 ${i ? "border-t border-border" : ""}`}>
+              <span className="w-12 shrink-0 text-2xl font-[750] tabular-nums tracking-[-0.03em]">{n}</span>
+              <span className="text-[13px] leading-snug text-text-muted">{t}</span>
+            </div>
+          ))}
         </Card>
+      </Section>
+
+      <Section no="02" kicker="아키텍처" title="다섯 개 층이 위에서 아래로 일을 넘깁니다">
+        <div data-testid="arch-diagram">
+            <Layer tag="채널" title="사용자 · 폰 상황판" desc="요청 · 아이디어 입력, 진행 확인, 승인. Vercel에서 실행되고 GitHub 기록을 실시간으로 읽음." />
+            <Arrow label="요청 · 아이디어" />
+            <Layer tag="기획" title="PM · Claude" desc="요청을 스텝 · 완료 기준 · 위험이 있는 계획 Issue로 정리. Codex가 감사하고 PM이 고침(최대 3회)." gate="승인 1" />
+            <Arrow label="orch:go" />
+            <Layer tag="엔진" title="오케스트레이터 · GitHub Actions" desc="스텝을 순서대로 맡기고 결과를 판정. 이벤트에 즉시 반응하고 20분마다 순찰.">
+              <div className="mt-2.5">
+                <p className="text-[11px] font-semibold text-text-muted">스텝마다 반복 · 실패하면 자동 수정 최대 3회</p>
+                {STEP_LOOP.map(([k, who, tool]) => (
+                  <div key={k} className="grid grid-cols-[4.5rem_1fr] gap-x-2 border-t border-border py-2 text-[12.5px] first-of-type:mt-1.5">
+                    <span className="font-bold">{k}</span>
+                    <span className="min-w-0">{who}<span className="block text-[11.5px] text-text-muted">+ {tool}</span></span>
+                  </div>
+                ))}
+              </div>
+            </Layer>
+            <Arrow label="모든 스텝 통과" />
+            <Layer tag="통합" title="최종 PR · 완공 보고서" desc="스텝을 합친 최종 PR에 결과 보고서. 패치노트 충돌은 자동 정리, 위험도를 판정." gate="승인 2">
+              <dl className="mt-2 grid grid-cols-[4.5rem_1fr] gap-x-2 border-t border-border pt-2 text-[12.5px]">
+                <dt className="font-bold">위험 낮음</dt><dd className="text-text-muted">자동 반영</dd>
+                <dt className="font-bold">위험 높음</dt><dd className="text-text-muted">사용자 승인 후 반영</dd>
+              </dl>
+            </Layer>
+            <Arrow label="main 반영" />
+            <Layer tag="전달" title="main → Vercel 운영 배포" desc="반영 10건마다 자동 배포(수동 즉시 배포 가능). 배포되면 이 상황판에 바로 보임." />
+        </div>
+      </Section>
+
+      <Section no="03" kicker="프로세스" title="여섯 단계, 단계마다 산출물과 통제가 있습니다">
         <Card className="py-1.5">
           <ol>
-            {FLOW.map(([k, v], i) => (
-              <li key={k} className={`flex gap-2 py-3 text-sm ${i ? "border-t border-border" : ""}`}>
-                <span className="w-3.5 shrink-0 text-[13px] font-semibold tabular-nums text-text-muted">{i + 1}</span>
-                <p className="min-w-0"><span className="font-bold">{k}</span> <span className="text-text-muted">— {v}</span></p>
+            {PROCESS.map((s, i) => (
+              <li key={s.name} className={`grid grid-cols-[1.25rem_1fr] gap-x-2 py-3 ${i ? "border-t border-border" : ""}`}>
+                <span className="pt-px text-[13px] font-semibold tabular-nums text-text-muted">{i + 1}</span>
+                <div className="min-w-0 space-y-1">
+                  <p className="flex flex-wrap items-baseline justify-between gap-x-2"><span className="text-[15px] font-bold">{s.name}</span><span className="text-[12px] text-text-muted">{s.owner}</span></p>
+                  <dl className="grid grid-cols-[3rem_1fr] gap-x-2 gap-y-0.5 text-[12.5px]">
+                    <dt className="text-text-muted">산출물</dt><dd>{s.out}</dd>
+                    <dt className="text-text-muted">통제</dt><dd>{s.control}</dd>
+                  </dl>
+                </div>
               </li>
             ))}
           </ol>
         </Card>
-      </section>
+      </Section>
 
-      <section aria-label="역할" className="space-y-2">
-        <h2 className={H2}>누가 무엇을</h2>
+      <Section no="04" kicker="역할" title="누가 무엇을 하고, 무엇은 하지 않는지">
         <Card className="py-1.5">
-          {MODELS.map(([k, v], i) => (
-            <p key={k} className={`py-3 text-sm ${i ? "border-t border-border" : ""}`}><span className="font-bold">{k}</span> <span className="text-text-muted">· {v}</span></p>
+          {ROLES.map((r, i) => (
+            <div key={r.who} className={`space-y-1 py-3 ${i ? "border-t border-border" : ""}`}>
+              <p className="text-[15px] font-bold">{r.who}</p>
+              <dl className="grid grid-cols-[3rem_1fr] gap-x-2 gap-y-0.5 text-[12.5px]">
+                <dt className="text-text-muted">한다</dt><dd>{r.does}</dd>
+                <dt className="text-text-muted">안 한다</dt><dd className="text-text-muted">{r.not}</dd>
+              </dl>
+            </div>
           ))}
         </Card>
-      </section>
+      </Section>
 
-      <section aria-label="보조 도구" className="space-y-2">
-        <h2 className={H2}>보조 도구</h2>
-        {TOOLS.map((t) => (
-          <Card key={t.name} className="space-y-2">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-              <h3 className={CARD_TITLE}>{t.name}</h3>
-              <span className="text-xs font-semibold text-accent">{t.where}</span>
+      <Section no="05" kicker="통제 장치" title="사고를 막는 일곱 가지 안전장치">
+        <Card className="py-1.5">
+          {CONTROLS.map(([k, v], i) => (
+            <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
+              <span className="font-bold">{k}</span>
+              <span className="text-text-muted">{v}</span>
             </div>
-            <p className="text-sm text-text-muted">{t.what}</p>
-            <ul className="list-disc space-y-1 pl-5 text-sm marker:text-text-faint">
-              {t.how.map((h) => <li key={h}>{h}</li>)}
-            </ul>
-            <p className="break-all border-t border-border pt-2.5 text-[11px] text-text-muted">{t.files}</p>
-          </Card>
-        ))}
-      </section>
+          ))}
+        </Card>
+      </Section>
+
+      <Section no="06" kicker="자동 루틴" title="PC가 꺼져 있어도 도는 것들">
+        <Card className="py-1.5">
+          {ROUTINES.map(([k, v], i) => (
+            <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
+              <span className="font-bold">{k}</span>
+              <span className="text-text-muted">{v}</span>
+            </div>
+          ))}
+        </Card>
+      </Section>
+
+      <Section no="07" kicker="보조 도구" title="각 단계에 붙어 품질을 올리는 도구">
+        <div className="space-y-3">
+          {TOOLS.map((t) => (
+            <Card key={t.name} className="space-y-2">
+              <div>
+                <p className="text-[11px] font-semibold text-accent">{t.where}</p>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                  <h3 className={CARD_TITLE}>{t.name}</h3>
+                  <span className="text-[12px] text-text-muted">{t.role}</span>
+                </div>
+              </div>
+              <ul className="space-y-1.5 text-[13px]">
+                {t.how.map((h) => (
+                  <li key={h} className="grid grid-cols-[0.75rem_1fr] gap-x-1.5"><span aria-hidden="true" className="mt-[7px] h-1 w-1 rounded-full bg-text-faint" />{h}</li>
+                ))}
+              </ul>
+              <p className="break-all border-t border-border pt-2.5 text-[11px] text-text-muted">{t.files}</p>
+            </Card>
+          ))}
+        </div>
+      </Section>
     </div>
   );
 }
