@@ -232,9 +232,9 @@ test("parseRun: prose mention of the state marker in the plan context does not b
 test("planReviewBadge: none / OK / REVISE / ERROR / stale", () => {
   const rv = (verdict: "OK" | "REVISE" | "ERROR", stale = false, round = 2) => ({ round, verdict, reviewer: "codex", at: null, hash: "h", stale });
   assert.deepEqual(planReviewBadge(null), { text: "감사 전", tone: "muted", revise: false });
-  assert.deepEqual(planReviewBadge(rv("OK")), { text: "✅ 감사 OK 2/3", tone: "ok", revise: false });
-  assert.deepEqual(planReviewBadge(rv("REVISE", false, 1)), { text: "✏️ 수정 필요 1/3", tone: "warn", revise: true });
-  assert.deepEqual(planReviewBadge(rv("ERROR")), { text: "⚠️ 감사 실패", tone: "danger", revise: false });
+  assert.deepEqual(planReviewBadge(rv("OK")), { text: "감사 OK 2/3", tone: "ok", revise: false });
+  assert.deepEqual(planReviewBadge(rv("REVISE", false, 1)), { text: "수정 필요 1/3", tone: "warn", revise: true });
+  assert.deepEqual(planReviewBadge(rv("ERROR")), { text: "감사 실패", tone: "danger", revise: false });
   for (const v of ["OK", "REVISE", "ERROR"] as const) assert.equal(planReviewBadge(rv(v, true)).text, "감사 후 수정됨 · 재감사 대기");
 });
 

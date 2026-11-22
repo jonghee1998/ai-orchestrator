@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "./globals.css";
 import { AuthGate } from "@/components/AuthGate";
 import { BottomNav } from "@/components/BottomNav";
@@ -12,7 +13,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0B1220",
+  themeColor: "#F6F7F9",
 };
 
 export default function RootLayout({

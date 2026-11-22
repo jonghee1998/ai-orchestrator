@@ -15,7 +15,7 @@ export function PageTitle({
 }) {
   return (
     <header className="mb-4">
-      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+      <h1 className="text-[22px] font-bold tracking-[-0.03em]">{title}</h1>
       {subtitle && <p className="mt-1 text-sm text-text-muted">{subtitle}</p>}
     </header>
   );
@@ -30,7 +30,7 @@ export function Card({
 }) {
   return (
     <div
-      className={`rounded-xl border border-border bg-bg-card p-4 ${className}`}
+      className={`rounded-[18px] bg-bg-card px-4 py-[18px] shadow-[0_1px_2px_rgba(17,20,24,.04),0_4px_16px_rgba(17,20,24,.04)] ${className}`}
     >
       {children}
     </div>
@@ -41,10 +41,10 @@ const connectionMeta: Record<
   ConnectionStatus,
   { label: string; color: string }
 > = {
-  connected: { label: "연결됨", color: "bg-ok/15 text-ok" },
-  disconnected: { label: "연결 안 됨", color: "bg-unknown/15 text-text-muted" },
-  connecting: { label: "연결 중", color: "bg-warn/15 text-warn" },
-  error: { label: "오류", color: "bg-danger/15 text-danger" },
+  connected: { label: "연결됨", color: "bg-ok/10 text-ok" },
+  disconnected: { label: "연결 안 됨", color: "bg-unknown/10 text-text-muted" },
+  connecting: { label: "연결 중", color: "bg-warn/10 text-warn" },
+  error: { label: "오류", color: "bg-danger/10 text-danger" },
 };
 
 export function ConnectionBadge({ status }: { status: ConnectionStatus }) {
@@ -60,12 +60,12 @@ export function ConnectionBadge({ status }: { status: ConnectionStatus }) {
 }
 
 const taskStatusMeta: Record<TaskStatus, { label: string; color: string }> = {
-  backlog: { label: "대기", color: "bg-unknown/15 text-text-muted" },
-  queued: { label: "큐", color: "bg-accent/15 text-accent" },
-  in_progress: { label: "진행 중", color: "bg-warn/15 text-warn" },
-  in_review: { label: "검수 중", color: "bg-accent/15 text-accent" },
-  done: { label: "완료", color: "bg-ok/15 text-ok" },
-  blocked: { label: "막힘", color: "bg-danger/15 text-danger" },
+  backlog: { label: "대기", color: "bg-unknown/10 text-text-muted" },
+  queued: { label: "큐", color: "bg-accent-dim text-accent" },
+  in_progress: { label: "진행 중", color: "bg-warn/10 text-warn" },
+  in_review: { label: "검수 중", color: "bg-accent-dim text-accent" },
+  done: { label: "완료", color: "bg-ok/10 text-ok" },
+  blocked: { label: "막힘", color: "bg-danger/10 text-danger" },
 };
 
 export function TaskStatusBadge({ status }: { status: TaskStatus }) {
@@ -81,9 +81,9 @@ export function TaskStatusBadge({ status }: { status: TaskStatus }) {
 
 const projectStatusMeta: Record<ProjectStatus, { label: string; color: string }> =
   {
-    active: { label: "진행", color: "bg-ok/15 text-ok" },
-    paused: { label: "일시중지", color: "bg-warn/15 text-warn" },
-    done: { label: "완료", color: "bg-unknown/15 text-text-muted" },
+    active: { label: "진행", color: "bg-ok/10 text-ok" },
+    paused: { label: "일시중지", color: "bg-warn/10 text-warn" },
+    done: { label: "완료", color: "bg-unknown/10 text-text-muted" },
   };
 
 export function ProjectStatusBadge({ status }: { status: ProjectStatus }) {
@@ -102,7 +102,7 @@ export function UnknownTag({ hint }: { hint?: string }) {
   return (
     <span
       title={hint}
-      className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium text-unknown ring-1 ring-inset ring-unknown/30"
+      className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium text-text-muted ring-1 ring-inset ring-unknown/30"
     >
       unknown
     </span>

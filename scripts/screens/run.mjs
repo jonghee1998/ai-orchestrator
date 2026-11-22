@@ -162,9 +162,9 @@ try {
       for (const d of ["개발 여부를 정함", "감사 후 사용자 승인", "독립 검수 → CI", "충돌 처리 후 main 반영", "Vercel에 배포"]) {
         if (!(await page.getByText(d).first().isVisible())) problems.push(`[projects] 칸 설명 '${d}' 이 보이지 않음`);
       }
-      // 0 인프라 ✅ 1/3 (완료 1개 / 3개), 6 확장 0/1 (na 제외)
+      // 0 인프라 1/3 (완료 1개 / 3개, 체크 아이콘은 SVG), 6 확장 0/1 (na 제외)
       const setupLine = (await page.getByTestId("orch-roadmap-setup").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
-      if (!/0 인프라 ✅ 1\/3/.test(setupLine)) problems.push(`[projects] 인프라 줄이 '0 인프라 ✅ 1/3' 이 아님 (${setupLine})`);
+      if (!/0 인프라 1\/3/.test(setupLine)) problems.push(`[projects] 인프라 줄이 '0 인프라 1/3' 이 아님 (${setupLine})`);
       const expLine = (await page.getByTestId("orch-roadmap-expansion").locator(":scope > summary").innerText()).replace(/\s+/g, " ");
       if (!/6 확장 0\/1/.test(expLine)) problems.push(`[projects] 확장 줄이 '6 확장 0/1' 이 아님 (${expLine})`);
       // 기본 상태 높이: 360x800 에서 첫 프로젝트 카드 600px 이하
@@ -179,8 +179,8 @@ try {
       if (!(await pmLink.isVisible())) problems.push("[projects] 'PM에게 말하기' 링크가 보이지 않음");
       else if ((await pmLink.getAttribute("target")) !== "_blank" || !/noreferrer/.test((await pmLink.getAttribute("rel")) ?? "") || !/^https?:\/\//.test((await pmLink.getAttribute("href")) ?? "")) problems.push("[projects] 'PM에게 말하기' 링크가 새 창(_blank, noreferrer, http 주소)이 아님");
       // 새로고침 버튼: 보이고, 누르면(GET 만 발생) '방금 갱신' 시각이 나와야 함
-      const refreshBtn = page.getByRole("button", { name: "↻ 새로고침" });
-      if (!(await refreshBtn.isVisible())) problems.push("[projects] '↻ 새로고침' 버튼이 보이지 않음");
+      const refreshBtn = page.getByRole("button", { name: "새로고침", exact: true });
+      if (!(await refreshBtn.isVisible())) problems.push("[projects] '새로고침' 버튼이 보이지 않음");
       else {
         await refreshBtn.click();
         try { await page.getByText("방금 갱신", { exact: false }).first().waitFor({ state: "visible", timeout: 10000 }); }
@@ -188,6 +188,13 @@ try {
       }
     }
     for (const text of t.forbid) if (await page.getByText(text, { exact: false }).count()) problems.push(`[${t.name}] '${text}' 가 보임`);
+    // 밝은 테마 + Pretendard: body 배경 rgb(246, 247, 249), 글꼴에 Pretendard
+    const bodyStyle = await page.evaluate(() => { const cs = getComputedStyle(document.body); return { bg: cs.backgroundColor, font: cs.fontFamily }; });
+    if (bodyStyle.bg !== "rgb(246, 247, 249)") problems.push(`[${t.name}] body 배경이 rgb(246, 247, 249) 가 아님 (${bodyStyle.bg})`);
+    if (!bodyStyle.font.includes("Pretendard")) problems.push(`[${t.name}] body 글꼴에 Pretendard 가 없음 (${bodyStyle.font})`);
+    // 하단 탭 아이콘은 SVG (글자 기호 아님)
+    const navSvgs = await page.getByRole("navigation", { name: "주 메뉴" }).locator("a svg").count();
+    if (navSvgs !== TABS.length) problems.push(`[${t.name}] 하단 탭 SVG 아이콘이 ${TABS.length}개가 아님 (${navSvgs})`);
     const active = await page.getByRole("navigation", { name: "주 메뉴" }).locator('[aria-current="page"]').allInnerTexts();
     if (!active.some((a) => a.includes(t.nav))) problems.push(`[${t.name}] 활성 탭 표시가 '${t.nav}' 아님 (${active.join(",")})`);
     for (const w of WIDTHS) {

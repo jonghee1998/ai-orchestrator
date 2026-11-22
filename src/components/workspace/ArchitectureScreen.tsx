@@ -128,7 +128,7 @@ export function LiveArchitectureScreen() {
             <ul className="list-disc space-y-1 pl-5 text-sm">
               {t.how.map((h) => <li key={h}>{h}</li>)}
             </ul>
-            <p className="break-all text-[11px] text-text-faint">{t.files}</p>
+            <p className="break-all text-[11px] text-text-muted">{t.files}</p>
           </Card>
         ))}
       </section>

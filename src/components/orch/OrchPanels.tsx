@@ -8,6 +8,7 @@ import { csrfHeaders, useSession } from "@/components/live/session";
 import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
+import { AlertIcon, CheckIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
 import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { LIFECYCLE, boardDeployCounts, boardNeedsUser, deployProgressText, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
 
@@ -48,10 +49,10 @@ function RunCard({ r }: { r: OrchRun }) {
         <span className="shrink-0 rounded-full bg-current/10 px-2 py-0.5 text-xs">{r.statusLabel}</span>
       </div>
       <p className="mt-1 text-xs text-text-muted">{short(r.repo)} #{r.number} · {stepText}{r.retries ? ` · 수정 ${r.retries}회` : ""}</p>
-      {r.held && <p className="mt-1 text-xs text-yellow-100">⏸️ {r.held}</p>}
-      {r.reason && <p className="mt-1 break-words text-xs text-red-200">⛔ {r.reason}</p>}
+      {r.held && <p className="mt-1 text-xs text-warn"><PauseIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />{r.held}</p>}
+      {r.reason && <p className="mt-1 break-words text-xs text-danger"><StopIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />{r.reason}</p>}
       <p className="mt-1 text-xs">다음 · {r.next}</p>
-      {r.updatedAt && <p className="mt-1 text-[11px] text-text-faint">갱신 {formatKst(r.updatedAt)}</p>}
+      {r.updatedAt && <p className="mt-1 text-[11px] text-text-muted">갱신 {formatKst(r.updatedAt)}</p>}
     </a>
   );
 }
@@ -60,22 +61,22 @@ const isEnded = (r: OrchRun) => r.status === "done" || r.status === "cancelled";
 const SUMMARY = "flex min-h-11 cursor-pointer items-center gap-2 py-2";
 
 function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
-  const icon = s.state === "passed" ? "✅" : s.state === "current" ? (blocked ? "⛔" : "▶") : "⬜";
+  const icon: StateKind = s.state === "passed" ? "done" : s.state === "current" ? (blocked ? "blocked" : "doing") : "todo";
   const label = s.state === "passed" ? "통과" : s.state === "current" ? (blocked ? "멈춤" : "진행 중") : "대기";
   return (
     <details open={s.state === "current"} className="rounded-lg border border-border" data-testid={`orch-step-${s.id}`}>
       <summary className={`${SUMMARY} px-2 text-sm`}>
-        <span aria-label={label} role="img" className="shrink-0">{icon}</span>
+        <span aria-label={label} role="img" className="shrink-0"><StateIcon kind={icon} /></span>
         <span className="min-w-0 break-words">Step {s.id}. {s.title}</span>
       </summary>
       <ul className="space-y-1 px-2 pb-2 text-xs">
         {s.checks.map((c, i) => (
           <li key={i} className="flex gap-1.5">
-            <span aria-label={c.done ? "완료" : "미완료"} role="img" className="shrink-0">{c.done ? "✅" : "⬜"}</span>
+            <span aria-label={c.done ? "완료" : "미완료"} role="img" className="shrink-0"><StateIcon kind={c.done ? "done" : "todo"} className="h-3.5 w-3.5 translate-y-px" /></span>
             <span className="min-w-0 break-words">{c.text}</span>
           </li>
         ))}
-        {!s.checks.length && <li className="text-text-faint">세부 할 일 없음</li>}
+        {!s.checks.length && <li className="text-text-muted">세부 할 일 없음</li>}
       </ul>
     </details>
   );
@@ -96,10 +97,10 @@ function RunDetails({ r }: { r: OrchRun }) {
         <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
       </span>
       <p className="text-xs"><a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center underline">#{r.number} 열기</a>{r.finalPr ? ` · 최종 PR #${r.finalPr}` : ""}</p>
-      {r.held && <p className="text-xs text-yellow-100">⏸️ {r.held}</p>}
-      {r.reason && <p className="break-words text-xs text-red-200">⛔ {r.reason}</p>}
+      {r.held && <p className="text-xs text-warn"><PauseIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />{r.held}</p>}
+      {r.reason && <p className="break-words text-xs text-danger"><StopIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />{r.reason}</p>}
       <p className="text-xs">다음 · {r.next}</p>
-      {r.updatedAt && <p className="text-[11px] text-text-faint">갱신 {formatKst(r.updatedAt)}</p>}
+      {r.updatedAt && <p className="text-[11px] text-text-muted">갱신 {formatKst(r.updatedAt)}</p>}
       <div className="space-y-1 pt-1">
         {r.steps.map((s) => <StepDetails key={s.id} s={s} blocked={r.status === "blocked"} />)}
       </div>
@@ -107,9 +108,9 @@ function RunDetails({ r }: { r: OrchRun }) {
   );
 }
 
-const ROADMAP_ICON: Record<RoadmapStatus, [string, string]> = { done: ["✅", "완료"], doing: ["🔄", "진행 중"], todo: ["⬜", "할 일"], na: ["➖", "해당 없음"] };
+const ROADMAP_ICON: Record<RoadmapStatus, [StateKind, string]> = { done: ["done", "완료"], doing: ["doing", "진행 중"], todo: ["todo", "할 일"], na: ["na", "해당 없음"] };
 
-/** Stage 0 (인프라) / 6 (확장) checklist row: '0 인프라 ✅ 완료/전체' + small bar, expands to one line per item. */
+/** Stage 0 (인프라) / 6 (확장) checklist row: '0 인프라 완료/전체' + small bar, expands to one line per item. */
 function RoadmapRow({ n, title, items, testid }: { n: 0 | 6; title: string; items: RoadmapItem[]; testid: string }) {
   const c = roadmapCount(items);
   const allDone = c.total > 0 && c.done === c.total;
@@ -118,7 +119,7 @@ function RoadmapRow({ n, title, items, testid }: { n: 0 | 6; title: string; item
     <details className="rounded-lg border border-border px-2" data-testid={testid}>
       <summary className={`${SUMMARY} text-sm`}>
         <span className="font-semibold">{n} {title}</span>
-        {allDone && n === 0 ? <span className="text-xs text-green-200">✅ 인프라 완료</span> : <span className="text-xs text-text-muted">{n === 0 ? "✅ " : ""}{c.text}</span>}
+        {allDone && n === 0 ? <span className="inline-flex items-center gap-1 text-xs text-ok"><StateIcon kind="done" className="h-3.5 w-3.5" />인프라 완료</span> : <span className="inline-flex items-center gap-1 text-xs text-text-muted">{n === 0 && <StateIcon kind="done" className="h-3.5 w-3.5" />}{c.text}</span>}
         <span className="ml-auto block h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-border" role="progressbar" aria-label={`${title} 완료 항목`} aria-valuemin={0} aria-valuemax={c.total} aria-valuenow={c.done}>
           <span className="block h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
         </span>
@@ -127,13 +128,13 @@ function RoadmapRow({ n, title, items, testid }: { n: 0 | 6; title: string; item
         {items.map((i) => (
           <li key={i.id} className="min-w-0">
             <p className="flex gap-1.5">
-              <span aria-label={ROADMAP_ICON[i.status][1]} role="img" className="shrink-0">{ROADMAP_ICON[i.status][0]}</span>
+              <span aria-label={ROADMAP_ICON[i.status][1]} role="img" className="shrink-0"><StateIcon kind={ROADMAP_ICON[i.status][0]} className="h-3.5 w-3.5 translate-y-0.5" /></span>
               <span className="min-w-0 break-words"><span className="tabular-nums text-text-muted">{i.id}</span> {i.title}</span>
             </p>
-            {i.note && <p className="truncate pl-6 text-[11px] text-text-faint" title={i.note}>{i.note}</p>}
+            {i.note && <p className="truncate pl-6 text-[11px] text-text-muted" title={i.note}>{i.note}</p>}
           </li>
         ))}
-        {!items.length && <li className="text-text-faint">항목 없음</li>}
+        {!items.length && <li className="text-text-muted">항목 없음</li>}
       </ul>
     </details>
   );
@@ -145,15 +146,15 @@ const DEPLOY_TEXT = (d: boolean | null | undefined) => (d === true ? "배포됨"
 function ItemLine({ item, done }: { item: BoardItem; done: boolean }) {
   return (
     <span className="block min-w-0 break-words text-xs">
-      {item.blocked && <span aria-hidden="true">⛔ </span>}
+      {item.blocked && <StopIcon className="mr-1 h-3.5 w-3.5 align-text-bottom text-danger" />}
       {done ? (
         <>
           <span className="tabular-nums text-text-muted">{formatKstShort(item.at, "날짜 없음")}</span>
           {" · "}
-          <span className={item.deployed === false ? "text-yellow-100" : item.deployed === true ? "text-green-200" : "text-text-muted"}>{DEPLOY_TEXT(item.deployed)}</span>
+          <span className={item.deployed === false ? "text-warn" : item.deployed === true ? "text-ok" : "text-text-muted"}>{DEPLOY_TEXT(item.deployed)}</span>
         </>
       ) : (
-        <><span className="tabular-nums text-text-muted">{item.sub}</span> <span className={item.blocked ? "text-red-200" : undefined}>{item.label}</span></>
+        <><span className="tabular-nums text-text-muted">{item.sub}</span> <span className={item.blocked ? "text-danger" : undefined}>{item.label}</span></>
       )}
       {" · "}<span className="font-medium">{item.title}</span>
     </span>
@@ -168,7 +169,7 @@ function BoardRow({ item, repo, done }: { item: BoardItem; repo: string; done: b
       <details className={`rounded-lg border px-2 ${tone(r)}`} data-testid={`orch-run-${short(repo)}-${r.number}`}>
         <summary className="flex min-h-11 cursor-pointer flex-col justify-center py-1.5">
           <ItemLine item={item} done={done} />
-          {r.needsUser && <span className="mt-1 inline-block self-start rounded-full bg-warn/20 px-2 py-0.5 text-[11px] text-yellow-100">사용자 확인 필요</span>}
+          {r.needsUser && <span className="mt-1 inline-block self-start rounded-full bg-warn/15 px-2 py-0.5 text-[11px] text-warn">사용자 확인 필요</span>}
         </summary>
         <RunDetails r={r} />
       </details>
@@ -191,8 +192,8 @@ function StageProcess({ n, at }: { n: number; at: Set<string> }) {
   return (
     <ol className="flex flex-wrap gap-1 text-[11px]" aria-label={`${step.title} 세부 과정`} data-testid={`orch-stage-process-${n}`}>
       {step.sub.map((x) => (
-        <li key={x.id} className={`rounded px-1.5 py-0.5 ${at.has(x.id) ? "bg-accent/25 text-text font-semibold" : "bg-white/5 text-text-muted"}`}>
-          <span className="tabular-nums text-text-faint">{x.id}</span> {x.title}
+        <li key={x.id} className={`rounded px-1.5 py-0.5 ${at.has(x.id) ? "bg-accent-dim text-accent font-semibold" : "bg-bg text-text-muted"}`}>
+          <span className="tabular-nums text-text-muted">{x.id}</span> {x.title}
         </li>
       ))}
     </ol>
@@ -214,7 +215,7 @@ function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: s
         <span className="flex min-w-0 flex-col">
           <span className="flex items-center gap-2">
             <span className="font-semibold">{c.n} {c.title}</span>
-            {needs > 0 && <span className="shrink-0 rounded-full bg-warn/20 px-2 py-0.5 text-[11px] text-yellow-100">확인 필요 {needs}</span>}
+            {needs > 0 && <span className="shrink-0 rounded-full bg-warn/15 px-2 py-0.5 text-[11px] text-warn">확인 필요 {needs}</span>}
             {counts && <span className="min-w-0 truncate text-[11px] text-text-muted" data-testid="orch-stage-deploy">배포 대기 {counts.pending} · 배포됨 {counts.deployed}</span>}
           </span>
           <span className="text-[11px] text-text-muted">{LIFECYCLE[c.n - 1].desc}</span>
@@ -223,7 +224,7 @@ function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: s
       </summary>
       <div className="space-y-1.5 pb-2">
         <StageProcess n={c.n} at={at} />
-        {done && deploy && <p className="text-[11px] text-text-faint" data-testid="orch-deploy">다음 배포까지 {deploy}</p>}
+        {done && deploy && <p className="text-[11px] text-text-muted" data-testid="orch-deploy">다음 배포까지 {deploy}</p>}
         {first.map((item) => <BoardRow key={item.key} item={item} repo={repo} done={done} />)}
         {rest.length > 0 && (
           <details data-testid="orch-stage-more">
@@ -231,7 +232,7 @@ function StageRow({ c, repo, deploy }: { c: BoardColumn; repo: string; deploy: s
             <div className="space-y-1.5">{rest.map((item) => <BoardRow key={item.key} item={item} repo={repo} done={done} />)}</div>
           </details>
         )}
-        {empty && <p className="text-xs text-text-faint">지금 이 단계에 있는 작업 없음</p>}
+        {empty && <p className="text-xs text-text-muted">지금 이 단계에 있는 작업 없음</p>}
       </div>
     </details>
   );
@@ -252,13 +253,13 @@ function ProjectCard({ v }: { v: RepoView }) {
           {needs > 0 && <span className="rounded-full bg-warn/20 px-2 py-0.5 text-xs">확인 필요 {needs}개</span>}
         </summary>
         <div className="space-y-2 pb-1">
-          {roadmapNote ? <p className={`text-xs ${v.roadmapError ? "text-red-200" : "text-text-faint"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
+          {roadmapNote ? <p className={`text-xs ${v.roadmapError ? "text-danger" : "text-text-muted"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
             : <RoadmapRow n={0} title="인프라" items={v.roadmap!.setup} testid="orch-roadmap-setup" />}
           <section aria-label="작업 흐름" className="space-y-1.5" data-testid="orch-flow">
             <h3 className="text-sm font-semibold">작업 흐름</h3>
-            {v.runsError && <p className="text-xs text-red-200">작업 불러오기 실패 · {v.runsError}</p>}
-            {v.plansError && <p className="text-xs text-red-200">계획 불러오기 실패 · {v.plansError}</p>}
-            {v.ideasError && <p className="text-xs text-red-200">아이디어 불러오기 실패 · {v.ideasError}</p>}
+            {v.runsError && <p className="text-xs text-danger">작업 불러오기 실패 · {v.runsError}</p>}
+            {v.plansError && <p className="text-xs text-danger">계획 불러오기 실패 · {v.plansError}</p>}
+            {v.ideasError && <p className="text-xs text-danger">아이디어 불러오기 실패 · {v.ideasError}</p>}
             {board.map((c) => <StageRow key={c.n} c={c} repo={v.repo} deploy={deploy} />)}
           </section>
           {!roadmapNote && <RoadmapRow n={6} title="확장" items={v.roadmap!.expansion} testid="orch-roadmap-expansion" />}
@@ -291,19 +292,19 @@ export function OrchRunsPanel() {
     <section aria-label="자동 진행 작업" className="space-y-2" data-testid="orch-runs">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-text-muted">자동 진행 작업</h2>
-        <button type="button" onClick={refresh} disabled={busy} data-testid="orch-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "불러오는 중…" : "↻ 새로고침"}</button>
+        <button type="button" onClick={refresh} disabled={busy} data-testid="orch-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "불러오는 중…" : <span className="inline-flex items-center gap-1.5"><RefreshIcon className="h-3.5 w-3.5" />새로고침</span>}</button>
       </div>
-      {updatedAt !== null && <p className="text-[11px] text-text-faint" data-testid="orch-refreshed">방금 갱신 {formatKstTime(updatedAt)}</p>}
-      {failed && <p role="status" className="text-xs text-red-200">새로고침 실패 · 잠시 후 다시</p>}
+      {updatedAt !== null && <p className="text-[11px] text-text-muted" data-testid="orch-refreshed">방금 갱신 {formatKstTime(updatedAt)}</p>}
+      {failed && <p role="status" className="text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
       {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
     </section>
   );
 }
 
 const BADGE_TONE: Record<PlanBadgeTone, string> = {
-  ok: "bg-ok/15 text-green-200",
-  warn: "bg-warn/20 text-yellow-100",
-  danger: "bg-danger/15 text-red-200",
+  ok: "bg-ok/10 text-ok",
+  warn: "bg-warn/10 text-warn",
+  danger: "bg-danger/10 text-danger",
   muted: "bg-current/10 text-text-muted",
 };
 
@@ -313,17 +314,17 @@ function PlanCard({ p, canApprove, busy, armed, onArm, onApprove }: { p: Pending
     <div className="rounded-xl border border-border p-3" data-testid={`orch-plan-${short(p.repo)}-${p.number}`}>
       <div className="flex items-start justify-between gap-2">
         <p className="min-w-0 break-words font-medium">{p.goal}</p>
-        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${BADGE_TONE[badge.tone]}`}>{badge.text}</span>
+        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ${BADGE_TONE[badge.tone]}`}>{badge.tone === "ok" ? <CheckIcon className="h-3 w-3" /> : badge.revise ? <EditIcon className="h-3 w-3" /> : badge.tone === "danger" ? <AlertIcon className="h-3 w-3" /> : null}{badge.text}</span>
       </div>
       <p className="mt-1 text-xs text-text-muted">{short(p.repo)} #{p.number} · 스텝 {p.steps}개</p>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
         {canApprove && (
           <button type="button" disabled={busy} onClick={armed ? onApprove : onArm}
-            className={`min-h-11 rounded-lg px-3 text-sm font-semibold disabled:opacity-50 ${armed ? "bg-warn/20 text-yellow-100" : "border border-border"}`}>
+            className={`min-h-11 rounded-lg px-3 text-sm font-semibold disabled:opacity-50 ${armed ? "bg-warn/15 text-warn" : "border border-border"}`}>
             {busy ? "승인 중…" : armed ? "정말 시작할까요? 승인" : "승인"}
           </button>
         )}
-        {canApprove && badge.revise && <span className="text-xs text-yellow-100">감사에서 수정 필요 상태입니다</span>}
+        {canApprove && badge.revise && <span className="text-xs text-warn">감사에서 수정 필요 상태입니다</span>}
         <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-xs underline">계획 보기</a>
       </div>
     </div>
@@ -355,8 +356,8 @@ export function OrchPlansPanel() {
   }
 
   const status = msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>;
-  const errorLines = errors.map((v) => <p key={v.repo} className="text-xs text-red-200">{short(v.repo)} 계획 불러오기 실패 · {v.plansError}</p>);
-  if (!plans.length) return <div className="space-y-2" data-testid="orch-plans">{status}{errorLines}<p className="text-sm text-text-faint">승인 대기 계획 없음</p></div>;
+  const errorLines = errors.map((v) => <p key={v.repo} className="text-xs text-danger">{short(v.repo)} 계획 불러오기 실패 · {v.plansError}</p>);
+  if (!plans.length) return <div className="space-y-2" data-testid="orch-plans">{status}{errorLines}<p className="text-sm text-text-muted">승인 대기 계획 없음</p></div>;
   return (
     <section aria-label="승인 대기 계획" className="space-y-2" data-testid="orch-plans">
       <h2 className="text-sm font-semibold text-text-muted">승인 대기 계획 · {plans.length}</h2>
@@ -366,7 +367,7 @@ export function OrchPlansPanel() {
         const key = `${p.repo}#${p.number}`;
         return <PlanCard key={key} p={p} canApprove={canApprove} busy={busy !== null} armed={armed === key} onArm={() => { setArmed(key); setMsg(null); }} onApprove={() => approve(p)} />;
       })}
-      {!canApprove && <p className="text-xs text-text-faint">{session.role !== "admin" ? "관리자 로그인에서만 승인할 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 승인할 수 없습니다."}</p>}
+      {!canApprove && <p className="text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 승인할 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 승인할 수 없습니다."}</p>}
     </section>
   );
 }
@@ -380,7 +381,7 @@ export function OrchDecisionsPanel() {
     <section aria-label="엔진 결정 필요" className="space-y-2" data-testid="orch-decisions">
       <h2 className="text-sm font-semibold text-text-muted">엔진 · 결정 필요 · {runs.filter((r) => r.needsUser).length}</h2>
       {runs.map((r) => <RunCard key={`${r.repo}#${r.number}`} r={r} />)}
-      {!runs.length && <p className="text-sm text-text-faint">없음 — 모든 작업이 자동으로 진행 중입니다.</p>}
+      {!runs.length && <p className="text-sm text-text-muted">없음 — 모든 작업이 자동으로 진행 중입니다.</p>}
     </section>
   );
 }
@@ -419,7 +420,7 @@ export function OrchSwitchesPanel() {
       {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => (
         <Card key={v.repo} className="space-y-3">
           <p className="font-semibold">{short(v.repo)}</p>
-          {!v.switches ? <p className="text-xs text-red-200">스위치를 읽지 못했습니다 · {v.switchesError}</p> : <>
+          {!v.switches ? <p className="text-xs text-danger">스위치를 읽지 못했습니다 · {v.switchesError}</p> : <>
             {FLAG_KEYS.map((k) => {
               const on = v.switches![k];
               const label = k === "paused" ? (on ? "정지됨" : "운영 중") : on ? "ON" : "OFF";
@@ -429,7 +430,7 @@ export function OrchSwitchesPanel() {
                   <div><p className="text-sm">{FLAG_TEXT[k].name}</p>{!active && FLAG_TEXT[k].off && <p className="text-xs text-text-muted">꺼짐 · {FLAG_TEXT[k].off}</p>}</div>
                   <button role="switch" aria-checked={active} aria-label={`${short(v.repo)} ${FLAG_TEXT[k].name}`} disabled={!canEdit || busy !== null}
                     onClick={() => change(v.repo, k, !on)}
-                    className={`min-h-11 min-w-20 shrink-0 rounded-full px-3 text-sm font-semibold disabled:opacity-50 ${active ? "bg-blue-500" : "bg-slate-700"}`}>
+                    className={`min-h-11 min-w-20 shrink-0 rounded-full px-3 text-sm font-semibold disabled:opacity-50 ${active ? "bg-accent text-white" : "bg-border text-text-muted"}`}>
                     {busy === `${v.repo}:${k}` ? "…" : label}
                   </button>
                 </div>
@@ -439,7 +440,7 @@ export function OrchSwitchesPanel() {
           </>}
         </Card>
       ))}
-      {state.kind === "ok" && !canEdit && <p className="text-xs text-text-faint">{session.role !== "admin" ? "관리자 로그인에서만 바꿀 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 읽기만 가능합니다."}</p>}
+      {state.kind === "ok" && !canEdit && <p className="text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 바꿀 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 읽기만 가능합니다."}</p>}
     </section>
   );
 }
@@ -461,15 +462,15 @@ function WindowEditor({ repo, value, disabled, onSave }: { repo: string; value: 
 function Bar({ label, w }: { label: string; w: UsageWindow | null }) {
   const p = w?.pct ?? null;
   const left = p === null ? null : Math.max(0, Math.round((100 - p) * 10) / 10);
-  const color = p === null ? "bg-slate-600" : p >= 90 ? "bg-red-400" : p >= 70 ? "bg-yellow-400" : "bg-blue-400";
+  const color = p === null ? "bg-text-faint" : p >= 90 ? "bg-danger" : p >= 70 ? "bg-warn" : "bg-accent";
   return (
     <div className="space-y-1">
       <div className="flex items-baseline justify-between text-sm">
         <span>{label}</span>
         <span className="font-semibold">{p === null ? "확인 불가" : `${p}% 사용 · ${left}% 남음`}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-700"><div className={`h-full ${color}`} style={{ width: `${Math.min(100, p ?? 0)}%` }} /></div>
-      <p className="text-[11px] text-text-faint">리셋 {w?.resetsAt ? formatKst(w.resetsAt) : "확인 불가"}</p>
+      <div className="h-2 overflow-hidden rounded-full bg-border"><div className={`h-full ${color}`} style={{ width: `${Math.min(100, p ?? 0)}%` }} /></div>
+      <p className="text-[11px] text-text-muted">리셋 {w?.resetsAt ? formatKst(w.resetsAt) : "확인 불가"}</p>
     </div>
   );
 }
@@ -500,24 +501,24 @@ export function OrchUsagePanel() {
     <section aria-label="AI 사용량" className="space-y-2" data-testid="orch-usage">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-semibold">AI 사용량</h2>
-        {canRefresh && <button type="button" onClick={refresh} disabled={busy} data-testid="usage-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "요청 중…" : "↻ 지금 확인"}</button>}
+        {canRefresh && <button type="button" onClick={refresh} disabled={busy} data-testid="usage-refresh" className="min-h-11 rounded-lg border border-border px-3 text-xs disabled:opacity-50">{busy ? "요청 중…" : <span className="inline-flex items-center gap-1.5"><RefreshIcon className="h-3.5 w-3.5" />지금 확인</span>}</button>}
       </div>
       {msg && <p role="status" className="rounded-xl border border-border bg-bg-raised p-2 text-xs">{msg}</p>}
-      {u && state.data.repos.some((r) => r.usageRefresh === "requested" || r.usageRefresh === "running") && <p className="text-[11px] text-text-faint" data-testid="usage-refreshing">값이 1시간 넘게 지나 새로 확인하는 중입니다. 1~2분 뒤 새로고침하면 반영됩니다.</p>}
+      {u && state.data.repos.some((r) => r.usageRefresh === "requested" || r.usageRefresh === "running") && <p className="text-[11px] text-text-muted" data-testid="usage-refreshing">값이 1시간 넘게 지나 새로 확인하는 중입니다. 1~2분 뒤 새로고침하면 반영됩니다.</p>}
       {!u ? <Card><p className="text-sm text-text-muted">아직 사용량 기록이 없습니다. 엔진의 usage 작업이 처음 돌면 표시됩니다.</p></Card> : <>
         <Card className="space-y-3">
           <p className="font-semibold">Claude <span className="text-xs font-normal text-text-muted">구독 전체 · 직접 대화 포함</span></p>
           {u.claude ? <><Bar label="5시간" w={u.claude.fiveHour} /><Bar label="7일" w={u.claude.sevenDay} /></> : <p className="text-sm text-text-muted">확인 불가{u.claudeError ? ` · ${u.claudeError}` : ""}</p>}
-          <p className="text-[11px] text-text-faint">확인 {formatKst(u.claudeCheckedAt, "없음")}{u.claude && u.claudeError ? ` · 이번 확인: ${u.claudeError}` : ""}</p>
+          <p className="text-[11px] text-text-muted">확인 {formatKst(u.claudeCheckedAt, "없음")}{u.claude && u.claudeError ? ` · 이번 확인: ${u.claudeError}` : ""}</p>
         </Card>
         <Card className="space-y-3">
           <div className="flex items-start justify-between gap-2">
             <p className="font-semibold">Codex</p>
-            {u.codex.limited && <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-xs text-yellow-200">한도 소진 · Opus 대체 검수</span>}
+            {u.codex.limited && <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs text-warn">한도 소진 · Opus 대체 검수</span>}
           </div>
           {u.codex.fiveHour || u.codex.weekly ? <><Bar label="5시간" w={u.codex.fiveHour} /><Bar label="주간" w={u.codex.weekly} /></> : <p className="text-sm text-text-muted">사용률 확인 불가</p>}
-          {u.codex.needsLogin && <p className="rounded-lg border border-warn/50 bg-warn/10 p-2 text-xs text-yellow-100">🔑 폰 로그인 필요 — GitHub Actions → codex-login → Run workflow 후 표시되는 코드로 승인</p>}
-          <p className="text-[11px] text-text-faint">확인 {formatKst(u.codex.checkedAt, "없음")}{u.codex.error && !u.codex.needsLogin ? ` · 이번 조회: ${u.codex.error}` : ""}</p>
+          {u.codex.needsLogin && <p className="rounded-lg border border-warn/50 bg-warn/10 p-2 text-xs text-warn"><KeyIcon className="mr-1 h-3.5 w-3.5 align-text-bottom" />폰 로그인 필요 — GitHub Actions → codex-login → Run workflow 후 표시되는 코드로 승인</p>}
+          <p className="text-[11px] text-text-muted">확인 {formatKst(u.codex.checkedAt, "없음")}{u.codex.error && !u.codex.needsLogin ? ` · 이번 조회: ${u.codex.error}` : ""}</p>
         </Card>
       </>}
     </section>

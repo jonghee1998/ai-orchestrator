@@ -12,7 +12,7 @@ export function LoginCard() {
   const [remember, setRemember] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  if (s.status === "unknown") return <Card><p className="text-xs text-text-faint">세션 확인 중…</p></Card>;
+  if (s.status === "unknown") return <Card><p className="text-xs text-text-muted">세션 확인 중…</p></Card>;
   if (s.status === "authed")
     return (
       <Card>
@@ -39,7 +39,7 @@ export function LoginCard() {
         <label className="mt-3 flex min-h-11 items-center gap-2 text-xs text-text-muted">
           <input type="checkbox" name="remember" checked={remember} onChange={(e) => setRemember(e.target.checked)} />로그인 상태 유지 (30일)
         </label>
-        <p className="text-xs text-text-faint">선택하지 않으면 브라우저 세션 동안 유지되며 최대 12시간 후 만료됩니다.</p>
+        <p className="text-xs text-text-muted">선택하지 않으면 브라우저 세션 동안 유지되며 최대 12시간 후 만료됩니다.</p>
         <button type="submit" disabled={busy || !username || !password} className="mt-2 min-h-11 rounded-lg border border-border px-3 text-sm disabled:opacity-50">{busy ? "로그인 중…" : "로그인"}</button>
         {msg && <p role="status" className="mt-2 text-xs text-warn">{msg}</p>}
       </form>
