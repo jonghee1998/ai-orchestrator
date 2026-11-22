@@ -5,30 +5,30 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // 다크모드 기본 팔레트 (앱 전역 토큰)
+        // 밝은 테마 팔레트 (앱 전역 토큰)
         bg: {
-          DEFAULT: "#0B1220",
-          raised: "#101A2A",
-          card: "#151F30",
+          DEFAULT: "#F6F7F9",
+          raised: "#F6F7F9",
+          card: "#FFFFFF",
         },
         border: {
-          DEFAULT: "#29384D",
-          subtle: "#1e222a",
+          DEFAULT: "#ECEEF1",
+          subtle: "#F1F3F5",
         },
         text: {
-          DEFAULT: "#e6e8ec",
-          muted: "#9aa0ab",
-          faint: "#949ba8",
+          DEFAULT: "#111418",
+          muted: "#5F6773",
+          faint: "#7A828E",
         },
         accent: {
-          DEFAULT: "#5b8def",
-          dim: "#2b3a5c",
+          DEFAULT: "#2563D9",
+          dim: "#EEF3FD",
         },
         // 상태 색상
-        ok: "#3fb950",
-        warn: "#d29922",
-        danger: "#f85149",
-        unknown: "#6e7681",
+        ok: "#17703C",
+        warn: "#8A5A00",
+        danger: "#C5221F",
+        unknown: "#7A828E",
       },
       maxWidth: {
         app: "520px",

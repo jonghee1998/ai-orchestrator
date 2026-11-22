@@ -302,9 +302,9 @@ export function planReviewBadge(review: PendingPlan["review"]): { text: string; 
   if (!review) return { text: "감사 전", tone: "muted", revise: false };
   if (review.stale) return { text: "감사 후 수정됨 · 재감사 대기", tone: "muted", revise: false };
   const r = `${review.round}/${PLAN_REVIEW_ROUNDS}`;
-  if (review.verdict === "OK") return { text: `✅ 감사 OK ${r}`, tone: "ok", revise: false };
-  if (review.verdict === "REVISE") return { text: `✏️ 수정 필요 ${r}`, tone: "warn", revise: true };
-  return { text: "⚠️ 감사 실패", tone: "danger", revise: false };
+  if (review.verdict === "OK") return { text: `감사 OK ${r}`, tone: "ok", revise: false };
+  if (review.verdict === "REVISE") return { text: `수정 필요 ${r}`, tone: "warn", revise: true };
+  return { text: "감사 실패", tone: "danger", revise: false };
 }
 
 /** Result line after POST { action: 'approve' } (status + JSON body from /api/orch). */

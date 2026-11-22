@@ -12,7 +12,7 @@ const MAX_TITLE = 80;
 const MAX_MINE = 4000;
 
 const REC_TEXT = { now: "지금 하자", later: "나중에", hold: "보류" } as const;
-const REC_TONE = { now: "bg-ok/15 text-green-200", later: "bg-warn/20 text-yellow-100", hold: "bg-current/10 text-text-muted" } as const;
+const REC_TONE = { now: "bg-ok/10 text-ok", later: "bg-warn/10 text-warn", hold: "bg-current/10 text-text-muted" } as const;
 const LEVEL_TEXT = { high: "높음", medium: "보통", low: "낮음" } as const;
 const STATUS_NOTE: Record<Idea["status"], string | null> = {
   collecting: "의견 수집 중",
@@ -53,7 +53,7 @@ function OpinionTable({ claude, codex }: { claude: Opinion | null; codex: Opinio
                   <td className="py-1 pr-2">{o.effort}{o.steps ? ` · ${o.steps}스텝` : ""}</td>
                   <td className="py-1 pr-2">{LEVEL_TEXT[o.risk]}</td>
                   <td className="py-1">{REC_TEXT[o.recommend]}</td>
-                </> : <td colSpan={4} className="py-1 text-text-faint">의견 없음</td>}
+                </> : <td colSpan={4} className="py-1 text-text-muted">의견 없음</td>}
               </tr>
             ))}
           </tbody>
@@ -76,7 +76,7 @@ function IdeaCard({ i }: { i: Idea }) {
       <p className="mt-1 text-xs text-text-muted">{formatKstShort(i.createdAt)}{` · ${short(i.repo)}`} · #{i.number}</p>
 
       <div className="mt-2 text-sm">
-        {!i.mine.trim() ? <p className="text-xs text-text-faint">내 의견 없음</p>
+        {!i.mine.trim() ? <p className="text-xs text-text-muted">내 의견 없음</p>
           : isLong(i.mine) ? (
             <details>
               <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-text-muted"><span className="shrink-0">내 의견</span><span className="min-w-0 truncate">{i.mine.split("\n")[0]}</span></summary>
@@ -86,7 +86,7 @@ function IdeaCard({ i }: { i: Idea }) {
       </div>
 
       <div className="mt-2 space-y-2 border-t border-border pt-2">
-        {note && <p className="text-xs text-yellow-100">{note}</p>}
+        {note && <p className="text-xs text-warn">{note}</p>}
         {r && (
           <>
             <div className="flex flex-wrap items-start gap-2">
@@ -161,7 +161,7 @@ export function OrchIdeasPanel() {
           })}
         </div>
       )}
-      {errors.map((v) => <p key={v.repo} className="text-xs text-red-200">{short(v.repo)} 아이디어 불러오기 실패 · {v.ideasError}</p>)}
+      {errors.map((v) => <p key={v.repo} className="text-xs text-danger">{short(v.repo)} 아이디어 불러오기 실패 · {v.ideasError}</p>)}
       {canWrite && (
         <form onSubmit={submit} className="space-y-2 rounded-xl border border-border p-3" aria-label="아이디어 적기" data-testid="orch-idea-form">
           <p className="text-sm font-medium">아이디어 적기</p>
@@ -182,11 +182,11 @@ export function OrchIdeasPanel() {
             <textarea id="idea-mine" value={mine} maxLength={MAX_MINE} rows={4} onChange={(e) => setMine(e.target.value)} className={`${FIELD} py-2`} />
           </div>
           <button type="submit" disabled={busy || !title.trim()} className="min-h-11 rounded-lg border border-border px-4 text-sm font-semibold disabled:opacity-50">{busy ? "등록 중…" : "등록"}</button>
-          {msg && <p role="status" className={`text-xs ${msg.ok ? "" : "text-red-200"}`}>{msg.text}</p>}
+          {msg && <p role="status" className={`text-xs ${msg.ok ? "" : "text-danger"}`}>{msg.text}</p>}
         </form>
       )}
       {shown.map((i) => <IdeaCard key={`${i.repo}#${i.number}`} i={i} />)}
-      {!shown.length && !errors.length && <p className="text-sm text-text-faint">아이디어 없음</p>}
+      {!shown.length && !errors.length && <p className="text-sm text-text-muted">아이디어 없음</p>}
     </section>
   );
 }
