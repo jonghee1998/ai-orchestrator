@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "setup": [
+    {"id": "0.1", "title": "목적·최종 목표", "status": "done", "note": "PRODUCT.md", "ref": "PRODUCT.md"},
+    {"id": "0.2", "title": "기술 스택·아키텍처", "status": "done", "note": "Next.js + Actions + Vercel"},
+    {"id": "0.3", "title": "GitHub 저장소", "status": "done", "note": "본체+시험용, 공개(Actions 무제한)"},
+    {"id": "0.4", "title": "브랜치·권한·반영 정책", "status": "doing", "note": "엔진 정책 완료, 브랜치 보호 확인 필요"},
+    {"id": "0.5", "title": "엔진·워크플로 설치", "status": "done", "note": "워크플로 10종", "ref": ".github/workflows"},
+    {"id": "0.6", "title": "매뉴얼·개발 규칙", "status": "done", "note": "ORCH_MANUAL·CLAUDE.md", "ref": "docs/ORCH_MANUAL.md"},
+    {"id": "0.7", "title": "Claude 구독 토큰", "status": "done", "note": "CLAUDE_CODE_OAUTH_TOKEN"},
+    {"id": "0.8", "title": "GitHub 작업 토큰", "status": "done", "note": "BOT_PAT"},
+    {"id": "0.9", "title": "Codex 리뷰 연결", "status": "done", "note": "한도 11/24 09:52 초기화"},
+    {"id": "0.10", "title": "Codex 사용량 인증", "status": "done", "note": "폰 로그인·암호화"},
+    {"id": "0.11", "title": "ECC·Impeccable·스킬", "status": "done", "note": "ECC 10 + Impeccable, 해시 고정", "ref": 215},
+    {"id": "0.12", "title": "CI·테스트·화면 테스트", "status": "done", "note": "typecheck·test·build·screens", "ref": 237},
+    {"id": "0.13", "title": "Vercel 배포", "status": "done", "note": "Deploy Hook, 11/22 첫 배포", "ref": 247},
+    {"id": "0.14", "title": "외부 서비스 연결", "status": "na", "note": "해당 없음(예전 Supabase 코드 정리 대상)"},
+    {"id": "0.15", "title": "모바일 알림", "status": "done", "note": "ntfy + PM 점검 알림"},
+    {"id": "0.16", "title": "통합 상황판 연결", "status": "done", "note": "ORCH_REPOS·ORCH_GITHUB_TOKEN"},
+    {"id": "0.17", "title": "사용량·시간·배포 정책", "status": "done", "note": "ON/OFF·시간대·10개 단위 배포"},
+    {"id": "0.18", "title": "보안 검증", "status": "doing", "note": "비밀값 점검 완료, 정식 점검표 남음"},
+    {"id": "0.19", "title": "실제 E2E 테스트", "status": "done", "note": "실제 작업 10건+ 완주", "ref": 209},
+    {"id": "0.20", "title": "개발 가능 상태", "status": "done"}
+  ],
+  "expansion": [
+    {"id": "6.1", "title": "새 프로젝트 연결 절차", "status": "todo", "note": "엔진 설치·비밀값·상황판 등록"},
+    {"id": "6.2", "title": "새 저장소 연결 테스트", "status": "todo", "note": "0단계 체크리스트 완주"},
+    {"id": "6.3", "title": "프로젝트별 규칙·스킬", "status": "todo", "note": "아이디어 #267", "ref": 267},
+    {"id": "6.4", "title": "다른 기술 스택 지원", "status": "todo", "note": "Python CI·검수"},
+    {"id": "6.5", "title": "여러 프로젝트 동시 확인", "status": "todo", "note": "스킬 목록 아이디어 #268", "ref": 268}
+  ]
+}
