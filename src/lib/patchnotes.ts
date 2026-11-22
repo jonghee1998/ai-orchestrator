@@ -17,7 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
-  { version: "2.1.0", date: "2026-11-22", title: "직접 할 일·프로젝트별 패치노트", items: ["프로젝트 탭에 '직접 할 일': 인프라 중 안 끝난 항목(브랜치 보호 확인·Codex 켜기·보안 점검표)", "패치노트를 프로젝트별로 선택해 보기, 다른 저장소는 docs/patchnotes.json 을 읽음"] },
+  { version: "2.1.0", date: "2026-11-22", pr: 298, title: "직접 할 일·프로젝트별 패치노트", items: ["프로젝트 탭에 '직접 할 일': 인프라 중 안 끝난 항목(브랜치 보호 확인·Codex 켜기·보안 점검표)", "패치노트를 프로젝트별로 선택해 보기, 다른 저장소는 docs/patchnotes.json 을 읽음"] },
   { version: "2.0.0", date: "2026-11-22", pr: 297, title: "상황판 2.0 — 새 디자인과 전체 흐름", items: ["밝은 화면·Pretendard·SVG 아이콘으로 5탭 전체 새 디자인", "프로젝트 탭: 계획·개발·통합 남은 과정, 세부 과정 완료 표시, 추가 검토(아이디어) 분리", "구조 탭: 요청→배포 한 장 흐름도와 배포·비밀값 구조도", "패치노트는 큰 버전(1.x, 2.x)별로 접고 펼침"] },
   { version: "1.21.5", date: "2026-11-22", pr: 296, title: "구조 탭 흐름도·배포 구조", items: ["아키텍처를 요청→배포 한 장 흐름도로(승인 1·2, PASS/FAIL, 자동 수정·중단, 반복)", "배포·비밀값 구조도 추가: 폰→Vercel→GitHub, 환경변수·Secrets·Variables 위치와 역할, Deploy Hook 배포", "비밀값 규칙 7가지"] },
   { version: "1.21.4", date: "2026-11-22", pr: 295, title: "추가 검토 분리·접기 표시", items: ["검토(아이디어)는 본 흐름과 따로: 칸은 계획·개발·통합 3개, 검토는 아래 '추가 검토'", "남은 할 일은 계획·개발·통합만 셈", "접고 펼 수 있는 줄마다 > 표시(펼치면 아래로)"] },
