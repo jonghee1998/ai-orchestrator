@@ -23,12 +23,12 @@ test("LIFECYCLE: 5 stages, sub counts 6/9/16/8/8, ids and titles match the task 
   assert.equal(LIFECYCLE[2].sub[9].title, "독립 검수");
 });
 
-const steps = (...states: RunStep["state"][]): RunStep[] => states.map((state, i) => ({ id: i + 1, title: `s${i + 1}`, state, checks: [] }));
+const steps = (...states: RunStep["state"][]): RunStep[] => states.map((state, i) => ({ id: i + 1, title: `s${i + 1}`, state, checks: [], model: null, task: null }));
 
 function run(over: Partial<OrchRun>): OrchRun {
   return {
     steps: steps("passed", "current", "pending"), repo: "o/r", number: 1, url: "u", goal: "g", status: "waiting", statusLabel: "",
-    step: 2, total: 3, passed: 1, pr: null, finalPr: null, retries: 0, maxRetries: 3, held: null, reason: null, updatedAt: null,
+    step: 2, total: 3, passed: 1, pr: null, finalPr: null, retries: 0, maxRetries: 3, planModel: null, held: null, reason: null, updatedAt: null,
     needsUser: false, next: "", ...over,
   };
 }

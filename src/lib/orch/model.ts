@@ -25,6 +25,10 @@ export interface RunStep {
   title: string;
   state: StepState;
   checks: { text: string; done: boolean }[];
+  /** Plan step.model (any string the engine accepts), null when unset. */
+  model: string | null;
+  /** Plan step.task (used only to mirror the engine's risky-text check), null when unset. */
+  task: string | null;
 }
 
 export interface OrchRun {
@@ -43,6 +47,8 @@ export interface OrchRun {
   retries: number;
   /** plan JSON max_retries (engine default 3). */
   maxRetries: number;
+  /** Plan-level model (plan.model), null when unset. */
+  planModel: string | null;
   held: string | null;
   reason: string | null;
   updatedAt: string | null;
@@ -106,7 +112,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
       .map((c) => str(c))
       .filter((c): c is string => c !== null)
       .map((c) => ({ text: c.slice(0, 200), done: state === "passed" }));
-    runSteps.push({ id, title: (str(s.title) ?? `스텝 ${id}`).slice(0, 200), state, checks });
+    runSteps.push({ id, title: (str(s.title) ?? `스텝 ${id}`).slice(0, 200), state, checks, model: str(s.model), task: typeof s.task === "string" ? s.task : null });
   }
   const held = str(obj(st?.held)?.reason);
   const reason = status === "blocked" ? str(st?.reason) : null;
@@ -136,6 +142,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
     finalPr,
     retries: num(st?.retries) ?? 0,
     maxRetries: maxRetriesOf(plan.max_retries),
+    planModel: str(plan.model),
     held,
     reason,
     updatedAt: str(st?.updatedAt),
