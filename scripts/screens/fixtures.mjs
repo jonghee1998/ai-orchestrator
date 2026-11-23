@@ -5,6 +5,7 @@ import { planHash } from "../orch/plan-review.mjs";
 import { ideaHash } from "../orch/idea-review.mjs";
 
 export const REPO = "example/orch-screens";
+export const REPO2 = "example/orch-second"; // 두 번째 가짜 저장소: 여러 저장소에 걸친 '지금 일하는 AI' 예시용
 const OWNER = { login: "example" }; // REPO owner — the engine and the dashboard only accept owner-authored plans
 const ACTIONS_BOT = { login: "github-actions[bot]", id: 41898282, type: "Bot" };
 
@@ -81,8 +82,10 @@ export function githubFixtures(now) {
     { sha: sha(4), parents: [{ sha: sha(3) }, { sha: sha(93) }], commit: { message: "Merge pull request #96 from example/topic-b" } },
   ] };
 
+  const second = secondRepoFixtures(iso, usage);
   /** @returns {{status:number, body:unknown} | null} */
   return (method, url) => {
+    if (url.pathname.startsWith(`/repos/${REPO2}/`)) return second(method, url);
     if (method !== "GET") return null; // the screens test is read-only; writes are reported as problems
     const p = url.pathname, q = url.searchParams;
     if (p === `/repos/${REPO}/issues`) {
@@ -100,6 +103,38 @@ export function githubFixtures(now) {
     if (p === `/repos/${REPO}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
     if (p === `/repos/${REPO}/compare/prod-deployed...main`) return { status: 200, body: compare };
     if (p === `/repos/${REPO}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
+    return null;
+  };
+}
+
+// 두 번째 저장소(example/orch-second): 구현 중(Sonnet) #31 · 검수 중(Codex 켜짐) #32 · 승인 대기(사용자) #33. Opus는 쉬는 중.
+function secondRepoFixtures(iso, usage) {
+  const mk = (number, title, body) => ({ number, title, body, html_url: `https://github.com/${REPO2}/issues/${number}`, state: "open", user: OWNER });
+  const runs = [
+    mk(31, "[plan] 둘째저장소 구현 작업", `${plan("둘째저장소 구현 작업", 2, "시그마")}\n${state({ status: "implementing", step: 1, passed: {}, updatedAt: iso(2) })}`),
+    mk(32, "[plan] 둘째저장소 검수 작업", `${plan("둘째저장소 검수 작업", 2, "오메가")}\n${state({ status: "reviewing", step: 2, passed: { 1: true }, updatedAt: iso(4) })}`),
+    mk(33, "[plan] 둘째저장소 승인 작업", `${plan("둘째저장소 승인 작업", 1, "람다")}\n${state({ status: "awaiting_merge", step: 1, passed: { 1: true }, finalPr: 77, updatedAt: iso(8) })}`),
+  ];
+  const usageIssue = mk(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
+  const variables = [{ name: "ORCH_CODEX", value: "on" }, { name: "ORCH_PAUSED", value: "off" }];
+  const roadmap = { version: 1, setup: [{ id: "0.1", title: "둘째로드맵 저장소", status: "done", note: null }], expansion: [] };
+  const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap)).toString("base64") };
+  return (method, url) => {
+    if (method !== "GET") return null;
+    const p = url.pathname, q = url.searchParams;
+    if (p === `/repos/${REPO2}/issues`) {
+      const label = q.get("labels");
+      if (label === "orch:run") return { status: 200, body: runs };
+      if (label === "orch:usage") return { status: 200, body: [usageIssue] };
+      if (label === null && q.get("state") === "open" && q.get("per_page") === "30") return { status: 200, body: runs.map((i) => ({ ...i, labels: [{ name: "orch:run" }] })) };
+      if (label === null && q.get("state") === "all") return { status: 200, body: runs };
+      return { status: 200, body: [] };
+    }
+    if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(p)) return { status: 200, body: [] };
+    if (p === `/repos/${REPO2}/actions/variables`) return { status: 200, body: { total_count: variables.length, variables } };
+    if (p === `/repos/${REPO2}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
+    if (p === `/repos/${REPO2}/compare/prod-deployed...main`) return { status: 200, body: { status: "identical", commits: [] } };
+    if (p === `/repos/${REPO2}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
     return null;
   };
 }

@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { githubFixtures, REPO } from "./fixtures.mjs";
+import { githubFixtures, REPO, REPO2 } from "./fixtures.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const OUT = path.resolve(process.env.SCREENS_DIR || path.join(ROOT, ".screens"));
@@ -50,7 +50,7 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     PATH: process.env.PATH, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1", VERCEL_ENV: "preview",
     ADMIN_USERNAME: user, ADMIN_PASSWORD_HASH: `scrypt$131072$8$1$${salt.toString("hex")}$${key.toString("hex")}`,
     CONTROL_ADMIN_TOKEN: crypto.randomBytes(24).toString("hex"),
-    ORCH_REPOS: REPO, ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
+    ORCH_REPOS: [REPO, REPO2].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
   },
 });
 
@@ -129,9 +129,27 @@ try {
       if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
     }
     if (t.name === "projects") {
+      // '지금 일하는 AI' 카드: 제목, 네 줄 이름, 두 저장소에 걸친 예시 작업 (구현 중 · 검수 중 · 승인 대기 · 쉬는 중)
+      const agentsCard = page.getByTestId("orch-agents");
+      const text1 = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
+      const agentsText = await text1(agentsCard);
+      if (!(await page.getByRole("heading", { name: "지금 일하는 AI" }).count())) problems.push("[projects] '지금 일하는 AI' 제목이 없음");
+      for (const [id, name, wants] of [
+        ["sonnet", "Sonnet", ["orch-screens", "#11", "상황판 시험 작업", "Step 2/3", "구현 중", "orch-second", "#31", "둘째저장소 구현 작업", "Step 1/2"]],
+        ["opus", "Opus", ["쉬는 중"]],
+        ["codex", "Codex", ["orch-second", "#32", "둘째저장소 검수 작업", "Step 2/2", "검수 중"]],
+        ["user", "사용자", ["#12", "승인 대기 시험 작업", "#33", "둘째저장소 승인 작업", "반영 승인 대기"]],
+      ]) {
+        const t = await text1(page.getByTestId(`orch-agent-${id}`));
+        if (!t.startsWith(name)) problems.push(`[projects] '지금 일하는 AI' ${name} 줄이 없음 (${t.slice(0, 80)})`);
+        for (const want of wants) if (!t.includes(want)) problems.push(`[projects] '지금 일하는 AI' ${name} 줄에 '${want}' 이 없음 (${t.slice(0, 200)})`);
+      }
+      if (!agentsText.includes("쉬는 중")) problems.push("[projects] '지금 일하는 AI' 에 '쉬는 중' 이 없음");
+      if (!(await agentsCard.locator('a[href$="/issues/31"][target="_blank"]').count())) problems.push("[projects] '지금 일하는 AI' #31 Issue 링크가 없음");
       // 기본 상태: 인프라·확장 목록, 단계 줄 4개, 작업 항목 모두 접힘 (줄의 요약·개수만 보임).
       for (const hidden of ["로드맵시험 저장소", "확장시험 두번째 저장소", "알파공정 2단계 제목", "알파공정 3단계 확인항목", "3.10 독립 검수", "알림 모아보기", "승인 기다리는 시험 계획", "상황판 시험 작업", "전체 39과정 중", "개발 여부를 정함"]) {
-        if (await page.getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
+        // 프로젝트 카드 안에서만 검사한다: 맨 위 '지금 일하는 AI' 카드는 작업 제목(예: 상황판 시험 작업)을 일부러 보여준다.
+        if (await page.locator('[data-testid^="orch-project-"]').getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
       }
       const card = page.getByTestId("orch-project-orch-screens");
       const flat = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();

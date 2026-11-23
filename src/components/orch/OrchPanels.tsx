@@ -10,6 +10,7 @@ import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
 import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { activeAgents, type AgentId } from "@/lib/orch/agents";
 import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
@@ -340,6 +341,38 @@ function ProjectCard({ v }: { v: RepoView }) {
 }
 
 /** 프로젝트 탭: 프로젝트마다 남은 할 일 · 3칸(계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 3개 · 추가 검토(아이디어) 줄 (모두 접고 펼 수 있음). */
+const AGENT_NAME: Record<AgentId, string> = { sonnet: "Sonnet", opus: "Opus", codex: "Codex", user: "사용자" };
+
+/** 홈 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
+function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
+  const rows = activeAgents(repos.flatMap((v) => v.runs), Object.fromEntries(repos.map((v) => [v.repo, v.switches])));
+  return (
+    <Card>
+      <h2 className={CARD_TITLE}>지금 일하는 AI</h2>
+      <ul className="mt-2 text-sm" data-testid="orch-agents">
+        {rows.map((row) => (
+          <li key={row.agent} className={`${ROW} first:border-t-0`} data-testid={`orch-agent-${row.agent}`}>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="shrink-0 font-semibold">{AGENT_NAME[row.agent]}</span>
+              {row.off ? <span className="text-text-muted">OFF</span>
+                : !row.items.length && <span className="text-text-muted">쉬는 중</span>}
+            </div>
+            {!row.off && row.items.map((it) => (
+              <p key={`${it.repo}#${it.number}`} className={`flex min-w-0 items-center gap-1 text-[13px] ${row.agent === "user" ? "text-warn" : "text-text-muted"}`}>
+                <span className="shrink-0">{short(it.repo)} ·</span>
+                <a href={it.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 min-w-0 items-center gap-1 underline">
+                  <span className="shrink-0">#{it.number}</span><span className="truncate">{it.goal}</span>
+                </a>
+                <span className="shrink-0">· {it.step ? `Step ${it.step}/${it.total} ` : ""}{it.activity}</span>
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
   const { state, reload, error } = useOrch();
   const latest = useRef({ state, error }); latest.current = { state, error };
@@ -370,7 +403,10 @@ export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
       </>} />
       <section aria-label="자동 진행 작업" className="space-y-3" data-testid="orch-runs">
         {failed && <p role="status" className="px-1 text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
-        {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
+        {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : <>
+          <ActiveAgentsCard repos={state.data.repos} />
+          {state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
+        </>}
       </section>
     </>
   );
