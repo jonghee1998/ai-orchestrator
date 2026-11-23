@@ -178,8 +178,16 @@ test("parseRun steps: in progress → passed / current / pending", () => {
   const r = stepsOf(20, { status: "implementing", step: 2, passed: { 1: true } });
   assert.deepEqual(states(r), ["passed", "current", "pending"]);
   assert.equal(r.passed, 1);
-  assert.deepEqual(r.steps[0], { id: 1, title: "s1", state: "passed", checks: [{ text: "x", done: true }] });
+  assert.deepEqual(r.steps[0], { id: 1, title: "s1", state: "passed", checks: [{ text: "x", done: true }], model: null, task: "t" });
+  assert.equal(r.planModel, null);
   assert.deepEqual(r.steps[1].checks, [{ text: "x", done: false }]);
+});
+
+test("parseRun: plan.model, steps[].model and steps[].task are kept", () => {
+  const plan = { goal: "g", model: "opus", steps: [{ id: 1, title: "a", task: "do it", model: "claude-sonnet-x" }, { id: 2, title: "b" }] };
+  const r = parseRun("o/r", { number: 30, html_url: "u", title: "t", body: "```json\n" + JSON.stringify(plan) + "\n```" })!;
+  assert.equal(r.planModel, "opus");
+  assert.deepEqual(r.steps.map((s) => [s.model, s.task]), [["claude-sonnet-x", "do it"], [null, null]]);
 });
 
 test("parseRun steps: blocked keeps the stopped step current", () => {

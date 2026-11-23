@@ -4,6 +4,7 @@ import path from "node:path";
 import Module from "node:module";
 import { approvePlan, createIdea, GitHubError, readRepo } from "./github";
 import { parsePlan, planHash, type PlanComment, type PlanIssue } from "./plans";
+import { SELF_REPO } from "./model";
 import { cookieName, csrfToken, issueSession } from "../session/session";
 
 const REPO = "o/r";
@@ -121,7 +122,7 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
 
 const ADMIN = "test-admin-token-for-route";
 async function withRoute(env: Record<string, string | undefined>, i: PlanIssue, run: (post: (b: unknown, h?: Record<string, string>) => Promise<Response>, g: ReturnType<typeof fakeGitHub>) => Promise<void>) {
-  const keys = ["ORCH_REPOS", "GITHUB_REPO", "ORCH_GITHUB_TOKEN", "GITHUB_READ_TOKEN", "GITHUB_TOKEN", "CONTROL_ADMIN_TOKEN", "CONTROL_READ_TOKEN"];
+  const keys = ["ORCH_REPOS", "GITHUB_REPO", "ORCH_GITHUB_TOKEN", "GITHUB_READ_TOKEN", "GITHUB_TOKEN", "CONTROL_ADMIN_TOKEN", "CONTROL_READ_TOKEN", "ORCH_SELF_REPO"];
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   const savedFetch = globalThis.fetch;
   const g = fakeGitHub(i);
@@ -180,6 +181,29 @@ test("route POST approve: validates repo/issue/hash (400), token (503), then app
     const r = await post(approve, h); // Issue 7 → fake 404
     assert.equal(r.status, 502);
     assert.equal((await r.json()).error, "github_error");
+  });
+});
+
+test("route GET: RepoView.isSelf decided on the server (ORCH_SELF_REPO set → that repo; unset → SELF_REPO)", async () => {
+  const OTHER = "o/second";
+  const get = async () => {
+    const { GET } = await import("../../app/api/orch/route");
+    const r = await GET(new Request("http://localhost/api/orch", { headers: { "x-admin-token": ADMIN } }));
+    assert.equal(r.status, 200);
+    const j = (await r.json()) as { mode: string; repos: { repo: string; isSelf: boolean }[] };
+    assert.equal(j.mode, "live");
+    return Object.fromEntries(j.repos.map((v) => [v.repo, v.isSelf]));
+  };
+  const both = { ...LIVE, ORCH_REPOS: `${REPO},${OTHER}` };
+  await withRoute({ ...both, ORCH_SELF_REPO: REPO }, issue(), async () => {
+    assert.deepEqual(await get(), { [REPO]: true, [OTHER]: false });
+  });
+  await withRoute({ ...both, ORCH_SELF_REPO: ` ${OTHER} ` }, issue(), async () => {
+    assert.deepEqual(await get(), { [REPO]: false, [OTHER]: true });
+  });
+  // 없음: SELF_REPO 상수(jonghee1998/ai-orchestrator)와 같은 저장소만 true
+  await withRoute({ ...both, ORCH_REPOS: `${REPO},${SELF_REPO}` }, issue(), async () => {
+    assert.deepEqual(await get(), { [REPO]: false, [SELF_REPO]: true });
   });
 });
 

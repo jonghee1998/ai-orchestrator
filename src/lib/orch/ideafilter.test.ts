@@ -49,3 +49,29 @@ test("screens fixtures: idea Issues parse as done + collecting", async () => {
   assert.equal(byNo[21].review?.summary, "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다");
   assert.equal(byNo[22].status, "collecting");
 });
+
+// 화면 테스트 픽스처 두 저장소가 '지금 일하는 AI' 예시(구현 중·검수 중·승인 대기·쉬는 중)로 읽히는지.
+test("screens fixtures: two repos give the 지금 일하는 AI example rows", async () => {
+  const { pathToFileURL } = await import("node:url");
+  const path = await import("node:path");
+  const { readRepo } = await import("./github");
+  const { activeAgents } = await import("./agents");
+  type Hit = { status: number; body: unknown } | null;
+  type Fx = { githubFixtures: (n: Date) => (m: string, u: URL) => Hit; REPO: string; REPO2: string };
+  const mod = await (new Function("p", "return import(p)") as (p: string) => Promise<Fx>)(pathToFileURL(path.resolve("scripts/screens/fixtures.mjs")).href);
+  const gh = mod.githubFixtures(new Date());
+  const f = (async (url: string, init?: RequestInit) => {
+    const hit = gh(init?.method ?? "GET", new URL(url));
+    return new Response(JSON.stringify(hit?.body ?? { message: "Not Found" }), { status: hit ? hit.status : 404 });
+  }) as typeof fetch;
+  const views = [await readRepo(mod.REPO, { ORCH_GITHUB_TOKEN: "t" }, f), await readRepo(mod.REPO2, { ORCH_GITHUB_TOKEN: "t" }, f)];
+  assert.deepEqual(views.map((v) => v.runsError), [null, null]);
+  const rows = activeAgents(views.flatMap((v) => v.runs), Object.fromEntries(views.map((v) => [v.repo, v.switches])));
+  const got = Object.fromEntries(rows.map((r) => [r.agent, [r.off, r.items.map((i) => `${i.repo}#${i.number} ${i.activity}`)]]));
+  assert.deepEqual(got, {
+    sonnet: [false, ["example/orch-screens#11 구현 중", "example/orch-second#31 구현 중"]],
+    opus: [false, []],
+    codex: [false, ["example/orch-second#32 검수 중"]],
+    user: [false, ["example/orch-screens#12 반영 승인 대기", "example/orch-second#33 반영 승인 대기"]],
+  });
+});

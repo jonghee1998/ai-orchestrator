@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { githubFixtures, REPO } from "./fixtures.mjs";
+import { githubFixtures, REPO, REPO2 } from "./fixtures.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const OUT = path.resolve(process.env.SCREENS_DIR || path.join(ROOT, ".screens"));
@@ -50,7 +50,8 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     PATH: process.env.PATH, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1", VERCEL_ENV: "preview",
     ADMIN_USERNAME: user, ADMIN_PASSWORD_HASH: `scrypt$131072$8$1$${salt.toString("hex")}$${key.toString("hex")}`,
     CONTROL_ADMIN_TOKEN: crypto.randomBytes(24).toString("hex"),
-    ORCH_REPOS: REPO, ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
+    ORCH_REPOS: [REPO, REPO2].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
+    ORCH_SELF_REPO: REPO, // 자기 저장소 판정(서버): orch-screens 카드에는 '화면 열기' 링크가 없어야 함
   },
 });
 
@@ -118,8 +119,12 @@ try {
       if (!(await page.locator('a[href$="/issues/13"]').count())) problems.push("[briefing] 승인 대기 계획(#13)의 '계획 보기' 링크가 없음");
     }
     if (t.name === "briefing") {
-      // 아이디어함: 저장소 1개라 프로젝트 칩 줄은 숨김, 관리자에게 입력창(항목·내 의견·등록)이 보임. 등록은 누르지 않는다 (읽기 전용).
-      if (await page.getByRole("group", { name: "프로젝트 필터" }).count()) problems.push("[briefing] 프로젝트가 1개인데 필터 칩 줄이 보임");
+      // 아이디어함: 저장소가 2개(orch-screens·orch-second)라 프로젝트 칩 줄이 보임, 관리자에게 입력창(항목·내 의견·등록)이 보임. 등록은 누르지 않는다 (읽기 전용).
+      {
+        const chips = page.getByRole("group", { name: "프로젝트 필터" });
+        if (!(await chips.count())) problems.push("[briefing] 프로젝트가 2개인데 필터 칩 줄이 없음");
+        else for (const c of ["전체", "orch-screens", "orch-second"]) if (!(await chips.getByRole("button", { name: new RegExp(c) }).count())) problems.push(`[briefing] 프로젝트 필터 칩 '${c}' 이 없음`);
+      }
       for (const [label, el] of [["항목", page.getByLabel("항목", { exact: false })], ["내 의견", page.getByLabel("내 의견", { exact: false })], ["등록", page.getByRole("button", { name: "등록", exact: true })]]) {
         try { await el.first().waitFor({ state: "visible", timeout: 5000 }); } catch { problems.push(`[briefing] 아이디어 입력창의 '${label}' 가 보이지 않음`); }
       }
@@ -129,9 +134,27 @@ try {
       if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
     }
     if (t.name === "projects") {
+      // '지금 일하는 AI' 카드: 제목, 네 줄 이름, 두 저장소에 걸친 예시 작업 (구현 중 · 검수 중 · 승인 대기 · 쉬는 중)
+      const agentsCard = page.getByTestId("orch-agents");
+      const text1 = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
+      const agentsText = await text1(agentsCard);
+      if (!(await page.getByRole("heading", { name: "지금 일하는 AI" }).count())) problems.push("[projects] '지금 일하는 AI' 제목이 없음");
+      for (const [id, name, wants] of [
+        ["sonnet", "Sonnet", ["orch-screens", "#11", "상황판 시험 작업", "Step 2/3", "구현 중", "orch-second", "#31", "둘째저장소 구현 작업", "Step 1/2"]],
+        ["opus", "Opus", ["쉬는 중"]],
+        ["codex", "Codex", ["orch-second", "#32", "둘째저장소 검수 작업", "Step 2/2", "검수 중"]],
+        ["user", "사용자", ["#12", "승인 대기 시험 작업", "#33", "둘째저장소 승인 작업", "반영 승인 대기"]],
+      ]) {
+        const t = await text1(page.getByTestId(`orch-agent-${id}`));
+        if (!t.startsWith(name)) problems.push(`[projects] '지금 일하는 AI' ${name} 줄이 없음 (${t.slice(0, 80)})`);
+        for (const want of wants) if (!t.includes(want)) problems.push(`[projects] '지금 일하는 AI' ${name} 줄에 '${want}' 이 없음 (${t.slice(0, 200)})`);
+      }
+      if (!agentsText.includes("쉬는 중")) problems.push("[projects] '지금 일하는 AI' 에 '쉬는 중' 이 없음");
+      if (!(await agentsCard.locator('a[href$="/issues/31"][target="_blank"]').count())) problems.push("[projects] '지금 일하는 AI' #31 Issue 링크가 없음");
       // 기본 상태: 인프라·확장 목록, 단계 줄 4개, 작업 항목 모두 접힘 (줄의 요약·개수만 보임).
       for (const hidden of ["로드맵시험 저장소", "확장시험 두번째 저장소", "알파공정 2단계 제목", "알파공정 3단계 확인항목", "3.10 독립 검수", "알림 모아보기", "승인 기다리는 시험 계획", "상황판 시험 작업", "전체 39과정 중", "개발 여부를 정함"]) {
-        if (await page.getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
+        // 프로젝트 카드 안에서만 검사한다: 맨 위 '지금 일하는 AI' 카드는 작업 제목(예: 상황판 시험 작업)을 일부러 보여준다.
+        if (await page.locator('[data-testid^="orch-project-"]').getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
       }
       const card = page.getByTestId("orch-project-orch-screens");
       const flat = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
@@ -162,14 +185,14 @@ try {
       if (rowCount !== 4) problems.push(`[projects] 단계 줄이 4개가 아님 (${rowCount})`);
       const ROWS = [[1, "검토", "#22 · #21 의견 수집 중", 2], [2, "계획", "#13 승인 대기", 1], [3, "개발", "#11 구현 중 · Step 2/3", 1], [4, "통합", "#12 반영 승인 대기", 1]];
       for (const [n, title, note, count] of ROWS) {
-        const row = page.getByTestId(`orch-stage-${n}`);
+        const row = card.getByTestId(`orch-stage-${n}`);
         const line = await flat(row.locator(":scope > summary"));
         if (!line.startsWith(`${n} ${title} ${note}`) || !line.endsWith(`· ${count}`)) problems.push(`[projects] 단계 줄이 '${n} ${title} ${note} … · ${count}' 이 아님 (${line})`);
         if (n === 4 && !line.includes("확인 필요 1")) problems.push(`[projects] 4 통합 줄에 '확인 필요 1' 이 없음 (${line})`);
         if (await row.evaluate((el) => el.open)) problems.push(`[projects] '${n} ${title}' 줄이 기본 상태에서 펼쳐져 있음`);
       }
       // 항목이 제 줄에 있는지: 1 아이디어 2개, 2 계획, 3 구현 중 run, 4 반영 승인 대기 run (끝난 run 은 없음)
-      const inStage = async (n) => page.getByTestId(`orch-stage-${n}`).locator('[data-testid^="orch-run-orch"], [data-testid^="orch-plan-"], [data-testid^="orch-idea-"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+      const inStage = async (n) => card.getByTestId(`orch-stage-${n}`).locator('[data-testid^="orch-run-orch"], [data-testid^="orch-plan-"], [data-testid^="orch-idea-"]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
       const PLACED = { 1: "orch-idea-orch-screens-22,orch-idea-orch-screens-21", 2: "orch-plan-orch-screens-13", 3: "orch-run-orch-screens-11", 4: "orch-run-orch-screens-12" };
       for (const [n, want] of Object.entries(PLACED)) {
         const got = (await inStage(n)).join();
@@ -181,7 +204,7 @@ try {
         [4, 12, "#12 승인 대기 시험 작업", "지금 4.7 반영·승인 · Step 2/2", "전체 39과정 중 37 완료 · 남은 2 (통합 2)"],
       ];
       for (const [n, num, title, now, total] of RUNS) {
-        const item = page.getByTestId(`orch-stage-${n}`).getByTestId(`orch-run-orch-screens-${num}`);
+        const item = card.getByTestId(`orch-stage-${n}`).getByTestId(`orch-run-orch-screens-${num}`);
         const text = await flat(item);
         for (const want of [title, now, total]) if (!text.includes(want)) problems.push(`[projects] #${num} 작업 카드에 '${want}' 이 없음 (${text.slice(0, 200)})`);
         if (!(await item.locator('[role="progressbar"][aria-label="전체 과정"]').count())) problems.push(`[projects] #${num} 작업 카드에 전체 과정 막대가 없음`);
@@ -189,7 +212,7 @@ try {
       if (!(await page.getByTestId("orch-run-orch-screens-12").getByText("사용자 확인 필요").count())) problems.push("[projects] #12 작업 카드에 '사용자 확인 필요' 배지가 없음");
       if (!(await page.getByTestId("orch-plan-orch-screens-13").locator('a[href$="/issues/13"]').count())) problems.push("[projects] 계획(#13) 항목에 '열기' 링크가 없음");
       // 인프라 1/3 (완료 1개 / 3개) ─ 막대 ─ 확장 0/1 (na 제외) 한 줄
-      const roadLine = await flat(page.getByTestId("orch-roadmap").locator(":scope > summary"));
+      const roadLine = await flat(card.getByTestId("orch-roadmap").locator(":scope > summary"));
       if (!/^인프라 1\/3 확장 0\/1$/.test(roadLine)) problems.push(`[projects] 로드맵 줄이 '인프라 1/3 ─ 확장 0/1' 이 아님 (${roadLine})`);
       // 기본 상태 높이: 360x800 에서 첫 프로젝트 카드 600px 이하
       await page.setViewportSize({ width: 360, height: 800 });
@@ -232,6 +255,7 @@ try {
     }
     await page.setViewportSize({ width: 390, height: 844 });
     if (t.name === "projects") {
+      const card = page.getByTestId("orch-project-orch-screens"); // 저장소가 둘이므로 단계 줄·로드맵은 첫 카드 안에서만 찾는다
       // 펼친 상태: 인프라·확장 목록 · 단계 줄 4개(설명·세부 과정·항목 카드) · 작업 카드의 스텝 보기 · 대기 스텝
       const expand = async (summary, shown, what) => {
         await summary.click();
@@ -239,25 +263,25 @@ try {
         catch { problems.push(`[projects] ${what} 를 펼쳐도 '${shown}' 이 안 보임`); }
       };
       // ':scope > summary': 펼친 작업 카드 안에는 스텝 <summary> 도 있으므로 바로 아래 summary 만 고른다
-      await expand(page.getByTestId("orch-roadmap").locator(":scope > summary"), "0.1 로드맵시험 저장소", "'인프라 · 확장' 줄");
+      await expand(card.getByTestId("orch-roadmap").locator(":scope > summary"), "0.1 로드맵시험 저장소", "'인프라 · 확장' 줄");
       for (const item of ["0.2 로드맵시험 배포", "0.3 로드맵시험 알림", "6.1 확장시험 두번째 저장소"]) {
         if (!(await page.getByText(item).first().isVisible())) problems.push(`[projects] 인프라·확장 줄을 펼쳐도 '${item}' 이 안 보임`);
       }
-      await expand(page.getByTestId("orch-stage-1").locator(":scope > summary"), "알림 모아보기", "'1 검토'");
-      await expand(page.getByTestId("orch-stage-2").locator(":scope > summary"), "승인 기다리는 시험 계획", "'2 계획'");
-      await expand(page.getByTestId("orch-stage-3").locator(":scope > summary"), "상황판 시험 작업", "'3 개발'");
+      await expand(card.getByTestId("orch-stage-1").locator(":scope > summary"), "알림 모아보기", "'1 검토'");
+      await expand(card.getByTestId("orch-stage-2").locator(":scope > summary"), "승인 기다리는 시험 계획", "'2 계획'");
+      await expand(card.getByTestId("orch-stage-3").locator(":scope > summary"), "상황판 시험 작업", "'3 개발'");
       // 펼친 줄에는 단계 설명이 보임
       for (const d of ["개발 여부를 정함", "감사 후 사용자 승인", "독립 검수 → CI"]) {
         if (!(await page.getByText(d).first().isVisible())) problems.push(`[projects] 펼친 줄의 단계 설명 '${d}' 이 보이지 않음`);
       }
       // 세부 과정: 3 개발 16개, 지금 있는 3.7 은 굵게 + '#11' 꼬리표
-      const proc3 = page.getByTestId("orch-stage-process-3").locator("li");
+      const proc3 = card.getByTestId("orch-stage-process-3").locator("li");
       if ((await proc3.count()) !== 16) problems.push(`[projects] 3 개발 세부 과정이 16개가 아님 (${await proc3.count()})`);
       if (!/font-bold/.test((await proc3.nth(6).getAttribute("class")) ?? "") || !((await proc3.nth(6).textContent()) ?? "").includes("#11")) problems.push("[projects] 3 개발 세부 과정에서 지금 위치(3.7 구현)가 굵게+'#11' 로 표시되지 않음");
       if (!(await page.getByText("전체 39과정 중 21 완료").first().isVisible())) problems.push("[projects] 3 개발을 펼쳐도 #11 작업 카드의 '전체 39과정 중' 이 안 보임");
-      await expand(page.getByTestId("orch-stage-4").locator(":scope > summary"), "충돌 처리 후 main 반영", "'4 통합'");
-      if (!(await page.getByTestId("orch-run-orch-screens-12").isVisible())) problems.push("[projects] 4 통합을 펼쳐도 #12 작업 카드가 안 보임");
-      await expand(page.getByTestId("orch-run-steps-orch-screens-11").locator(":scope > summary"), "알파공정 2단계 확인항목", "#11 작업 카드의 '스텝 보기'");
+      await expand(card.getByTestId("orch-stage-4").locator(":scope > summary"), "충돌 처리 후 main 반영", "'4 통합'");
+      if (!(await card.getByTestId("orch-run-orch-screens-12").isVisible())) problems.push("[projects] 4 통합을 펼쳐도 #12 작업 카드가 안 보임");
+      await expand(card.getByTestId("orch-run-steps-orch-screens-11").locator(":scope > summary"), "알파공정 2단계 확인항목", "#11 작업 카드의 '스텝 보기'");
       for (const text of ["스텝 1/3 통과", "지금 2번"]) {
         if (!(await page.getByText(text).first().isVisible())) problems.push(`[projects] #11 스텝 보기를 펼쳐도 '${text}' 이 안 보임`);
       }
@@ -273,6 +297,63 @@ try {
         shots.push(path.relative(ROOT, file));
       }
       await page.setViewportSize({ width: 390, height: 844 });
+
+      // 다른 프로젝트 화면 링크: orch-second(roadmap app, label 없음) → '화면 열기' 새 탭, 자기 저장소(ORCH_SELF_REPO=orch-screens)는 app 이 있어도 링크 없음
+      const second = page.getByTestId("orch-project-orch-second");
+      const appLink = second.getByTestId("orch-app-link");
+      if ((await appLink.count()) !== 1) problems.push(`[projects] orch-second 카드에 '화면 열기' 링크가 1개가 아님 (${await appLink.count()})`);
+      else {
+        const [href, target, rel, text, inButton] = [await appLink.getAttribute("href"), await appLink.getAttribute("target"), (await appLink.getAttribute("rel")) ?? "", ((await appLink.textContent()) ?? "").trim(), await appLink.evaluate((el) => !!el.closest("button"))];
+        if (href !== "https://example.com/") problems.push(`[projects] orch-second '화면 열기' href 가 https://example.com/ 이 아님 (${href})`);
+        if (text !== "화면 열기") problems.push(`[projects] orch-second 링크 글자가 '화면 열기' 가 아님 (${text})`);
+        if (target !== "_blank" || !/noreferrer/.test(rel)) problems.push("[projects] '화면 열기' 링크가 새 탭(_blank, noreferrer)이 아님");
+        if (inButton) problems.push("[projects] '화면 열기' 링크가 접기 버튼 안에 있음");
+        if (!(await appLink.isVisible())) problems.push("[projects] '화면 열기' 링크가 보이지 않음");
+      }
+      if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
+
+      // 카드 접기/펼치기: 머리 버튼(aria-expanded·aria-controls), 기본 펼침, 접어도 머리 줄(이름·남은 할 일·확인 필요)은 보임, 새로고침 뒤 유지
+      const toggle = (c) => c.getByTestId("orch-project-toggle");
+      const body = (c) => c.getByTestId("orch-project-body");
+      const expanded = async (c) => toggle(c).getAttribute("aria-expanded");
+      if ((await expanded(card)) !== "true" || (await expanded(second)) !== "true") problems.push("[projects] 프로젝트 카드 기본 상태가 펼침(aria-expanded=true)이 아님");
+      {
+        const ctl = await toggle(card).getAttribute("aria-controls");
+        const bodyId = await body(card).getAttribute("id");
+        if (!ctl || ctl !== bodyId) problems.push(`[projects] 접기 버튼 aria-controls(${ctl})가 카드 본문 id(${bodyId})와 다름`);
+        const box = await toggle(card).boundingBox();
+        if (!box || box.height < 44) problems.push(`[projects] 접기 버튼 높이 ${box?.height}px < 44px`);
+      }
+      const headText = ((await card.getByTestId("orch-project-summary").textContent()) ?? "").replace(/\s+/g, " ").trim();
+      if (headText !== "남은 할 일 46과정 · 확인 필요 1") problems.push(`[projects] 카드 머리 요약이 '남은 할 일 46과정 · 확인 필요 1' 이 아님 (${headText})`);
+      await toggle(card).click();
+      try { await body(card).waitFor({ state: "hidden", timeout: 5000 }); } catch { problems.push("[projects] 카드 머리를 눌러도 본문이 숨겨지지 않음"); }
+      if ((await expanded(card)) !== "false") problems.push(`[projects] 접은 뒤 aria-expanded 가 false 가 아님 (${await expanded(card)})`);
+      if (!(await card.getByText("orch-screens", { exact: true }).first().isVisible()) || !(await card.getByTestId("orch-project-summary").isVisible()) || !(await card.getByTestId("orch-deploy-pending").isVisible()))
+        problems.push("[projects] 접힌 카드 머리에 이름·남은 할 일·배포 대기가 안 보임");
+      if (!(await body(second).isVisible())) problems.push("[projects] orch-screens 를 접었는데 orch-second 본문도 숨겨짐");
+      const saved = await page.evaluate(() => localStorage.getItem("orch.projects.collapsed"));
+      if (saved !== JSON.stringify(["example/orch-screens"])) problems.push(`[projects] localStorage 'orch.projects.collapsed' 값이 다름 (${saved})`);
+      await page.reload();
+      try {
+        await toggle(card).waitFor({ timeout: 15000 });
+        await page.waitForFunction(() => document.querySelector('[data-testid="orch-project-orch-screens"] [data-testid="orch-project-toggle"]')?.getAttribute("aria-expanded") === "false", null, { timeout: 5000 });
+      } catch { problems.push(`[projects] 새로고침 뒤 접힘이 유지되지 않음 (aria-expanded=${await expanded(card).catch(() => "?")})`); }
+      if (await body(card).isVisible()) problems.push("[projects] 새로고침 뒤 접힌 카드 본문이 보임");
+      if ((await expanded(second)) !== "true") problems.push("[projects] 새로고침 뒤 orch-second 카드가 펼침이 아님");
+      for (const w of WIDTHS) {
+        await page.setViewportSize({ width: w, height: 800 });
+        await page.waitForTimeout(150);
+        if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[projects-collapsed] ${w}px 에서 가로 넘침`);
+        const file = path.join(OUT, `projects-collapsed-${w}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        shots.push(path.relative(ROOT, file));
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await toggle(card).click();
+      try { await body(card).waitFor({ state: "visible", timeout: 5000 }); } catch { problems.push("[projects] 접힌 카드 머리를 다시 눌러도 본문이 보이지 않음"); }
+      if ((await expanded(card)) !== "true") problems.push(`[projects] 다시 펼친 뒤 aria-expanded 가 true 가 아님 (${await expanded(card)})`);
+      if ((await page.evaluate(() => localStorage.getItem("orch.projects.collapsed"))) !== "[]") problems.push("[projects] 다시 펼친 뒤 localStorage 가 비지 않음");
     }
   }
   if (pageErrors.length) problems.push(`페이지 오류: ${pageErrors.slice(0, 3).join(" | ")}`);

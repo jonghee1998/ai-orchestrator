@@ -25,6 +25,10 @@ export interface RunStep {
   title: string;
   state: StepState;
   checks: { text: string; done: boolean }[];
+  /** Plan step.model (any string the engine accepts), null when unset. */
+  model: string | null;
+  /** Plan step.task (used only to mirror the engine's risky-text check), null when unset. */
+  task: string | null;
 }
 
 export interface OrchRun {
@@ -43,6 +47,8 @@ export interface OrchRun {
   retries: number;
   /** plan JSON max_retries (engine default 3). */
   maxRetries: number;
+  /** Plan-level model (plan.model), null when unset. */
+  planModel: string | null;
   held: string | null;
   reason: string | null;
   updatedAt: string | null;
@@ -106,7 +112,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
       .map((c) => str(c))
       .filter((c): c is string => c !== null)
       .map((c) => ({ text: c.slice(0, 200), done: state === "passed" }));
-    runSteps.push({ id, title: (str(s.title) ?? `스텝 ${id}`).slice(0, 200), state, checks });
+    runSteps.push({ id, title: (str(s.title) ?? `스텝 ${id}`).slice(0, 200), state, checks, model: str(s.model), task: typeof s.task === "string" ? s.task : null });
   }
   const held = str(obj(st?.held)?.reason);
   const reason = status === "blocked" ? str(st?.reason) : null;
@@ -136,6 +142,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
     finalPr,
     retries: num(st?.retries) ?? 0,
     maxRetries: maxRetriesOf(plan.max_retries),
+    planModel: str(plan.model),
     held,
     reason,
     updatedAt: str(st?.updatedAt),
@@ -375,6 +382,16 @@ export interface RepoView {
   /** docs/patchnotes.json (other projects' patch notes); null = no file (404) or unreadable (then patchNotesError). */
   patchNotes?: PatchNote[] | null;
   patchNotesError?: string | null;
+  /** This dashboard's own repo (decided on the server: ORCH_SELF_REPO or SELF_REPO). Its card gets no 'app' link. */
+  isSelf: boolean;
+}
+
+/** The dashboard's own repository (patch notes tab, project card without an 'app' link). The server may override it with ORCH_SELF_REPO. */
+export const SELF_REPO = "jonghee1998/ai-orchestrator";
+
+/** Server-side: is this the dashboard's own repo? ORCH_SELF_REPO (trimmed, non-empty) wins over SELF_REPO. */
+export function isSelfRepo(repo: string, env: Readonly<Record<string, string | undefined>>): boolean {
+  return repo === (env.ORCH_SELF_REPO?.trim() || SELF_REPO);
 }
 
 /** Active runs first (needs-user first), then recent finished ones. */
@@ -413,10 +430,13 @@ export interface RoadmapItem {
   /** PR number or file path. */
   ref: number | string | null;
 }
-export interface Roadmap { version: number; setup: RoadmapItem[]; expansion: RoadmapItem[] }
+/** Link to the project's own app screen (roadmap.json top-level "app"). label null → shown as '화면 열기'. */
+export interface RoadmapApp { label: string | null; url: string }
+export interface Roadmap { version: number; setup: RoadmapItem[]; expansion: RoadmapItem[]; app: RoadmapApp | null }
 
 export const ROADMAP_TITLE_MAX = 24;
 export const ROADMAP_NOTE_MAX = 80;
+export const ROADMAP_APP_LABEL_MAX = 12;
 const ROADMAP_STATUSES = new Set<string>(["done", "doing", "todo", "na"]);
 
 function roadmapItem(v: unknown): RoadmapItem | null {
@@ -435,13 +455,23 @@ function roadmapItem(v: unknown): RoadmapItem | null {
   };
 }
 
+/** roadmap.json "app": { label?, url }. Only a well-formed https:// URL is accepted; anything else → null. Label cut to 12 chars. */
+function roadmapApp(v: unknown): RoadmapApp | null {
+  const o = obj(v);
+  const url = str(o?.url)?.trim();
+  if (!o || !url || !url.startsWith("https://")) return null;
+  try { if (new URL(url).protocol !== "https:") return null; } catch { return null; }
+  const label = str(o.label)?.trim().slice(0, ROADMAP_APP_LABEL_MAX) || null;
+  return { label, url };
+}
+
 /** Parse docs/roadmap.json. Not a JSON object → null; malformed items skipped, long strings cut, unknown status → todo. */
 export function parseRoadmap(text: string | null | undefined): Roadmap | null {
   const j = parseJson(text ?? undefined);
   if (!j) return null;
   const list = (v: unknown) => (Array.isArray(v) ? v : []).map(roadmapItem).filter((i): i is RoadmapItem => i !== null);
   const version = num(j.version);
-  return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, setup: list(j.setup), expansion: list(j.expansion) };
+  return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, setup: list(j.setup), expansion: list(j.expansion), app: roadmapApp(j.app) };
 }
 
 /**
