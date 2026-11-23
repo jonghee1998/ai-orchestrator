@@ -51,6 +51,7 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     ADMIN_USERNAME: user, ADMIN_PASSWORD_HASH: `scrypt$131072$8$1$${salt.toString("hex")}$${key.toString("hex")}`,
     CONTROL_ADMIN_TOKEN: crypto.randomBytes(24).toString("hex"),
     ORCH_REPOS: [REPO, REPO2].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
+    ORCH_SELF_REPO: REPO, // 자기 저장소 판정(서버): orch-screens 카드에는 '화면 열기' 링크가 없어야 함
   },
 });
 
@@ -296,6 +297,63 @@ try {
         shots.push(path.relative(ROOT, file));
       }
       await page.setViewportSize({ width: 390, height: 844 });
+
+      // 다른 프로젝트 화면 링크: orch-second(roadmap app, label 없음) → '화면 열기' 새 탭, 자기 저장소(ORCH_SELF_REPO=orch-screens)는 app 이 있어도 링크 없음
+      const second = page.getByTestId("orch-project-orch-second");
+      const appLink = second.getByTestId("orch-app-link");
+      if ((await appLink.count()) !== 1) problems.push(`[projects] orch-second 카드에 '화면 열기' 링크가 1개가 아님 (${await appLink.count()})`);
+      else {
+        const [href, target, rel, text, inButton] = [await appLink.getAttribute("href"), await appLink.getAttribute("target"), (await appLink.getAttribute("rel")) ?? "", ((await appLink.textContent()) ?? "").trim(), await appLink.evaluate((el) => !!el.closest("button"))];
+        if (href !== "https://example.com/") problems.push(`[projects] orch-second '화면 열기' href 가 https://example.com/ 이 아님 (${href})`);
+        if (text !== "화면 열기") problems.push(`[projects] orch-second 링크 글자가 '화면 열기' 가 아님 (${text})`);
+        if (target !== "_blank" || !/noreferrer/.test(rel)) problems.push("[projects] '화면 열기' 링크가 새 탭(_blank, noreferrer)이 아님");
+        if (inButton) problems.push("[projects] '화면 열기' 링크가 접기 버튼 안에 있음");
+        if (!(await appLink.isVisible())) problems.push("[projects] '화면 열기' 링크가 보이지 않음");
+      }
+      if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
+
+      // 카드 접기/펼치기: 머리 버튼(aria-expanded·aria-controls), 기본 펼침, 접어도 머리 줄(이름·남은 할 일·확인 필요)은 보임, 새로고침 뒤 유지
+      const toggle = (c) => c.getByTestId("orch-project-toggle");
+      const body = (c) => c.getByTestId("orch-project-body");
+      const expanded = async (c) => toggle(c).getAttribute("aria-expanded");
+      if ((await expanded(card)) !== "true" || (await expanded(second)) !== "true") problems.push("[projects] 프로젝트 카드 기본 상태가 펼침(aria-expanded=true)이 아님");
+      {
+        const ctl = await toggle(card).getAttribute("aria-controls");
+        const bodyId = await body(card).getAttribute("id");
+        if (!ctl || ctl !== bodyId) problems.push(`[projects] 접기 버튼 aria-controls(${ctl})가 카드 본문 id(${bodyId})와 다름`);
+        const box = await toggle(card).boundingBox();
+        if (!box || box.height < 44) problems.push(`[projects] 접기 버튼 높이 ${box?.height}px < 44px`);
+      }
+      const headText = ((await card.getByTestId("orch-project-summary").textContent()) ?? "").replace(/\s+/g, " ").trim();
+      if (headText !== "남은 할 일 46과정 · 확인 필요 1") problems.push(`[projects] 카드 머리 요약이 '남은 할 일 46과정 · 확인 필요 1' 이 아님 (${headText})`);
+      await toggle(card).click();
+      try { await body(card).waitFor({ state: "hidden", timeout: 5000 }); } catch { problems.push("[projects] 카드 머리를 눌러도 본문이 숨겨지지 않음"); }
+      if ((await expanded(card)) !== "false") problems.push(`[projects] 접은 뒤 aria-expanded 가 false 가 아님 (${await expanded(card)})`);
+      if (!(await card.getByText("orch-screens", { exact: true }).first().isVisible()) || !(await card.getByTestId("orch-project-summary").isVisible()) || !(await card.getByTestId("orch-deploy-pending").isVisible()))
+        problems.push("[projects] 접힌 카드 머리에 이름·남은 할 일·배포 대기가 안 보임");
+      if (!(await body(second).isVisible())) problems.push("[projects] orch-screens 를 접었는데 orch-second 본문도 숨겨짐");
+      const saved = await page.evaluate(() => localStorage.getItem("orch.projects.collapsed"));
+      if (saved !== JSON.stringify(["example/orch-screens"])) problems.push(`[projects] localStorage 'orch.projects.collapsed' 값이 다름 (${saved})`);
+      await page.reload();
+      try {
+        await toggle(card).waitFor({ timeout: 15000 });
+        await page.waitForFunction(() => document.querySelector('[data-testid="orch-project-orch-screens"] [data-testid="orch-project-toggle"]')?.getAttribute("aria-expanded") === "false", null, { timeout: 5000 });
+      } catch { problems.push(`[projects] 새로고침 뒤 접힘이 유지되지 않음 (aria-expanded=${await expanded(card).catch(() => "?")})`); }
+      if (await body(card).isVisible()) problems.push("[projects] 새로고침 뒤 접힌 카드 본문이 보임");
+      if ((await expanded(second)) !== "true") problems.push("[projects] 새로고침 뒤 orch-second 카드가 펼침이 아님");
+      for (const w of WIDTHS) {
+        await page.setViewportSize({ width: w, height: 800 });
+        await page.waitForTimeout(150);
+        if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[projects-collapsed] ${w}px 에서 가로 넘침`);
+        const file = path.join(OUT, `projects-collapsed-${w}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        shots.push(path.relative(ROOT, file));
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await toggle(card).click();
+      try { await body(card).waitFor({ state: "visible", timeout: 5000 }); } catch { problems.push("[projects] 접힌 카드 머리를 다시 눌러도 본문이 보이지 않음"); }
+      if ((await expanded(card)) !== "true") problems.push(`[projects] 다시 펼친 뒤 aria-expanded 가 true 가 아님 (${await expanded(card)})`);
+      if ((await page.evaluate(() => localStorage.getItem("orch.projects.collapsed"))) !== "[]") problems.push("[projects] 다시 펼친 뒤 localStorage 가 비지 않음");
     }
   }
   if (pageErrors.length) problems.push(`페이지 오류: ${pageErrors.slice(0, 3).join(" | ")}`);

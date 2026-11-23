@@ -9,7 +9,7 @@
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
 import type { PatchNote } from "@/lib/patchnotes";
-import { USAGE_RETRY_MS, deployEveryFromVars, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
+import { USAGE_RETRY_MS, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -161,6 +161,7 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     patchNotes: notes.status === "fulfilled" ? notes.value : null,
     patchNotesError: notes.status === "fulfilled" || notesMissing ? null
       : notes.reason instanceof PatchNotesFormatError ? notes.reason.message : describe(notes.reason),
+    isSelf: isSelfRepo(repo, env),
   };
 }
 
