@@ -71,6 +71,8 @@ export function githubFixtures(now) {
       { id: "6.1", title: "확장시험 두번째 저장소", status: "todo", note: null },
       { id: "6.2", title: "확장시험 팀 공유", status: "na", note: "필요 없음" },
     ],
+    // 자기 저장소(ORCH_SELF_REPO)라 app 이 있어도 '화면 열기' 링크가 없어야 함
+    app: { label: "자기화면", url: "https://example.com/self" },
   };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap, null, 2)).toString("base64") };
   // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 카드 머리 '배포 대기 3' (머지 커밋만 셈).
@@ -117,7 +119,8 @@ function secondRepoFixtures(iso, usage) {
   ];
   const usageIssue = mk(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
   const variables = [{ name: "ORCH_CODEX", value: "on" }, { name: "ORCH_PAUSED", value: "off" }];
-  const roadmap = { version: 1, setup: [{ id: "0.1", title: "둘째로드맵 저장소", status: "done", note: null }], expansion: [] };
+  // app: 다른 프로젝트 화면 링크 (label 없음 → '화면 열기')
+  const roadmap = { version: 1, setup: [{ id: "0.1", title: "둘째로드맵 저장소", status: "done", note: null }], expansion: [], app: { url: "https://example.com/" } };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap)).toString("base64") };
   return (method, url) => {
     if (method !== "GET") return null;

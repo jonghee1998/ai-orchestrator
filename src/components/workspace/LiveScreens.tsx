@@ -8,6 +8,7 @@ import { BackIcon, ChevronIcon } from "@/components/icons";
 import { Account } from "./Account";
 import { OrchIdeasPanel } from "@/components/orch/IdeasPanel";
 import { OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel, useOrch } from "@/components/orch/OrchPanels";
+import { SELF_REPO } from "@/lib/orch/model";
 import { useState } from "react";
 
 export function LiveProjectsScreen({ projectId }: { projectId?: string; taskId?: string }) {
@@ -40,7 +41,6 @@ function NoteItem({ n, first, repo }: { n: PatchNote; first: boolean; repo: stri
   );
 }
 
-const SELF_REPO = "jonghee1998/ai-orchestrator";
 const shortRepo = (r: string) => r.split("/").pop() ?? r;
 
 /** 패치노트 탭: 프로젝트를 고르고(이 상황판 + docs/patchnotes.json 이 있는 다른 저장소), 큰 버전(1.x, 2.x)마다 접고 펼침. */

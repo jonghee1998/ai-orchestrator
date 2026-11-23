@@ -1,7 +1,7 @@
 "use client";
 // Orchestrator engine panels for the live mobile tabs (프로젝트 / AI 팀 / PM 브리핑).
 // Data: GET /api/orch. Switch changes: POST /api/orch (admin session + CSRF) → GitHub repository variables.
-import { useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { BUTTON, CARD_TITLE, Card, FIELD, ICON_BUTTON, PRIMARY_BUTTON, PageTitle, ROW, STATUS_BOX } from "@/components/ui";
 import { useAuthedJson } from "@/components/live/useAuthedJson";
 import { csrfHeaders, useSession } from "@/components/live/session";
@@ -11,6 +11,7 @@ import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
 import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { activeAgents, type AgentId } from "@/lib/orch/agents";
+import { readCollapsed, toggleCollapsed, writeCollapsed } from "@/lib/orch/collapse";
 import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
@@ -284,8 +285,15 @@ function StageCell({ c }: { c: BoardColumn }) {
   );
 }
 
-function ProjectCard({ v }: { v: RepoView }) {
+/**
+ * 프로젝트 카드. 머리(저장소 이름 · 남은 할 일 · 확인 필요)는 접기 버튼이고, 본문(남은 할 일 요약 · 칸 · 인프라/확장 · 단계 줄)이 접힌다.
+ * 다른 프로젝트는 roadmap.json 'app' 이 있으면 머리 오른쪽에 '화면 열기' 링크 (버튼 밖, 새 탭). 자기 저장소(isSelf, 서버 판정)는 링크 없음.
+ */
+function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onToggle: () => void }) {
+  const bodyId = useId();
   const board = stageBoard({ runs: v.runs, plans: v.plans ?? [], ideas: v.ideas ?? [] });
+  const needs = board.reduce((n, c) => n + boardNeedsUser(c), 0);
+  const app = !v.isSelf ? v.roadmap?.app ?? null : null;
   // 검토(아이디어)는 개발할지 정하기 전이라 본 흐름(계획·개발·통합)과 따로 보인다
   const flow = board.filter((c) => c.n > 1);
   const review = board[0];
@@ -296,13 +304,34 @@ function ProjectCard({ v }: { v: RepoView }) {
   return (
     <Card>
       <section aria-label={`${short(v.repo)} 작업`} data-testid={`orch-project-${short(v.repo)}`}>
-        <div className="flex items-baseline justify-between gap-2">
-          <h3 className="min-w-0 truncate text-lg font-bold tracking-[-0.02em]">{short(v.repo)}</h3>
-          <span className="shrink-0 text-xs tabular-nums text-text-muted" data-testid="orch-deploy-pending">
-            배포 대기 {v.deployPending ?? "?"} ·{" "}
-            <Link href="/patch-notes" className="-my-3 inline-flex min-h-11 items-center gap-0.5 text-accent">완료 기록<ArrowRightIcon className="h-3 w-3" /></Link>
-          </span>
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="min-w-0 flex-1">
+            <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={bodyId} data-testid="orch-project-toggle"
+              className="flex min-h-11 w-full items-center gap-1.5 rounded-lg text-left">
+              <span className="min-w-0">
+                <span className="block truncate text-lg font-bold tracking-[-0.02em]">{short(v.repo)}</span>
+                <span className="block text-xs tabular-nums text-text-muted" data-testid="orch-project-summary">
+                  {left === null ? "남은 할 일 없음" : `남은 할 일 ${left}과정`}
+                  {needs > 0 && <> · <span className="font-semibold text-warn">확인 필요 {needs}</span></>}
+                </span>
+              </span>
+              <ChevronIcon className={`ml-auto h-4 w-4 ${open ? "rotate-90" : ""}`} />
+            </button>
+          </h3>
+          <div className="flex shrink-0 flex-col items-end text-xs tabular-nums text-text-muted">
+            {app && (
+              <a href={app.url} target="_blank" rel="noreferrer" data-testid="orch-app-link"
+                className="inline-flex min-h-11 max-w-[9.5rem] items-center gap-0.5 font-semibold text-accent">
+                <span className="truncate">{app.label ? `${app.label} 열기` : "화면 열기"}</span><ArrowRightIcon className="h-3 w-3 shrink-0" />
+              </a>
+            )}
+            <span className={app ? "" : "pt-1.5"} data-testid="orch-deploy-pending">
+              배포 대기 {v.deployPending ?? "?"} ·{" "}
+              <Link href="/patch-notes" className="-my-3 inline-flex min-h-11 items-center gap-0.5 text-accent">완료 기록<ArrowRightIcon className="h-3 w-3" /></Link>
+            </span>
+          </div>
         </div>
+        <div id={bodyId} hidden={!open} data-testid="orch-project-body">
         <p className="mt-3 text-[13px] tabular-nums text-text-muted" data-testid="orch-remaining">
           {left === null ? "개발 남은 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
           {todo.length > 0 && <> · 직접 할 일 <b className="font-semibold text-text">{todo.length}건</b></>}
@@ -335,6 +364,7 @@ function ProjectCard({ v }: { v: RepoView }) {
           <p className="pb-1 text-xs font-semibold text-text-muted">추가 검토 · 개발 여부를 정하기 전 아이디어 <span className="tabular-nums">{review.items.length}건</span></p>
           <StageRow c={review} repo={v.repo} />
         </section>
+        </div>
       </section>
     </Card>
   );
@@ -379,6 +409,16 @@ export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
   const [busy, setBusy] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
+  // 프로젝트 카드 접힘: 기본은 모두 펼침, 저장소별로 localStorage 에 기억 (읽기·쓰기 실패 시 기본값)
+  const [collapsed, setCollapsed] = useState<string[]>([]);
+  useEffect(() => { setCollapsed(readCollapsed(() => window.localStorage)); }, []);
+  function toggleProject(repo: string) {
+    setCollapsed((prev) => {
+      const next = toggleCollapsed(prev, repo);
+      writeCollapsed(() => window.localStorage, next);
+      return next;
+    });
+  }
   async function refresh() {
     setBusy(true);
     try {
@@ -405,7 +445,7 @@ export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
         {failed && <p role="status" className="px-1 text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
         {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : <>
           <ActiveAgentsCard repos={state.data.repos} />
-          {state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} />)}
+          {state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} open={!collapsed.includes(v.repo)} onToggle={() => toggleProject(v.repo)} />)}
         </>}
       </section>
     </>

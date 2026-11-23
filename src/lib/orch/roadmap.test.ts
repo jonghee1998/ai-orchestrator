@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
-import { ROADMAP_NOTE_MAX, ROADMAP_TITLE_MAX, deployEveryFromVars, parseRoadmap, parseRun, roadmapCount, type RoadmapItem } from "./model";
+import { ROADMAP_APP_LABEL_MAX, ROADMAP_NOTE_MAX, ROADMAP_TITLE_MAX, SELF_REPO, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, roadmapCount, type RoadmapItem } from "./model";
 import { readRepo } from "./github";
 
 const REPO = "o/r";
@@ -24,8 +24,24 @@ test("parseRoadmap: valid file → items with null for missing note/ref", () => 
 
 test("parseRoadmap: not JSON / not an object → null; missing lists → []", () => {
   for (const t of ["", "{", "not json", "[1,2]", "null", "3", null, undefined]) assert.equal(parseRoadmap(t), null, String(t));
-  assert.deepEqual(parseRoadmap("{}"), { version: 1, setup: [], expansion: [] });
-  assert.deepEqual(parseRoadmap(JSON.stringify({ version: "x", setup: "no", expansion: {} })), { version: 1, setup: [], expansion: [] });
+  assert.deepEqual(parseRoadmap("{}"), { version: 1, setup: [], expansion: [], app: null });
+  assert.deepEqual(parseRoadmap(JSON.stringify({ version: "x", setup: "no", expansion: {} })), { version: 1, setup: [], expansion: [], app: null });
+});
+
+test("parseRoadmap app: https URL only, label cut to 12, missing/odd → null", () => {
+  const app = (v: unknown) => parseRoadmap(JSON.stringify({ setup: [], app: v }))!.app;
+  assert.deepEqual(app({ label: "가계부", url: "https://example.com/" }), { label: "가계부", url: "https://example.com/" });
+  assert.deepEqual(app({ url: " https://app.example.com/x?y=1 " }), { label: null, url: "https://app.example.com/x?y=1" });
+  assert.deepEqual(app({ label: "  ", url: "https://example.com/" }), { label: null, url: "https://example.com/" });
+  assert.deepEqual(app({ label: 7, url: "https://example.com/" }), { label: null, url: "https://example.com/" });
+  assert.equal(app({ label: "가".repeat(30), url: "https://example.com/" })!.label, "가".repeat(ROADMAP_APP_LABEL_MAX));
+  assert.equal(ROADMAP_APP_LABEL_MAX, 12);
+  for (const bad of [
+    undefined, null, "https://example.com/", [], 3, {}, { label: "x" },
+    { url: "http://example.com/" }, { url: "javascript:alert(1)" }, { url: "HTTPS://example.com/" }, { url: "//example.com/" },
+    { url: "https://" }, { url: "https:// bad host" }, { url: "ftp://example.com/" }, { url: 42 }, { url: "" },
+  ]) assert.equal(app(bad), null, JSON.stringify(bad));
+  assert.equal(parseRoadmap("{}")!.app, null);
 });
 
 test("parseRoadmap: malformed items skipped, unknown status → todo, odd ref dropped", () => {
@@ -122,7 +138,7 @@ test("readRepo: roadmap read from contents API (base64), deployPending counts me
   const commits = [{ parents: [{}, {}] }, { parents: [{}] }, { parents: [{}, {}] }, { parents: [{}, {}, {}] }, {}, null];
   const g = fake({ compare: { status: 200, body: { commits } }, vars: [{ name: "ORCH_DEPLOY_EVERY", value: "7" }, { name: "ORCH_PAUSED", value: "on" }] });
   const v = await readRepo(REPO, ENV, g.f);
-  assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null }], expansion: [] });
+  assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null }], expansion: [], app: null });
   assert.equal(v.roadmapError, null);
   assert.equal(v.deployPending, 3);
   assert.equal(v.deployEvery, 7);
@@ -156,6 +172,27 @@ test("readRepo: roadmap 403/500/broken file → roadmapError, everything else in
     assert.equal(v.deployPending, 1);
     assert.deepEqual([v.runsError, v.switchesError, v.plansError, v.ideasError], [null, null, null, null]);
   }
+});
+
+test("readRepo isSelf: ORCH_SELF_REPO set → that repo only; unset/blank → SELF_REPO", async () => {
+  assert.equal(SELF_REPO, "jonghee1998/ai-orchestrator");
+  const self = (repo: string, env: Record<string, string | undefined>) => readRepo(repo, { ...ENV, ...env }, fake({}).f).then((v) => v.isSelf);
+  // ORCH_SELF_REPO 있음: 그 저장소만 자기 저장소 (공백은 잘라냄), SELF_REPO 는 아님
+  assert.equal(await self(REPO, { ORCH_SELF_REPO: REPO }), true);
+  assert.equal(await self(REPO, { ORCH_SELF_REPO: `  ${REPO} ` }), true);
+  assert.equal(await self("o/other", { ORCH_SELF_REPO: REPO }), false);
+  assert.equal(isSelfRepo(SELF_REPO, { ORCH_SELF_REPO: REPO }), false);
+  // ORCH_SELF_REPO 없음·빈 값: SELF_REPO 상수
+  assert.equal(await self(REPO, {}), false);
+  assert.equal(await self(REPO, { ORCH_SELF_REPO: "   " }), false);
+  assert.equal(isSelfRepo(SELF_REPO, {}), true);
+  assert.equal(isSelfRepo(SELF_REPO, { ORCH_SELF_REPO: "" }), true);
+});
+
+test("readRepo: roadmap app passed through (https only)", async () => {
+  const withApp = (app: unknown) => fake({ roadmap: { status: 200, body: { encoding: "base64", content: b64(JSON.stringify({ setup: [], app })) } } }).f;
+  assert.deepEqual((await readRepo(REPO, ENV, withApp({ label: "앱", url: "https://example.com/" }))).roadmap!.app, { label: "앱", url: "https://example.com/" });
+  assert.equal((await readRepo(REPO, ENV, withApp({ url: "http://example.com/" }))).roadmap!.app, null);
 });
 
 test("readRepo: variables unreadable → deployEvery 10; compare error → deployPending null", async () => {
