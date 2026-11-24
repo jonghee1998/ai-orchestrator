@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.3.0", date: "2026-11-24", title: "프로젝트 진행 단계 표시", items: ["프로젝트 카드에 단계 완료/전체와 진행 단계 목록", "단계에 연결된 작업이 끝나면 자동으로 완료 표시"] },
   { version: "2.2.0", date: "2026-11-23", title: "홈에 지금 일하는 AI·프로젝트 접기", items: ["홈 맨 위에 Sonnet·Opus·Codex·사용자별로 맡은 프로젝트와 작업 한 줄씩", "프로젝트 카드를 눌러 접고 펼치기(상태 기억)", "다른 프로젝트 카드에 화면 열기 링크"] },
   { version: "2.1.2", date: "2026-11-23", pr: 300, title: "하단 탭 높이 조정", items: ["2.1.1에서 너무 올라간 하단 탭을 홈 표시줄과 겹치지 않을 만큼만 올리도록 낮춤"] },
   { version: "2.1.1", date: "2026-11-23", pr: 299, title: "하단 탭 위로", items: ["아이폰 홈 표시줄 위로 하단 탭을 올리고 누르는 영역을 키움"] },

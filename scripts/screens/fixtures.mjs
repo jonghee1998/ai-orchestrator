@@ -110,6 +110,7 @@ export function githubFixtures(now) {
 }
 
 // 두 번째 저장소(example/orch-second): 구현 중(Sonnet) #31 · 검수 중(Codex 켜짐) #32 · 승인 대기(사용자) #33. Opus는 쉬는 중.
+// 끝난 #30 (orch:done 에만) + roadmap phases 4개 → 카드 머리 '단계 2/4 완료'.
 function secondRepoFixtures(iso, usage) {
   const mk = (number, title, body) => ({ number, title, body, html_url: `https://github.com/${REPO2}/issues/${number}`, state: "open", user: OWNER });
   const runs = [
@@ -117,10 +118,23 @@ function secondRepoFixtures(iso, usage) {
     mk(32, "[plan] 둘째저장소 검수 작업", `${plan("둘째저장소 검수 작업", 2, "오메가")}\n${state({ status: "reviewing", step: 2, passed: { 1: true }, updatedAt: iso(4) })}`),
     mk(33, "[plan] 둘째저장소 승인 작업", `${plan("둘째저장소 승인 작업", 1, "람다")}\n${state({ status: "awaiting_merge", step: 1, passed: { 1: true }, finalPr: 77, updatedAt: iso(8) })}`),
   ];
+  // 끝난 run #30: orch:done(state=closed) 응답에만 있음. 진행 단계 P2(ref 30)가 이것으로 자동 완료된다.
+  const runsDone = [
+    { ...mk(30, "[plan] 둘째저장소 끝난 단계", `${plan("둘째저장소 끝난 단계", 1, "카파")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 76, updatedAt: iso(90) })}`), state: "closed" },
+  ];
   const usageIssue = mk(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
   const variables = [{ name: "ORCH_CODEX", value: "on" }, { name: "ORCH_PAUSED", value: "off" }];
   // app: 다른 프로젝트 화면 링크 (label 없음 → '화면 열기')
-  const roadmap = { version: 1, setup: [{ id: "0.1", title: "둘째로드맵 저장소", status: "done", note: null }], expansion: [], app: { url: "https://example.com/" } };
+  // phases 4개: P1 완료 · P2 할 일이지만 ref 30(끝난 run) → 자동 완료 · P3 할 일이지만 ref 31(구현 중) → 자동 진행(굵게) · P4 할 일 → '단계 2/4 완료'
+  const roadmap = {
+    version: 1, setup: [{ id: "0.1", title: "둘째로드맵 저장소", status: "done", note: null }], expansion: [], app: { url: "https://example.com/" },
+    phases: [
+      { id: "P1", title: "둘째진행 기초 공사", status: "done", note: null },
+      { id: "P2", title: "둘째진행 연결 완료", status: "todo", note: "끝난 작업으로 자동 완료", ref: 30 },
+      { id: "P3", title: "둘째진행 연결 구현", status: "todo", note: null, ref: 31 },
+      { id: "P4", title: "둘째진행 마무리", status: "todo", note: null },
+    ],
+  };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap)).toString("base64") };
   return (method, url) => {
     if (method !== "GET") return null;
@@ -128,6 +142,7 @@ function secondRepoFixtures(iso, usage) {
     if (p === `/repos/${REPO2}/issues`) {
       const label = q.get("labels");
       if (label === "orch:run") return { status: 200, body: runs };
+      if (label === "orch:done" && q.get("state") === "closed") return { status: 200, body: runsDone };
       if (label === "orch:usage") return { status: 200, body: [usageIssue] };
       if (label === null && q.get("state") === "open" && q.get("per_page") === "30") return { status: 200, body: runs.map((i) => ({ ...i, labels: [{ name: "orch:run" }] })) };
       if (label === null && q.get("state") === "all") return { status: 200, body: runs };
