@@ -24,15 +24,48 @@ const CURRENT_VERSION = /version: "(\d+\.\d+\.\d+)"/.exec(fs.readFileSync(path.j
 const freePort = () => new Promise((ok) => { const s = net.createServer().listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); }); });
 const listen = (srv) => new Promise((ok) => srv.listen(0, "127.0.0.1", () => ok(srv.address().port)));
 
+// 스위치 쓰기 시나리오 (머지 전 확인용, 기본 읽기 전용 실행과 분리): SCREENS_SWITCH=ok|partial
+//   ok      = 가짜 GitHub 가 두 저장소의 변수 PATCH·dispatch 를 모두 받아들임 → '2개 프로젝트에 적용'
+//   partial = 두 번째 저장소 PATCH 만 403 → '일부 실패: orch-second · …'
+// 쓰기는 이 프로세스 안의 가짜 서버에만 간다 (운영 저장소 설정은 바꾸지 않음).
+const SWITCH = process.env.SCREENS_SWITCH || "";
+if (SWITCH && SWITCH !== "ok" && SWITCH !== "partial") { console.error(`SCREENS_SWITCH 는 ok 또는 partial (${SWITCH})`); process.exit(2); }
+
 // ---- fake GitHub API
 const gh = githubFixtures(new Date());
 const ghCalls = [];
+/** switch 시나리오에서 저장된 변수: repo → { NAME: value }. GET variables 응답에 덮어쓴다. */
+const varOverrides = new Map();
+const setVar = (repo, name, value) => { const m = varOverrides.get(repo) ?? {}; m[name] = value; varOverrides.set(repo, m); };
+function fakeWrite(method, p, body) {
+  const v = /^\/repos\/([^/]+\/[^/]+)\/actions\/variables\/([A-Z_]+)$/.exec(p);
+  if (method === "PATCH" && v) {
+    if (SWITCH === "partial" && v[1] === REPO2) return { status: 403, body: { message: "Resource not accessible by integration" } };
+    setVar(v[1], v[2], String(body?.value ?? ""));
+    return { status: 204 };
+  }
+  if (method === "POST" && /^\/repos\/[^/]+\/[^/]+\/actions\/workflows\/orchestrator\.yml\/dispatches$/.test(p)) return { status: 204 };
+  return null;
+}
 const ghServer = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   ghCalls.push(`${req.method} ${url.pathname}${url.search}`);
-  const hit = gh(req.method, url);
-  res.writeHead(hit ? hit.status : 404, { "content-type": "application/json" });
-  res.end(hit?.body === undefined ? JSON.stringify({ message: "Not Found" }) : JSON.stringify(hit.body));
+  let raw = "";
+  req.on("data", (c) => { raw += c; });
+  req.on("end", () => {
+    let hit = null;
+    if (SWITCH && req.method !== "GET") { let b = null; try { b = JSON.parse(raw || "null"); } catch {} hit = fakeWrite(req.method, url.pathname, b); }
+    else hit = gh(req.method, url);
+    const vm = /^\/repos\/([^/]+\/[^/]+)\/actions\/variables$/.exec(url.pathname);
+    if (hit?.status === 200 && vm && req.method === "GET" && varOverrides.has(vm[1])) {
+      const over = varOverrides.get(vm[1]);
+      const list = (hit.body.variables ?? []).filter((x) => !(x.name in over)).concat(Object.entries(over).map(([name, value]) => ({ name, value })));
+      hit = { status: 200, body: { total_count: list.length, variables: list } };
+    }
+    if (hit?.status === 204) { res.writeHead(204); res.end(); return; }
+    res.writeHead(hit ? hit.status : 404, { "content-type": "application/json" });
+    res.end(hit?.body === undefined ? JSON.stringify({ message: "Not Found" }) : JSON.stringify(hit.body));
+  });
 });
 const ghPort = await listen(ghServer);
 
@@ -41,6 +74,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "screens-"));
 const user = `u${crypto.randomBytes(8).toString("hex")}`, password = crypto.randomBytes(18).toString("hex");
 const salt = crypto.randomBytes(16);
 const key = crypto.scryptSync(password, salt, 64, { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+const readToken = crypto.randomBytes(24).toString("hex");
 const appPort = await freePort();
 const log = fs.openSync(path.join(tmp, "server.log"), "w");
 const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(appPort)], {
@@ -50,6 +84,7 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     PATH: process.env.PATH, NODE_ENV: "production", NEXT_TELEMETRY_DISABLED: "1", VERCEL_ENV: "preview",
     ADMIN_USERNAME: user, ADMIN_PASSWORD_HASH: `scrypt$131072$8$1$${salt.toString("hex")}$${key.toString("hex")}`,
     CONTROL_ADMIN_TOKEN: crypto.randomBytes(24).toString("hex"),
+    CONTROL_READ_TOKEN: readToken, // 읽기 세션 확인용 (일회용)
     ORCH_REPOS: [REPO, REPO2].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
     ORCH_SELF_REPO: REPO, // 자기 저장소 판정(서버): orch-screens 카드에는 '화면 열기' 링크가 없어야 함
   },
@@ -79,7 +114,7 @@ try {
   }
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, headless: true, args: ["--no-sandbox"] });
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "ko-KR" });
-  const page = await context.newPage();
+  let page = await context.newPage(); // 읽기 세션 확인 동안만 다른 page 로 바꿔 낀다
   const pageErrors = [], external = [];
   page.on("pageerror", (e) => pageErrors.push(String(e)));
   await page.route("**/*", (r) => (r.request().url().startsWith(base) ? r.continue() : (external.push(r.request().url()), r.abort())));
@@ -103,7 +138,28 @@ try {
   const navLabels = (await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
   for (const t of TABS) if (!navLabels.some((l) => l.includes(t.nav))) problems.push(`하단 탭에 '${t.nav}' 없음 (${navLabels.join(", ")})`);
 
-  for (const t of TABS) {
+  // 스위치 카드: 카드 하나에 스위치 한 벌(4개 + 작업 시간대), 저장소별 카드 없음, 두 가짜 저장소 Codex 값이 달라 '일부 프로젝트 값이 다름'
+  const SWITCH_NAMES = ["Claude Sonnet (구현)", "Claude Opus (고난도 구현·대체 검수)", "Codex (독립 검수)", "전체 일시정지"];
+  const checkSwitchCard = async (who) => {
+    const sec = page.getByTestId("orch-switches");
+    try { await sec.getByRole("switch").first().waitFor({ timeout: 15000 }); } catch { problems.push(`[${who}] 스위치가 보이지 않음`); return; }
+    const cards = await sec.getByTestId("orch-switch-card").count();
+    if (cards !== 1) problems.push(`[${who}] 스위치 카드가 1개가 아님 (${cards})`);
+    const secText = ((await sec.textContent()) ?? "").replace(/\s+/g, " ");
+    for (const want of ["AI ON/OFF", "등록된 모든 프로젝트에 한 번에 적용", "끄면 새 작업만 막고", "작업 시간대 (한국시간, 비우면 항상)", ...SWITCH_NAMES]) if (!secText.includes(want)) problems.push(`[${who}] 스위치 영역에 '${want}' 이 없음`);
+    const sw = sec.getByRole("switch");
+    if ((await sw.count()) !== 4) problems.push(`[${who}] 스위치가 4개가 아님 (${await sw.count()}) — 저장소별로 반복되면 안 됨`);
+    for (const n of SWITCH_NAMES) if ((await sec.getByRole("switch", { name: n, exact: true }).count()) !== 1) problems.push(`[${who}] '${n}' 스위치가 1개가 아님`);
+    if ((await sec.locator("h3").filter({ hasText: /orch-screens|orch-second/ }).count()) || (await sec.locator('[aria-label*="orch-"]').count())) problems.push(`[${who}] 저장소별 스위치 카드가 남아 있음`);
+    if ((await sec.locator("input#win-all").count()) !== 1 || (await sec.locator("input").count()) !== 1) problems.push(`[${who}] 작업 시간대 입력이 하나가 아님`);
+    const diff = sec.getByTestId("orch-switch-differs");
+    const diffText = ((await diff.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+    if (!diffText.includes("일부 프로젝트 값이 다름: Codex(orch-second)")) problems.push(`[${who}] '일부 프로젝트 값이 다름: Codex(orch-second)' 가 없음 (${diffText})`);
+    if (!/text-warn/.test((await diff.locator("p").getAttribute("class").catch(() => "")) ?? "")) problems.push(`[${who}] '일부 프로젝트 값이 다름' 줄이 warn 색이 아님`);
+    return { sec, align: diff.getByRole("button", { name: "모두 맞추기" }) };
+  };
+
+  for (const t of SWITCH ? [] : TABS) {
     // reach the tab through the bottom nav, as a user would
     await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: new RegExp(t.nav) }).click();
     await page.waitForURL((u) => u.pathname.startsWith(t.path) || (t.path === "/projects" && u.pathname === "/"));
@@ -155,6 +211,12 @@ try {
       const nowTop = await page.getByRole("heading", { name: "지금 일하는 AI" }).evaluate((h) => h.getBoundingClientRect().top);
       const usageTop = await page.getByRole("heading", { name: "AI 사용량" }).evaluate((h) => h.getBoundingClientRect().top);
       if (nowTop >= usageTop) problems.push("[agents] '지금 일하는 AI' 가 'AI 사용량' 보다 위에 있지 않음");
+      // 스위치 카드 (관리자 + 쓰기 토큰): 스위치·'모두 맞추기'는 눌 수 있는 상태. 누르지는 않는다 (읽기 전용).
+      const sc = await checkSwitchCard("agents");
+      if (sc) {
+        if (!(await sc.align.isEnabled().catch(() => false))) problems.push("[agents] 관리자 세션에서 '모두 맞추기' 가 비활성");
+        if (!(await sc.sec.getByRole("switch", { name: "Codex (독립 검수)" }).isEnabled())) problems.push("[agents] 관리자 세션에서 Codex 스위치가 비활성");
+      }
     }
     if (t.name === "projects") {
       // 홈에는 '지금 일하는 AI' 가 없다 (AI 팀 탭으로 옮김)
@@ -445,9 +507,96 @@ try {
       if ((await page.evaluate(() => localStorage.getItem("orch.projects.collapsed"))) !== "[]") problems.push("[projects] 다시 펼친 뒤 localStorage 가 비지 않음");
     }
   }
+  if (!SWITCH) {
+    // 읽기 세션 (CONTROL_READ_TOKEN 토큰 교환): 값이 달라도 '모두 맞추기'·스위치·시간대 저장은 비활성
+    const rctx = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "ko-KR" });
+    const rpage = await rctx.newPage();
+    rpage.on("pageerror", (e) => pageErrors.push(String(e)));
+    await rpage.route("**/*", (r) => (r.request().url().startsWith(base) ? r.continue() : (external.push(r.request().url()), r.abort())));
+    await rpage.goto(`${base}/agents`);
+    const role = await rpage.evaluate(async (token) => {
+      const r = await fetch("/api/session", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) });
+      return (await r.json().catch(() => null))?.role ?? `HTTP ${r.status}`;
+    }, readToken);
+    if (role !== "read") problems.push(`[agents-read] 읽기 세션 로그인 실패 (${role})`);
+    else {
+      await rpage.reload();
+      const main = page; // checkSwitchCard 는 page 를 쓰므로 잠시 바꿔 끼운다
+      page = rpage;
+      try {
+        const sc = await checkSwitchCard("agents-read");
+        if (sc) {
+          if (!(await sc.align.count())) problems.push("[agents-read] '모두 맞추기' 버튼이 없음");
+          else if (await sc.align.isEnabled()) problems.push("[agents-read] 읽기 세션에서 '모두 맞추기' 가 눌림 (비활성이어야 함)");
+          for (const n of SWITCH_NAMES) if (await sc.sec.getByRole("switch", { name: n, exact: true }).isEnabled()) problems.push(`[agents-read] 읽기 세션에서 '${n}' 스위치가 눌림`);
+          if (await sc.sec.getByRole("button", { name: "저장", exact: true }).isEnabled()) problems.push("[agents-read] 읽기 세션에서 작업 시간대 '저장' 이 눌림");
+          if (!(await sc.sec.getByText("관리자 로그인에서만 바꿀 수 있습니다.").count())) problems.push("[agents-read] '관리자 로그인에서만 바꿀 수 있습니다.' 안내가 없음");
+        }
+        const file = path.join(OUT, "agents-read-390.png");
+        fs.mkdirSync(OUT, { recursive: true });
+        await rpage.screenshot({ path: file, fullPage: true });
+        shots.push(path.relative(ROOT, file));
+      } finally { page = main; }
+    }
+    await rctx.close();
+  } else {
+    // 쓰기 시나리오: 관리자 로그인 → AI 팀 탭 → Codex 토글 (기준 orch-screens 가 off → on 으로 모든 프로젝트에 저장)
+    // ok 시나리오는 그 사이 다른 곳에서 작업 시간대가 바뀐 것으로 두어, 저장 뒤 다시 읽을 때 시간대 입력값도 갱신되는지 본다.
+    await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: /AI 팀/ }).click();
+    await page.waitForURL((u) => u.pathname.startsWith("/agents"));
+    const sc = await checkSwitchCard(`switch-${SWITCH}`);
+    if (sc) {
+      const before = ghCalls.length;
+      const win = sc.sec.locator("input#win-all");
+      if ((await win.inputValue()) !== "") problems.push(`[switch-${SWITCH}] 처음 작업 시간대 입력이 비어 있지 않음 (${await win.inputValue()})`);
+      if (SWITCH === "ok") for (const r of [REPO, REPO2]) setVar(r, "ORCH_WINDOW", "09:00-21:00"); // 화면이 읽은 뒤 바뀐 기준값
+      await sc.sec.getByRole("switch", { name: "Codex (독립 검수)" }).click();
+      const msg = sc.sec.getByTestId("orch-switch-msg");
+      try { await msg.waitFor({ timeout: 15000 }); } catch { problems.push(`[switch-${SWITCH}] 저장 결과 문구가 나오지 않음`); }
+      const text = ((await msg.textContent().catch(() => "")) ?? "").trim();
+      const cls = (await msg.getAttribute("class").catch(() => "")) ?? "";
+      if (SWITCH === "ok") {
+        if (text !== "2개 프로젝트에 적용") problems.push(`[switch-ok] 결과 문구가 '2개 프로젝트에 적용' 이 아님 (${text})`);
+        if (/text-warn/.test(cls)) problems.push("[switch-ok] 전체 성공 문구가 warn 색");
+      } else {
+        if (!text.startsWith("일부 실패: orch-second · ")) problems.push(`[switch-partial] 결과 문구가 '일부 실패: orch-second · …' 이 아님 (${text})`);
+        if (/프로젝트에 적용/.test(text)) problems.push(`[switch-partial] 일부 실패인데 전체 성공 문구가 보임 (${text})`);
+        if (!/text-warn/.test(cls)) problems.push("[switch-partial] 일부 실패 문구가 warn 색이 아님");
+      }
+      const writes = ghCalls.slice(before).filter((c) => !c.startsWith("GET"));
+      const want = [`PATCH /repos/${REPO}/actions/variables/ORCH_CODEX`, `POST /repos/${REPO}/actions/workflows/orchestrator.yml/dispatches`, `PATCH /repos/${REPO2}/actions/variables/ORCH_CODEX`];
+      if (SWITCH === "ok") want.push(`POST /repos/${REPO2}/actions/workflows/orchestrator.yml/dispatches`);
+      for (const w of want) if (!writes.includes(w)) problems.push(`[switch-${SWITCH}] 가짜 GitHub 에 '${w}' 가 없음 (${writes.join(", ")})`);
+      if (SWITCH === "partial" && writes.some((w) => w.startsWith(`POST /repos/${REPO2}/actions/workflows`))) problems.push("[switch-partial] 저장 실패한 저장소에 dispatch 를 보냄");
+      if (!ghCalls.slice(before).some((c) => c.startsWith(`GET /repos/${REPO}/actions/variables`))) problems.push(`[switch-${SWITCH}] 저장 뒤 다시 읽지 않음`);
+      // 다시 읽은 뒤: Codex 는 기준 값(ON), ok 는 시간대 입력도 새 기준값으로 갱신
+      try { await page.waitForFunction(() => document.querySelector('[data-testid="orch-switches"] [role="switch"][aria-label="Codex (독립 검수)"]')?.getAttribute("aria-checked") === "true", null, { timeout: 10000 }); }
+      catch { problems.push(`[switch-${SWITCH}] 다시 읽은 뒤 Codex 가 ON 이 아님`); }
+      if (SWITCH === "ok") {
+        try { await page.waitForFunction(() => document.querySelector("input#win-all")?.value === "09:00-21:00", null, { timeout: 10000 }); }
+        catch { problems.push(`[switch-ok] 기준값이 바뀌었는데 작업 시간대 입력이 갱신되지 않음 (${await win.inputValue()})`); }
+      }
+      for (const w of WIDTHS) {
+        await page.setViewportSize({ width: w, height: 844 });
+        await page.waitForTimeout(150);
+        if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[switch-${SWITCH}] ${w}px 에서 가로 넘침`);
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await sc.sec.scrollIntoViewIfNeeded();
+      fs.mkdirSync(OUT, { recursive: true });
+      const file = path.join(OUT, `switch-${SWITCH}.png`);
+      await page.screenshot({ path: file, fullPage: true });
+      shots.push(path.relative(ROOT, file));
+    }
+  }
   if (pageErrors.length) problems.push(`페이지 오류: ${pageErrors.slice(0, 3).join(" | ")}`);
   if (external.length) problems.push(`외부 요청 차단됨: ${[...new Set(external)].slice(0, 3).join(", ")}`);
-  if (ghCalls.some((c) => c.startsWith("POST") || c.startsWith("PATCH"))) problems.push(`화면 조회 중 GitHub 쓰기 요청: ${ghCalls.filter((c) => !c.startsWith("GET")).join(", ")}`);
+  if (!SWITCH && ghCalls.some((c) => c.startsWith("POST") || c.startsWith("PATCH"))) problems.push(`화면 조회 중 GitHub 쓰기 요청: ${ghCalls.filter((c) => !c.startsWith("GET")).join(", ")}`);
+  if (SWITCH) {
+    const allowed = /^(PATCH \/repos\/[^/]+\/[^/]+\/actions\/variables\/ORCH_CODEX|POST \/repos\/[^/]+\/[^/]+\/actions\/workflows\/orchestrator\.yml\/dispatches)$/;
+    const odd = ghCalls.filter((c) => !c.startsWith("GET") && !allowed.test(c));
+    if (odd.length) problems.push(`쓰기 시나리오에서 예상 밖 GitHub 쓰기: ${odd.join(", ")}`);
+  }
 } catch (e) {
   problems.push(`실행 실패: ${e?.message ?? e}`);
   try { problems.push(`server.log 끝: ${fs.readFileSync(path.join(tmp, "server.log"), "utf8").slice(-800)}`); } catch {}
@@ -457,7 +606,7 @@ try {
   proxy.close(); ghServer.close();
 }
 
-const report = [`## 결과 화면 테스트 (Playwright)`, "", problems.length ? `❌ 실패 ${problems.length}건` : `✅ 통과 · 탭 5개 × 폭 ${WIDTHS.join("/")}px`, "",
+const report = [`## 결과 화면 테스트 (Playwright)`, "", problems.length ? `❌ 실패 ${problems.length}건` : SWITCH ? `✅ 통과 · 스위치 쓰기 시나리오 ${SWITCH}` : `✅ 통과 · 탭 5개 × 폭 ${WIDTHS.join("/")}px`, "",
   ...problems.map((p) => `- ${p}`), problems.length ? "" : "", `스크린샷 ${shots.length}장: ${path.relative(ROOT, OUT) || "."}/`].join("\n");
 console.log(report);
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + "\n");
