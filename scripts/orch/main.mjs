@@ -464,6 +464,18 @@ async function finishRun(run, line) {
   await save(run, { status: "done" }, line);
   await setLabels(run.n, [C.LABELS.done], [C.LABELS.run]);
   if (run.issue.state === "open") await gh().patch(`/issues/${run.n}`, { state: "closed", state_reason: "completed" });
+  await dispatchNextPlan("run 완료");
+}
+
+/** Auto mode: ask plan-next for the next plan (it re-checks everything itself, so extra calls are harmless). */
+async function dispatchNextPlan(why) {
+  if (!SW().auto) return;
+  try {
+    await ro().post("/actions/workflows/plan-next.yml/dispatches", { ref: "main" });
+    log(`plan-next dispatched (${why})`);
+  } catch (e) {
+    log(`plan-next dispatch failed: ${e.message}`);
+  }
 }
 
 async function onFail(run, pr, reason) {
@@ -487,6 +499,11 @@ async function watchdog() {
     } catch (e) {
       log(`watchdog #${it.number} error: ${e.message}`);
     }
+  }
+  // Auto mode fallback: nothing running and no plan waiting → let plan-next decide (missed dispatch, cool-down over).
+  if (SW().auto && !issues.some((i) => !i.pull_request)) {
+    const open = await gh().all("/issues?state=open");
+    if (!open.some((i) => !i.pull_request && String(i.title ?? "").startsWith("[plan]"))) await dispatchNextPlan("순찰");
   }
 }
 

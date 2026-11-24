@@ -1,0 +1,117 @@
+# Auto mode (ORCH_AUTO): write the next plan without a person when nothing is open.
+# Dispatched by the orchestrator when a run finishes (and by the watchdog as a fallback). Codex (read-only)
+# writes a fact sheet first; Claude (Opus) then picks the next work and writes the plan Issue as the owner,
+# which starts plan-review → (auto) orch:go. Human-only work goes to the "orch:human" Issue instead.
+# Shares the orch-usage concurrency group with plan-review/usage (one encrypted Codex login cache).
+name: plan-next
+run-name: "plan-next"
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: orch-usage
+  cancel-in-progress: false
+
+jobs:
+  next:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write   # prune old encrypted-login cache entries
+      id-token: write  # claude-code-action
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Keep a trusted copy of the orchestrator scripts
+        run: cp -r scripts/orch "$RUNNER_TEMP/orch"
+      - name: Should we write a plan now?
+        id: prep
+        run: node "$RUNNER_TEMP/orch/plan-next.mjs" prepare
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
+          ORCH_DAILY_PLANS: ${{ vars.ORCH_DAILY_PLANS }}
+
+      # ---- Codex fact sheet (read-only sandbox). Optional: without it Claude analyses on its own.
+      - name: Restore encrypted Codex login
+        if: steps.prep.outputs.skip == 'false' && vars.ORCH_CODEX != 'off'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-latest
+          restore-keys: codex-auth-
+      - name: Codex pre-analysis
+        id: codex
+        if: steps.prep.outputs.skip == 'false' && vars.ORCH_CODEX != 'off'
+        continue-on-error: true
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          [ -f ~/.orch/codex-auth.enc ] || { echo "note=Codex 로그인 없음"; exit 0; }
+          mkdir -p ~/.codex
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null \
+            || { rm -f ~/.codex/auth.json; echo "note=Codex 로그인 복호화 실패"; exit 0; }
+          before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          npm i -g @openai/codex >/dev/null 2>&1
+          codex exec -s read-only --skip-git-repo-check \
+            -o "$RUNNER_TEMP/codex-facts.md" \
+            "$(cat "$RUNNER_TEMP/plan-next-codex.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || echo "note=Codex 실행 실패(한도 또는 오류)"
+          after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
+          if [ -n "$after" ] && [ "$before" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Remove Codex credentials from the runner
+        if: always()
+        run: rm -rf ~/.codex
+      - name: Save refreshed encrypted login
+        if: steps.codex.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-${{ github.run_id }}
+      - name: Prune old login cache entries
+        if: steps.codex.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: codex-auth-${{ github.run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
+            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
+
+      # ---- Claude PM writes the next plan
+      - name: Build PM prompt
+        id: pm
+        if: steps.prep.outputs.skip == 'false'
+        run: node "$RUNNER_TEMP/orch/plan-next.mjs" claude
+      - name: Claude writes the next plan (Opus)
+        if: steps.prep.outputs.skip == 'false'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          allowed_bots: "*"
+          prompt: ${{ steps.pm.outputs.prompt }}
+          claude_args: >-
+            --max-turns 80
+            --model opus
+            --allowedTools "Read,Glob,Grep,Write,Task,Agent,Bash(ls:*),Bash(git log:*),Bash(mkdir:*)"
+      - name: Open the plan Issue (owner PAT) or record "nothing to do"
+        if: steps.prep.outputs.skip == 'false'
+        run: node "$RUNNER_TEMP/orch/plan-next.mjs" publish
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
+          ORCH_DAILY_PLANS: ${{ vars.ORCH_DAILY_PLANS }}
