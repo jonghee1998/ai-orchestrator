@@ -13,9 +13,6 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: orch-usage
-  cancel-in-progress: false
 
 jobs:
   review:
@@ -24,6 +21,11 @@ jobs:
       (startsWith(github.event.issue.title, '[plan]') &&
        github.event.issue.user.login == github.repository_owner &&
        github.event.sender.login == github.repository_owner)
+    # Job-level so events this job skips (e.g. engine state edits of a non-plan Issue) never take the single
+    # pending slot of the shared orch-usage group and cancel a real review waiting there.
+    concurrency:
+      group: orch-usage
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
