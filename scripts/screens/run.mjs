@@ -133,12 +133,12 @@ try {
       if (!/\d{1,2}\/\d{1,2}\([월화수목금토일]\) \d{2}:\d{2} KST/.test(dates)) problems.push(`[briefing] 아이디어 카드 날짜가 요일 형식이 아님: ${JSON.stringify(dates.slice(0, 200))}`);
       if (!(await page.locator('a[href$="/issues/21"]').count())) problems.push("[briefing] 아이디어(#21) '원문 보기' 링크가 없음");
     }
-    if (t.name === "projects") {
-      // '지금 일하는 AI' 카드: 제목, 네 줄 이름, 두 저장소에 걸친 예시 작업 (구현 중 · 검수 중 · 승인 대기 · 쉬는 중)
+    if (t.name === "agents") {
+      // AI 팀 탭 맨 위 '지금 일하는 AI' 카드: 제목, 네 줄 이름, 두 저장소에 걸친 예시 작업 (구현 중 · 검수 중 · 승인 대기 · 쉬는 중)
       const agentsCard = page.getByTestId("orch-agents");
       const text1 = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
       const agentsText = await text1(agentsCard);
-      if (!(await page.getByRole("heading", { name: "지금 일하는 AI" }).count())) problems.push("[projects] '지금 일하는 AI' 제목이 없음");
+      if (!(await page.getByRole("heading", { name: "지금 일하는 AI" }).count())) problems.push("[agents] '지금 일하는 AI' 제목이 없음");
       for (const [id, name, wants] of [
         ["sonnet", "Sonnet", ["orch-screens", "#11", "상황판 시험 작업", "Step 2/3", "구현 중", "orch-second", "#31", "둘째저장소 구현 작업", "Step 1/2"]],
         ["opus", "Opus", ["쉬는 중"]],
@@ -146,15 +146,22 @@ try {
         ["user", "사용자", ["#12", "승인 대기 시험 작업", "#33", "둘째저장소 승인 작업", "반영 승인 대기"]],
       ]) {
         const t = await text1(page.getByTestId(`orch-agent-${id}`));
-        if (!t.startsWith(name)) problems.push(`[projects] '지금 일하는 AI' ${name} 줄이 없음 (${t.slice(0, 80)})`);
-        for (const want of wants) if (!t.includes(want)) problems.push(`[projects] '지금 일하는 AI' ${name} 줄에 '${want}' 이 없음 (${t.slice(0, 200)})`);
+        if (!t.startsWith(name)) problems.push(`[agents] '지금 일하는 AI' ${name} 줄이 없음 (${t.slice(0, 80)})`);
+        for (const want of wants) if (!t.includes(want)) problems.push(`[agents] '지금 일하는 AI' ${name} 줄에 '${want}' 이 없음 (${t.slice(0, 200)})`);
       }
-      if (!agentsText.includes("쉬는 중")) problems.push("[projects] '지금 일하는 AI' 에 '쉬는 중' 이 없음");
-      if (!(await agentsCard.locator('a[href$="/issues/31"][target="_blank"]').count())) problems.push("[projects] '지금 일하는 AI' #31 Issue 링크가 없음");
+      if (!agentsText.includes("쉬는 중")) problems.push("[agents] '지금 일하는 AI' 에 '쉬는 중' 이 없음");
+      if (!(await agentsCard.locator('a[href$="/issues/31"][target="_blank"]').count())) problems.push("[agents] '지금 일하는 AI' #31 Issue 링크가 없음");
+      // 맨 위: 'AI 사용량' 보다 위
+      const nowTop = await page.getByRole("heading", { name: "지금 일하는 AI" }).evaluate((h) => h.getBoundingClientRect().top);
+      const usageTop = await page.getByRole("heading", { name: "AI 사용량" }).evaluate((h) => h.getBoundingClientRect().top);
+      if (nowTop >= usageTop) problems.push("[agents] '지금 일하는 AI' 가 'AI 사용량' 보다 위에 있지 않음");
+    }
+    if (t.name === "projects") {
+      // 홈에는 '지금 일하는 AI' 가 없다 (AI 팀 탭으로 옮김)
+      if ((await page.getByRole("heading", { name: "지금 일하는 AI" }).count()) || (await page.getByTestId("orch-agents").count())) problems.push("[projects] 홈에 '지금 일하는 AI' 가 있음 (AI 팀 탭에만 있어야 함)");
       // 기본 상태: 인프라·확장 목록, 단계 줄 4개, 작업 항목 모두 접힘 (줄의 요약·개수만 보임).
       for (const hidden of ["로드맵시험 저장소", "확장시험 두번째 저장소", "알파공정 2단계 제목", "알파공정 3단계 확인항목", "3.10 독립 검수", "알림 모아보기", "승인 기다리는 시험 계획", "상황판 시험 작업", "전체 39과정 중", "개발 여부를 정함"]) {
-        // 프로젝트 카드 안에서만 검사한다: 맨 위 '지금 일하는 AI' 카드는 작업 제목(예: 상황판 시험 작업)을 일부러 보여준다.
-        if (await page.locator('[data-testid^="orch-project-"]').getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
+        if (await page.getByText(hidden).first().isVisible()) problems.push(`[projects] 접힌 내용 '${hidden}' 이 기본 상태에서 보임`);
       }
       const card = page.getByTestId("orch-project-orch-screens");
       const flat = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();

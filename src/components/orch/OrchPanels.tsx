@@ -462,7 +462,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
 /** 프로젝트 탭: 프로젝트마다 남은 할 일 · 3칸(계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 3개 · 추가 검토(아이디어) 줄 (모두 접고 펼 수 있음). */
 const AGENT_NAME: Record<AgentId, string> = { sonnet: "Sonnet", opus: "Opus", codex: "Codex", user: "사용자" };
 
-/** 홈 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
+/** AI 팀 탭 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
 function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
   const rows = activeAgents(repos.flatMap((v) => v.runs), Object.fromEntries(repos.map((v) => [v.repo, v.switches])));
   return (
@@ -490,6 +490,12 @@ function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
       </ul>
     </Card>
   );
+}
+
+export function OrchAgentsNowPanel() {
+  const { state } = useOrch();
+  if (state.kind !== "ok") return <section aria-label="지금 일하는 AI" className="space-y-2"><h2 className={SECTION_TITLE}>지금 일하는 AI</h2><Card><StateNote kind={state.kind} /></Card></section>;
+  return <ActiveAgentsCard repos={state.data.repos} />;
 }
 
 export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
@@ -533,7 +539,6 @@ export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
       <section aria-label="자동 진행 작업" className="space-y-3" data-testid="orch-runs">
         {failed && <p role="status" className="px-1 text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
         {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : <>
-          <ActiveAgentsCard repos={state.data.repos} />
           {state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} open={!collapsed.includes(v.repo)} onToggle={() => toggleProject(v.repo)} />)}
         </>}
       </section>
