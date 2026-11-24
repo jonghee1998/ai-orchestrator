@@ -140,6 +140,7 @@ export function readSwitches(e = {}) {
     opus: flag(e.ORCH_OPUS, true),
     codex: flag(e.ORCH_CODEX, true),
     paused: flag(e.ORCH_PAUSED, false),
+    auto: flag(e.ORCH_AUTO, false),
     window: String(e.ORCH_WINDOW ?? "").trim(),
   };
 }

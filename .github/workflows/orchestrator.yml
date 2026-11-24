@@ -76,4 +76,5 @@ jobs:
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
           ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
           ORCH_WINDOW: ${{ vars.ORCH_WINDOW }}

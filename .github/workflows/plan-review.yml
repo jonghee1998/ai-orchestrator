@@ -50,6 +50,7 @@ jobs:
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
           ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
 
       # ---- Codex (read-only sandbox)
       - name: Restore encrypted Codex login
@@ -131,13 +132,30 @@ jobs:
             --allowedTools "Read,Glob,Grep,Write,Task,Agent,Bash(ls:*),Bash(git log:*),Bash(mkdir:*)"
 
       - name: Post audit
+        id: post
         if: always() && steps.prep.outputs.skip == 'false'
         run: node scripts/orch/plan-review.mjs publish
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
           ISSUE: ${{ inputs.issue || github.event.issue.number }}
           ROUND: ${{ steps.prep.outputs.round }}
           HASH: ${{ steps.prep.outputs.hash }}
           CLAUDE_RAN: ${{ steps.fb.outputs.run == 'true' }}
           NOTE: ${{ steps.codex.outputs.note }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      # ---- Auto mode (ORCH_AUTO): no person in the loop
+      - name: Auto start (orch:go as the owner)
+        if: always() && steps.post.outputs.next == 'go'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}   # owner PAT: the engine only starts on the owner's label
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/labels" -f "labels[]=orch:go" >/dev/null
+      - name: Auto revise (Claude applies the findings)
+        if: always() && steps.post.outputs.next == 'revise'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue || github.event.issue.number }}
+          FINAL: ${{ steps.post.outputs.final }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/plan-revise.yml/dispatches" -f ref=main -f "inputs[issue]=$ISSUE" -f "inputs[final]=$FINAL"

@@ -1,0 +1,62 @@
+# Auto mode (ORCH_AUTO): PM(Claude) applies the latest plan-audit findings to the plan Issue without a person.
+# Dispatched by plan-review only. The edit is made with the owner PAT, so it opens the next audit round;
+# on the last round it adds orch:go instead. Claude only reads the code and writes two files under .orch/.
+name: plan-revise
+run-name: "plan-revise #${{ inputs.issue }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue: { required: true, type: string }
+      final: { required: false, type: string }
+
+permissions: {}
+
+concurrency:
+  group: orch-plan-revise-${{ inputs.issue }}
+  cancel-in-progress: false
+
+jobs:
+  revise:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write   # claude-code-action
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Keep a trusted copy of the orchestrator scripts
+        run: cp -r scripts/orch "$RUNNER_TEMP/orch"
+      - name: Decide and build prompt
+        id: prep
+        run: node "$RUNNER_TEMP/orch/plan-revise.mjs" prepare
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          ISSUE: ${{ inputs.issue }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
+      - name: Claude revises the plan (Opus)
+        if: steps.prep.outputs.skip == 'false'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          allowed_bots: "*"
+          prompt: ${{ steps.prep.outputs.prompt }}
+          claude_args: >-
+            --max-turns 60
+            --model opus
+            --allowedTools "Read,Glob,Grep,Write,Task,Agent,Bash(ls:*),Bash(git log:*),Bash(mkdir:*)"
+      - name: Write back the plan (owner PAT) and start on the last round
+        if: always() && steps.prep.outputs.skip == 'false'
+        run: node "$RUNNER_TEMP/orch/plan-revise.mjs" publish
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          ISSUE: ${{ inputs.issue }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}

@@ -646,6 +646,7 @@ const FLAG_TEXT: Record<FlagKey, { name: string; off: string }> = {
   opus: { name: "Claude Opus (고난도 구현·대체 검수)", off: "Sonnet이 대신 구현, 대체 검수 없음" },
   codex: { name: "Codex (독립 검수)", off: "Opus가 바로 검수" },
   paused: { name: "전체 일시정지", off: "" },
+  auto: { name: "자동 모드 (시작·반영 자동)", off: "계획 시작(orch:go)과 위험 변경 반영은 사람이 함" },
 };
 
 /** AI 팀 탭: 스위치 한 벌을 등록된 모든 프로젝트에 한 번에 적용(POST scope all). 관리자 세션에서만 조작 가능. */

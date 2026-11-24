@@ -209,9 +209,10 @@ test("filesSummary: fallback when SUMMARY.md is missing", () => {
 });
 
 test("switches: parsing, time window (KST, wraps midnight, fail-closed), model resolution", () => {
-  assert.deepEqual(C.readSwitches({}), { sonnet: true, opus: true, codex: true, paused: false, window: "" });
+  assert.deepEqual(C.readSwitches({}), { sonnet: true, opus: true, codex: true, paused: false, auto: false, window: "" });
+  assert.equal(C.readSwitches({ ORCH_AUTO: "on" }).auto, true);
   assert.deepEqual(C.readSwitches({ ORCH_SONNET: "OFF", ORCH_OPUS: "false", ORCH_CODEX: "0", ORCH_PAUSED: "on" }),
-    { sonnet: false, opus: false, codex: false, paused: true, window: "" });
+    { sonnet: false, opus: false, codex: false, paused: true, auto: false, window: "" });
   assert.equal(C.readSwitches({ ORCH_CODEX: "maybe" }).codex, true, "unknown value keeps default");
   const at = (hhmm) => Date.parse(`2026-11-20T${hhmm}:00+09:00`);
   assert.equal(C.windowOpen("", at("03:00")), true);

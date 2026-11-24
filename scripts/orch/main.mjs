@@ -367,7 +367,9 @@ async function openFinal(run) {
     ? C.depDiff(await readPackageJson("main"), await readPackageJson(branch))
     : [];
   const risk = C.classifyRisk(files, deps);
-  const autoMerge = plan.auto_merge !== false && risk.level === "low";
+  // Auto mode (ORCH_AUTO): the owner delegated final approval, so every final PR merges itself after CI.
+  const auto = SW().auto;
+  const autoMerge = auto || (plan.auto_merge !== false && risk.level === "low");
 
   const steps = [];
   for (const s of plan.steps) {
@@ -391,8 +393,11 @@ async function openFinal(run) {
   });
 
   if (autoMerge) {
+    const why = auto && (risk.level !== "low" || plan.auto_merge === false)
+      ? `자동 모드 → 확인 필요 항목(${risk.reasons.map((r) => r.reason).join(", ") || "auto_merge: false"})도 완공 보고서에 남기고 자동 반영`
+      : "위험 낮음";
     await save(run, { status: "finalizing", pr: null, finalPr: final.number, risk: risk.level },
-      `🎉 전체 ${plan.steps.length}개 스텝 통과. 위험 낮음 → 최종 PR #${final.number}의 CI가 통과하면 자동 반영합니다.`);
+      `🎉 전체 ${plan.steps.length}개 스텝 통과. ${why} → 최종 PR #${final.number}의 CI가 통과하면 자동 반영합니다.`);
     return;
   }
   const why = risk.reasons.length ? risk.reasons.map((r) => r.reason).join(", ") : "auto_merge: false";
@@ -450,7 +455,8 @@ async function evaluateFinal(pr, n) {
       return block(run, `최종 PR 자동 반영 실패 (${e.status}): ${C.oneLine(e.message, 200)}`, pr.html_url, "final");
     }
   }
-  await finishRun(run, `🏁 최종 PR #${pr.number}을 main에 자동 반영했습니다 (위험 낮음, CI 통과). 완료!`);
+  const how = st.risk && st.risk !== "low" ? "자동 모드, CI 통과" : "위험 낮음, CI 통과";
+  await finishRun(run, `🏁 최종 PR #${pr.number}을 main에 자동 반영했습니다 (${how}). 완료!`);
   await notify(`✅ Run #${run.n} 완료 (자동 반영)`, `${run.plan.goal}`, pr.html_url);
 }
 
@@ -537,6 +543,15 @@ async function watchOne(n) {
     if (await recoverPushedWork(run)) return;
     await block(run, `Claude 작업이 ${Math.round(minutesSince(st.requestedAt))}분째 결과가 없습니다.`, null, "work");
     return;
+  }
+
+  // Auto mode switched on while a final PR waits for the owner: take the automatic path.
+  if (st.status === "awaiting_merge" && st.finalPr && SW().auto) {
+    const pr = await gh().get(`/pulls/${st.finalPr}`, { allow404: true });
+    if (pr?.state === "open" && !pr.merged_at) {
+      await save(run, { status: "finalizing" }, `🤖 자동 모드가 켜져 있어 최종 PR #${pr.number}을 CI 통과 후 자동 반영합니다.`);
+      return evaluateFinal(pr, n);
+    }
   }
 
   if (st.status === "finalizing" && st.finalPr) {

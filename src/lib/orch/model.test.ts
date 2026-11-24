@@ -53,9 +53,11 @@ test("sortRuns: needs-user first, finished last", () => {
 });
 
 test("switches: same defaults as the engine; dashboard changes validated", () => {
-  assert.deepEqual(switchesFromVars([]), { sonnet: true, opus: true, codex: true, paused: false, window: "" });
+  assert.deepEqual(switchesFromVars([]), { sonnet: true, opus: true, codex: true, paused: false, auto: false, window: "" });
+  assert.equal(switchesFromVars([{ name: "ORCH_AUTO", value: "on" }]).auto, true);
+  assert.deepEqual(switchChange("auto", true), { ok: true, name: "ORCH_AUTO", value: "on" });
   assert.deepEqual(switchesFromVars([{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "on" }, { name: "ORCH_WINDOW", value: " 08:00-24:00 " }]),
-    { sonnet: true, opus: true, codex: false, paused: true, window: "08:00-24:00" });
+    { sonnet: true, opus: true, codex: false, paused: true, auto: false, window: "08:00-24:00" });
   assert.deepEqual(switchChange("codex", false), { ok: true, name: "ORCH_CODEX", value: "off" });
   assert.deepEqual(switchChange("paused", true), { ok: true, name: "ORCH_PAUSED", value: "on" });
   assert.deepEqual(switchChange("window", "22:00-06:00"), { ok: true, name: "ORCH_WINDOW", value: "22:00-06:00" });
