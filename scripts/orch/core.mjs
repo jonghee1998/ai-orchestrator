@@ -369,7 +369,9 @@ const OK_CONCLUSIONS = new Set(["success", "skipped", "neutral"]);
 export function ciVerdict(checkRuns, excludeNames = []) {
   const runs = (checkRuns ?? []).filter((r) => !excludeNames.includes(r.name));
   if (runs.length === 0) return { result: "none", failed: [] };
-  if (runs.some((r) => r.status !== "completed")) return { result: "pending", failed: [] };
+  // GitHub sometimes leaves a finished check at status "in_progress" with its conclusion and completed_at set.
+  const done = (r) => r.status === "completed" || (!!r.conclusion && !!r.completed_at);
+  if (runs.some((r) => !done(r))) return { result: "pending", failed: [] };
   const failed = runs.filter((r) => !OK_CONCLUSIONS.has(r.conclusion)).map((r) => ({ name: r.name, url: r.html_url }));
   return { result: failed.length ? "failure" : "success", failed };
 }
