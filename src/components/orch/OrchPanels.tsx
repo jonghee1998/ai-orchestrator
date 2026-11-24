@@ -9,8 +9,9 @@ import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
-import { FLAG_KEYS, approveMessage, latestUsage, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { FLAG_KEYS, approveMessage, latestUsage, mergedSwitches, type SwitchKey, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { activeAgents, type AgentId } from "@/lib/orch/agents";
+import { WRITE_UNCONFIGURED_TEXT, alignResultMessage, alignSwitches, differsText, switchResultMessage, type SwitchAllResponse, type SwitchMessage } from "@/lib/orch/switchUi";
 import { readCollapsed, toggleCollapsed, writeCollapsed } from "@/lib/orch/collapse";
 import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, phaseBoard, stageBoard, type BoardColumn, type BoardItem, type DonePhase, type PhaseColumn, type PhaseGroup } from "@/lib/orch/lifecycle";
 
@@ -647,67 +648,95 @@ const FLAG_TEXT: Record<FlagKey, { name: string; off: string }> = {
   paused: { name: "전체 일시정지", off: "" },
 };
 
-/** AI 팀 탭: 저장소별 ON/OFF. 관리자 세션에서만 조작 가능. */
+/** AI 팀 탭: 스위치 한 벌을 등록된 모든 프로젝트에 한 번에 적용(POST scope all). 관리자 세션에서만 조작 가능. */
 export function OrchSwitchesPanel() {
   const { state, reload } = useOrch();
   const session = useSession();
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<SwitchMessage | null>(null);
+  const aligning = useRef(false); // '모두 맞추기' 중복 실행 막기 (상태 갱신 전 두 번 눌러도 한 번만)
   const canEdit = session.role === "admin" && state.kind === "ok" && state.data.canWrite;
+  const merged = state.kind === "ok" ? mergedSwitches(state.data.repos) : null;
+  const value = merged?.value ?? null;
+  const locked = !canEdit || busy !== null || !value;
+  const differs = merged ? differsText(merged.differs) : null;
 
-  async function change(repo: string, key: string, value: boolean | string) {
-    setBusy(`${repo}:${key}`); setMsg(null);
+  async function postAll(key: SwitchKey, v: boolean | string): Promise<SwitchAllResponse> {
     try {
-      const r = await fetch("/api/orch", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify({ repo, key, value }) });
-      const j = await r.json().catch(() => null);
-      setMsg(r.ok ? `저장됨 · 새 작업부터 적용${j?.woke ? ", 대기 작업은 지금 재개 요청" : " (최대 20분 내 반영)"}` : `저장 실패 · ${j?.detail ?? j?.error ?? r.status}`);
-      await reload();
-    } catch { setMsg("저장 실패 · 네트워크 오류"); }
+      const r = await fetch("/api/orch", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", ...csrfHeaders() }, body: JSON.stringify({ key, value: v, scope: "all" }) });
+      return { status: r.status, body: await r.json().catch(() => null) };
+    } catch { return { status: 0, body: null }; }
+  }
+
+  async function change(key: SwitchKey, v: boolean | string) {
+    if (locked) return;
+    setBusy(key); setMsg(null);
+    try { setMsg(switchResultMessage(await postAll(key, v))); await reload(); }
     finally { setBusy(null); }
+  }
+
+  async function alignAll() {
+    if (locked || !value || !merged?.differs.length || aligning.current) return;
+    aligning.current = true; setBusy("align"); setMsg(null);
+    try { setMsg(alignResultMessage(await alignSwitches(value, merged.differs, postAll))); await reload(); }
+    finally { aligning.current = false; setBusy(null); }
   }
 
   return (
     <section aria-label="엔진 ON/OFF" className="space-y-2" data-testid="orch-switches">
       <h2 className={SECTION_TITLE}>AI ON/OFF</h2>
       <p className="px-1 text-xs text-text-muted">끄면 새 작업만 막고, 이미 실행 중인 작업은 끝까지 진행합니다. GitHub 저장소 변수에 저장되어 이 앱이 꺼져 있어도 지켜집니다.</p>
-      {msg && <p role="status" className={STATUS_BOX}>{msg}</p>}
-      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : state.data.repos.map((v) => (
-        <Card key={v.repo}>
-          <h3 className={CARD_TITLE}>{short(v.repo)}</h3>
-          {!v.switches ? <p className="mt-2 text-xs text-danger">스위치를 읽지 못했습니다 · {v.switchesError}</p> : <div className="mt-2">
-            {FLAG_KEYS.map((k) => {
-              const on = v.switches![k];
-              const label = k === "paused" ? (on ? "정지됨" : "운영 중") : on ? "ON" : "OFF";
-              const active = k === "paused" ? !on : on;
-              return (
-                <div key={k} className={`flex items-center justify-between gap-3 ${ROW} py-2`}>
-                  <div className="min-w-0"><p className="text-sm font-medium">{FLAG_TEXT[k].name}</p>{!active && FLAG_TEXT[k].off && <p className="mt-[3px] text-xs text-text-muted">꺼짐 · {FLAG_TEXT[k].off}</p>}</div>
-                  <button role="switch" aria-checked={active} aria-label={`${short(v.repo)} ${FLAG_TEXT[k].name}`} disabled={!canEdit || busy !== null}
-                    onClick={() => change(v.repo, k, !on)}
-                    className={`min-h-11 min-w-20 shrink-0 rounded-full px-3 text-[13px] font-semibold disabled:opacity-50 ${active ? "bg-accent text-white" : "bg-bg text-text-muted ring-1 ring-inset ring-border"}`}>
-                    {busy === `${v.repo}:${k}` ? "…" : label}
-                  </button>
-                </div>
-              );
-            })}
-            <WindowEditor repo={v.repo} value={v.switches.window} disabled={!canEdit || busy !== null} onSave={(w) => change(v.repo, "window", w)} />
-          </div>}
-        </Card>
-      ))}
-      {state.kind === "ok" && !canEdit && <p className="px-1 text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 바꿀 수 있습니다." : "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 읽기만 가능합니다."}</p>}
+      {msg && <p role="status" className={`${STATUS_BOX} ${msg.tone === "warn" ? "text-warn" : ""}`} data-testid="orch-switch-msg">{msg.text}</p>}
+      {differs && (
+        <div className="flex items-center gap-2 px-1" data-testid="orch-switch-differs">
+          <p className="min-w-0 flex-1 text-xs text-warn">{differs}</p>
+          <button type="button" onClick={alignAll} disabled={locked} className={`${BUTTON} shrink-0`}>{busy === "align" ? "맞추는 중…" : "모두 맞추기"}</button>
+        </div>
+      )}
+      {merged && merged.unreadable.length > 0 && <p className="px-1 text-xs text-text-muted" data-testid="orch-switch-unreadable">읽지 못함: {merged.unreadable.map(short).join(", ")}</p>}
+      {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : (
+        <div data-testid="orch-switch-card">
+          <Card>
+            <h3 className={CARD_TITLE}>모든 프로젝트</h3>
+            <p className="mt-[3px] text-xs text-text-muted">등록된 모든 프로젝트에 한 번에 적용</p>
+            {!value && <p className="mt-2 text-xs text-danger">스위치를 읽지 못했습니다</p>}
+            <div className="mt-2">
+              {FLAG_KEYS.map((k) => {
+                const on = value?.[k] ?? false;
+                const label = !value ? "—" : k === "paused" ? (on ? "정지됨" : "운영 중") : on ? "ON" : "OFF";
+                const active = !!value && (k === "paused" ? !on : on);
+                return (
+                  <div key={k} className={`flex items-center justify-between gap-3 ${ROW} py-2`}>
+                    <div className="min-w-0"><p className="text-sm font-medium">{FLAG_TEXT[k].name}</p>{value && !active && FLAG_TEXT[k].off && <p className="mt-[3px] text-xs text-text-muted">꺼짐 · {FLAG_TEXT[k].off}</p>}</div>
+                    <button type="button" role="switch" aria-checked={active} aria-label={FLAG_TEXT[k].name} disabled={locked}
+                      onClick={() => change(k, !on)}
+                      className={`min-h-11 min-w-20 shrink-0 rounded-full px-3 text-[13px] font-semibold disabled:opacity-50 ${active ? "bg-accent text-white" : "bg-bg text-text-muted ring-1 ring-inset ring-border"}`}>
+                      {busy === k ? "…" : label}
+                    </button>
+                  </div>
+                );
+              })}
+              <WindowEditor id="win-all" value={value?.window ?? ""} disabled={locked} onSave={(w) => change("window", w)} />
+            </div>
+          </Card>
+        </div>
+      )}
+      {state.kind === "ok" && !canEdit && <p className="px-1 text-xs text-text-muted">{session.role !== "admin" ? "관리자 로그인에서만 바꿀 수 있습니다." : WRITE_UNCONFIGURED_TEXT}</p>}
     </section>
   );
 }
 
-function WindowEditor({ repo, value, disabled, onSave }: { repo: string; value: string; disabled: boolean; onSave(v: string): void }) {
+/** 작업 시간대 입력. 기준값(value)이 바뀌면(저장 뒤 다시 읽기 등) 입력값도 새 기준값으로 맞춘다. */
+function WindowEditor({ id, value, disabled, onSave }: { id: string; value: string; disabled: boolean; onSave(v: string): void }) {
   const [w, setW] = useState(value);
+  useEffect(() => { setW(value); }, [value]);
   return (
     <div className={`space-y-1.5 ${ROW} pb-0`}>
-      <label className="block text-sm font-medium" htmlFor={`win-${repo}`}>작업 시간대 (한국시간, 비우면 항상)</label>
+      <label className="block text-sm font-medium" htmlFor={id}>작업 시간대 (한국시간, 비우면 항상)</label>
       <div className="flex gap-2">
-        <input id={`win-${repo}`} value={w} onChange={(e) => setW(e.target.value)} placeholder="08:00-24:00" inputMode="numeric"
+        <input id={id} value={w} onChange={(e) => setW(e.target.value)} placeholder="08:00-24:00" inputMode="numeric" data-testid="orch-window-input"
           className={`${FIELD} min-h-11 min-w-0 flex-1 tabular-nums`} />
-        <button disabled={disabled || w.trim() === value} onClick={() => onSave(w.trim())} className={BUTTON}>저장</button>
+        <button type="button" disabled={disabled || w.trim() === value} onClick={() => onSave(w.trim())} className={BUTTON}>저장</button>
       </div>
     </div>
   );

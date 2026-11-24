@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.5.0", date: "2026-11-24", title: "프로젝트별 구조·스위치 일괄 적용", items: ["구조 탭을 프로젝트별로 접고 펴기, 머리에 프로젝트 목적", "다른 프로젝트 구조는 각 저장소 architecture.json 에서 읽음", "AI ON/OFF 를 모든 프로젝트에 한 번에 적용", "새 프로젝트 시작 절차 문서"] },
   { version: "2.4.0", date: "2026-11-24", title: "단계별로 묶인 작업 흐름", items: ["계획·개발·통합 칸 안에 진행 단계와 세부 할 일", "끝난 단계는 완료 줄에", "지금 일하는 AI 를 AI 팀 탭으로 옮김"] },
   { version: "2.3.0", date: "2026-11-24", title: "프로젝트 진행 단계 표시", items: ["프로젝트 카드에 단계 완료/전체와 진행 단계 목록", "단계에 연결된 작업이 끝나면 자동으로 완료 표시"] },
   { version: "2.2.0", date: "2026-11-23", title: "홈에 지금 일하는 AI·프로젝트 접기", items: ["홈 맨 위에 Sonnet·Opus·Codex·사용자별로 맡은 프로젝트와 작업 한 줄씩", "프로젝트 카드를 눌러 접고 펼치기(상태 기억)", "다른 프로젝트 카드에 화면 열기 링크"] },

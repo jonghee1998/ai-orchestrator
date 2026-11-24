@@ -1,2 +1,2 @@
-import { LiveArchitectureScreen } from "@/components/workspace/ArchitectureScreen";
+import { LiveArchitectureScreen } from "@/components/workspace/ProjectArchitecture";
 export default function Page() { return <LiveArchitectureScreen />; }

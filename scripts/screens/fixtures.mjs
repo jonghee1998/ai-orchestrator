@@ -6,6 +6,8 @@ import { ideaHash } from "../orch/idea-review.mjs";
 
 export const REPO = "example/orch-screens";
 export const REPO2 = "example/orch-second"; // 두 번째 가짜 저장소: 여러 저장소에 걸친 '지금 일하는 AI' 예시용
+export const REPO3 = "example/orch-third"; // 구조 탭 전용 가짜 저장소: docs/architecture.json 404 → '구조 문서 없음'
+export const REPO4 = "example/orch-fourth"; // 구조 탭 전용 가짜 저장소: docs/architecture.json 조회 500 → '구조 읽기 실패'
 const OWNER = { login: "example" }; // REPO owner — the engine and the dashboard only accept owner-authored plans
 const ACTIONS_BOT = { login: "github-actions[bot]", id: 41898282, type: "Bot" };
 
@@ -86,9 +88,11 @@ export function githubFixtures(now) {
   ] };
 
   const second = secondRepoFixtures(iso, usage);
+  const archOnly = archOnlyFixtures(iso);
   /** @returns {{status:number, body:unknown} | null} */
   return (method, url) => {
     if (url.pathname.startsWith(`/repos/${REPO2}/`)) return second(method, url);
+    if (url.pathname.startsWith(`/repos/${REPO3}/`) || url.pathname.startsWith(`/repos/${REPO4}/`)) return archOnly(method, url);
     if (method !== "GET") return null; // the screens test is read-only; writes are reported as problems
     const p = url.pathname, q = url.searchParams;
     if (p === `/repos/${REPO}/issues`) {
@@ -140,9 +144,33 @@ function secondRepoFixtures(iso, usage) {
     ],
   };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap)).toString("base64") };
+  // 구조 문서(docs/architecture.json): 섹션 2개(text+table / diagram). 긴 단일 문자열 칸(40자), 글자가 길어 말줄임되는 상자,
+  // 좁은 상자(w 40), 말줄임표도 안 들어가는 상자(w 16), 낮은 상자(h 18)를 일부러 넣었다.
+  const architecture = {
+    version: 1,
+    purpose: "둘째 프로젝트의 시험용 구조 문서",
+    sections: [
+      { no: "01", kicker: "개요", title: "둘째구조 글과 표 시험", blocks: [
+        { type: "text", lines: ["둘째구조 첫 문장입니다.", "둘째구조 둘째 문장입니다."] },
+        { type: "table", head: ["이름", "설명"], rows: [["둘째구조 칸", "짧은 설명"], ["ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd", "긴 단일 문자열 칸"]] },
+      ] },
+      { no: "02", kicker: "흐름", title: "둘째구조 그림 시험", blocks: [
+        { type: "diagram", width: 300, height: 160, label: "둘째구조 시험 그림", caption: "범례: 진한 상자는 좁은 상자",
+          boxes: [
+            { x: 10, y: 10, w: 130, h: 44, lines: ["둘째구조 수집", "원본 데이터를 모으는 아주 긴 단계 이름"], tone: "accent" },
+            { x: 10, y: 100, w: 40, h: 44, lines: ["좁은 상자 글자"], tone: "deep" },
+            { x: 100, y: 100, w: 16, h: 44, lines: ["가"], tone: "plain" },
+            { x: 160, y: 110, w: 120, h: 18, lines: ["낮은 상자"], tone: "plain" },
+          ],
+          arrows: [{ points: [[75, 54], [75, 80], [30, 80], [30, 100]] }, { points: [[75, 54], [75, 80], [108, 80], [108, 100]] }, { points: [[140, 32], [220, 32], [220, 110]] }] },
+      ] },
+    ],
+  };
+  const architectureContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(architecture, null, 2)).toString("base64") };
   return (method, url) => {
     if (method !== "GET") return null;
     const p = url.pathname, q = url.searchParams;
+    if (p === `/repos/${REPO2}/contents/docs/architecture.json`) return { status: 200, body: architectureContent };
     if (p === `/repos/${REPO2}/issues`) {
       const label = q.get("labels");
       if (label === "orch:run") return { status: 200, body: runs };
@@ -157,6 +185,27 @@ function secondRepoFixtures(iso, usage) {
     if (p === `/repos/${REPO2}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
     if (p === `/repos/${REPO2}/compare/prod-deployed...main`) return { status: 200, body: { status: "identical", commits: [] } };
     if (p === `/repos/${REPO2}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
+    return null;
+  };
+}
+
+// 구조 탭 전용 가짜 저장소 둘(example/orch-third · example/orch-fourth): 작업·계획·변수는 모두 빈 응답이라 다른 탭에는 보이는 게 없다.
+// docs/architecture.json 만 다르다: third 는 404(파일 없음), fourth 는 500(조회 오류).
+function archOnlyFixtures(iso) {
+  // 다른 탭의 기존 검사에 영향이 없도록 스위치 값은 기준 저장소(orch-screens)와 같게(Codex off), 로드맵은 빈 항목으로 둔다.
+  const variables = [{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
+  const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify({ version: 1, setup: [], expansion: [] })).toString("base64") };
+  return (method, url) => {
+    if (method !== "GET") return null;
+    const p = url.pathname;
+    const repo = /^\/repos\/([^/]+\/[^/]+)\//.exec(p)?.[1];
+    if (p === `/repos/${repo}/contents/docs/architecture.json`) return repo === REPO4 ? { status: 500, body: { message: "Server Error" } } : null;
+    if (p === `/repos/${repo}/issues`) return { status: 200, body: [] };
+    if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(p)) return { status: 200, body: [] };
+    if (p === `/repos/${repo}/actions/variables`) return { status: 200, body: { total_count: variables.length, variables } };
+    if (p === `/repos/${repo}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
+    if (p === `/repos/${repo}/compare/prod-deployed...main`) return { status: 200, body: { status: "identical", commits: [] } };
+    if (p === `/repos/${repo}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
     return null;
   };
 }
