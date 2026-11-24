@@ -81,7 +81,7 @@ jobs:
           if [ -f .orch/PLAN_REVISED.json ] || [ -f .orch/PLAN_REVISED.json ]; then echo "Claude 결과 있음"; exit 0; fi
           [ -f ~/.codex/auth.json ] || { echo "Codex 로그인 없음"; exit 0; }
           mkdir -p .orch
-          codex exec --full-auto --skip-git-repo-check -o "$RUNNER_TEMP/codex-pm.md" \
+          codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -c approval_policy=never --skip-git-repo-check -o "$RUNNER_TEMP/codex-pm.md" \
             "$(cat "$RUNNER_TEMP/plan-revise-prompt.md")" > "$RUNNER_TEMP/codex-pm.log" 2>&1 || echo "Codex 실행 실패"
           ls -la .orch || true
       - name: Keep a refreshed Codex login

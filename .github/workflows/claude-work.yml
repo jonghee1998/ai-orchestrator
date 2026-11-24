@@ -143,7 +143,7 @@ jobs:
           before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
           npm i -g @openai/codex >/dev/null 2>&1
           status=0
-          codex exec --full-auto --skip-git-repo-check -o "$RUNNER_TEMP/codex-last.md" \
+          codex exec -s workspace-write -c sandbox_workspace_write.network_access=true -c approval_policy=never --skip-git-repo-check -o "$RUNNER_TEMP/codex-last.md" \
             "$(cat "$RUNNER_TEMP/work-prompt.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || status=$?
           tail -n 40 "$RUNNER_TEMP/codex.log" || true
           after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
