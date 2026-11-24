@@ -4,7 +4,7 @@ import path from "node:path";
 import Module from "node:module";
 import { approvePlan, createIdea, GitHubError, readRepo } from "./github";
 import { parsePlan, planHash, type PlanComment, type PlanIssue } from "./plans";
-import { SELF_REPO } from "./model";
+import { SELF_REPO, mergedSwitches } from "./model";
 import { cookieName, csrfToken, issueSession } from "../session/session";
 
 const REPO = "o/r";
@@ -18,7 +18,8 @@ const issue = (extra: Partial<PlanIssue> = {}): PlanIssue => ({
 
 type Call = { method: string; path: string; body: unknown };
 /** Fake GitHub: serves the Issue + comments, records every request. */
-function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: { labelStatus?: number; issueStatus?: number } = {}) {
+type FakeOpts = { labelStatus?: number; issueStatus?: number; saveFail?: Record<string, number>; wakeFail?: string[] };
+function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: FakeOpts = {}) {
   const calls: Call[] = [];
   const f = (async (url: string | URL, init?: RequestInit) => {
     const u = new URL(String(url));
@@ -29,6 +30,10 @@ function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: { labelSta
     if (method === "GET" && u.pathname === `/repos/${REPO}/issues/${i.number}/comments`) return json(200, comments);
     if (method === "POST" && u.pathname === `/repos/${REPO}/issues/${i.number}/labels`) return json(opts.labelStatus ?? 200, [{ name: "orch:go" }]);
     if (method === "POST" && u.pathname === `/repos/${REPO}/issues`) return json(opts.issueStatus ?? 201, { number: 42, html_url: `https://github.com/${REPO}/issues/42` });
+    // Switch writes for any repo: PATCH variable (saveFail[repo] = status) then orchestrator.yml dispatch (wakeFail).
+    const sw = /^\/repos\/([^/]+\/[^/]+)\/actions\/(variables\/ORCH_[A-Z]+|workflows\/orchestrator\.yml\/dispatches)$/.exec(u.pathname);
+    if (sw && method === "PATCH") return opts.saveFail?.[sw[1]] ? json(opts.saveFail[sw[1]], { message: "no" }) : new Response(null, { status: 204 });
+    if (sw && method === "POST") return opts.wakeFail?.includes(sw[1]) ? json(500, { message: "no" }) : new Response(null, { status: 204 });
     return json(404, { message: "Not Found" });
   }) as typeof fetch;
   const labelPosts = () => calls.filter((c) => c.method === "POST" && c.path.endsWith("/labels"));
@@ -121,11 +126,11 @@ M._resolveFilename = function (request: string, ...rest: unknown[]) {
 };
 
 const ADMIN = "test-admin-token-for-route";
-async function withRoute(env: Record<string, string | undefined>, i: PlanIssue, run: (post: (b: unknown, h?: Record<string, string>) => Promise<Response>, g: ReturnType<typeof fakeGitHub>) => Promise<void>) {
+async function withRoute(env: Record<string, string | undefined>, i: PlanIssue, run: (post: (b: unknown, h?: Record<string, string>) => Promise<Response>, g: ReturnType<typeof fakeGitHub>) => Promise<void>, opts: FakeOpts = {}) {
   const keys = ["ORCH_REPOS", "GITHUB_REPO", "ORCH_GITHUB_TOKEN", "GITHUB_READ_TOKEN", "GITHUB_TOKEN", "CONTROL_ADMIN_TOKEN", "CONTROL_READ_TOKEN", "ORCH_SELF_REPO"];
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   const savedFetch = globalThis.fetch;
-  const g = fakeGitHub(i);
+  const g = fakeGitHub(i, [], opts);
   try {
     for (const k of keys) delete process.env[k];
     for (const [k, v] of Object.entries(env)) if (v !== undefined) process.env[k] = v;
@@ -249,6 +254,130 @@ test("route POST idea: validates repo/title/body (400), token (503), then create
     assert.deepEqual([r.status, (await r.json()).error], [503, "write_unconfigured"]);
     assert.equal(g.calls.length, 0);
   });
+});
+
+// ---------------------------------------------------------------- route.ts POST switch { scope: "all" }
+
+const R2 = "o/second";
+const R3 = "o/third";
+const ALL3 = { ...LIVE, ORCH_REPOS: `${REPO},${R2},${R3}`, CONTROL_READ_TOKEN: "test-read-token-for-route" };
+const allOff = { key: "codex", value: false, scope: "all" };
+const patches = (g: ReturnType<typeof fakeGitHub>) => g.calls.filter((c) => c.method === "PATCH").map((c) => c.path);
+
+test("route POST scope all: admin cookie + CSRF → every repo PATCHed and woken, ok true", async () => {
+  await withRoute(ALL3, issue(), async (post, g) => {
+    const admin = issueSession("admin", process.env, Date.now())!;
+    const h = { host: "localhost", origin: "http://localhost", cookie: `${cookieName(process.env)}=${admin.value}`, "x-csrf-token": csrfToken(admin.session, process.env) };
+    const r = await post(allOff, h);
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: true, results: [REPO, R2, R3].map((repo) => ({ repo, saved: true, woke: true })) });
+    assert.deepEqual(patches(g), [REPO, R2, R3].map((x) => `/repos/${x}/actions/variables/ORCH_CODEX`));
+    assert.ok(g.calls.filter((c) => c.method === "PATCH").every((c) => JSON.stringify(c.body) === JSON.stringify({ name: "ORCH_CODEX", value: "off" })));
+    assert.equal(g.calls.filter((c) => c.method === "POST" && c.path.endsWith("/orchestrator.yml/dispatches")).length, 3);
+  });
+});
+
+test("route POST scope all: read session, missing/wrong CSRF, no auth, bad input, no write token → zero GitHub calls", async () => {
+  await withRoute(ALL3, issue(), async (post, g) => {
+    const admin = issueSession("admin", process.env, Date.now())!;
+    const read = issueSession("read", process.env, Date.now())!;
+    const same = { host: "localhost", origin: "http://localhost" };
+    const ck = (s: typeof admin) => `${cookieName(process.env)}=${s.value}`;
+    assert.equal((await post(allOff)).status, 401);
+    assert.equal((await post(allOff, { "x-admin-token": "test-read-token-for-route" })).status, 401, "read token is not admin");
+    assert.equal((await post(allOff, { ...same, cookie: ck(admin) })).status, 403, "no CSRF token");
+    assert.equal((await post(allOff, { ...same, cookie: ck(admin), "x-csrf-token": "wrong" })).status, 403);
+    assert.equal((await post(allOff, { ...same, cookie: ck(read), "x-csrf-token": csrfToken(read.session, process.env) })).status, 403, "read role");
+    const h = { ...same, cookie: ck(admin), "x-csrf-token": csrfToken(admin.session, process.env) };
+    for (const b of [{ ...allOff, key: "gpt" }, { ...allOff, value: "off" }, { key: "window", value: "25:00-26:00", scope: "all" }, { ...allOff, scope: "every" }, { ...allOff, scope: true }]) {
+      assert.equal((await post(b, h)).status, 400, JSON.stringify(b));
+    }
+    assert.equal(g.calls.length, 0);
+  });
+  await withRoute({ ...ALL3, ORCH_GITHUB_TOKEN: undefined, GITHUB_TOKEN: "read-only-test-token" }, issue(), async (post, g) => {
+    const r = await post(allOff, { "x-admin-token": ADMIN });
+    assert.deepEqual([r.status, (await r.json()).error], [503, "write_unconfigured"]);
+    assert.equal(g.calls.length, 0);
+  });
+});
+
+test("route POST scope all: one repo fails to save → the rest continue; wake failure reported as woke false", async () => {
+  await withRoute(ALL3, issue(), async (post, g) => {
+    const r = await post({ key: "window", value: "08:00-24:00", scope: "all" }, { "x-admin-token": ADMIN });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), {
+      ok: false,
+      results: [
+        { repo: REPO, saved: false, woke: false, error: "권한 없음 또는 저장소 없음" },
+        { repo: R2, saved: true, woke: true },
+        { repo: R3, saved: true, woke: false },
+      ],
+    });
+    assert.deepEqual(patches(g), [REPO, R2, R3].map((x) => `/repos/${x}/actions/variables/ORCH_WINDOW`), "continued after the failing repo");
+    assert.ok(!g.calls.some((c) => c.method === "POST" && c.path === `/repos/${REPO}/actions/workflows/orchestrator.yml/dispatches`), "no wake for an unsaved repo");
+  }, { saveFail: { [REPO]: 403 }, wakeFail: [R3] });
+});
+
+test("route POST scope all: no configured repos → 200 ok false, results []", async () => {
+  await withRoute({ ...LIVE, ORCH_REPOS: undefined }, issue(), async (post, g) => {
+    const r = await post(allOff, { "x-admin-token": ADMIN });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: false, results: [] });
+    assert.equal(g.calls.length, 0);
+  });
+});
+
+test("route POST single repo { repo, key, value }: same response contract as before", async () => {
+  await withRoute(ALL3, issue(), async (post, g) => {
+    const r = await post({ repo: R2, key: "paused", value: true }, { "x-admin-token": ADMIN });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { ok: true, name: "ORCH_PAUSED", value: "on", woke: true });
+    assert.deepEqual(patches(g), [`/repos/${R2}/actions/variables/ORCH_PAUSED`], "only that repo");
+    assert.equal((await post({ repo: "x/y", key: "paused", value: true }, { "x-admin-token": ADMIN })).status, 400);
+    assert.equal((await post({ repo: R2, key: "paused", value: "on" }, { "x-admin-token": ADMIN })).status, 400);
+    assert.equal(patches(g).length, 1);
+  });
+  await withRoute(ALL3, issue(), async (post) => {
+    const r = await post({ repo: REPO, key: "codex", value: false }, { "x-admin-token": ADMIN });
+    assert.deepEqual([r.status, (await r.json()).error], [502, "github_error"]);
+  }, { saveFail: { [REPO]: 500 } });
+  await withRoute({ ...ALL3, ORCH_GITHUB_TOKEN: undefined, GITHUB_TOKEN: "read-only-test-token" }, issue(), async (post, g) => {
+    const r = await post({ repo: REPO, key: "codex", value: false }, { "x-admin-token": ADMIN });
+    assert.deepEqual([r.status, (await r.json()).error], [503, "write_unconfigured"]);
+    assert.equal(g.calls.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------- repository variables: every page
+
+test("readRepo: switches read across variable pages; a failing page → switches null → mergedSwitches.value null", async () => {
+  const filler = Array.from({ length: 100 }, (_, n) => ({ name: `OTHER_${n}`, value: "x" }));
+  const second = [{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_WINDOW", value: "08:00-24:00" }];
+  const calls: string[] = [];
+  const fakeVars = (page2Status: number, total: number | undefined = 102) => (async (url: string, init?: RequestInit) => {
+    const u = new URL(url);
+    const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s });
+    if ((init?.method ?? "GET") !== "GET") return json(500, {});
+    if (u.pathname === `/repos/${REPO}/actions/variables`) {
+      calls.push(u.search);
+      const page = u.searchParams.get("page");
+      if (page === "1") return json(200, { total_count: total, variables: filler });
+      if (page === "2") return json(page2Status, page2Status === 200 ? { total_count: total, variables: second } : { message: "no" });
+      return json(200, { total_count: total, variables: [] });
+    }
+    if (u.pathname.endsWith("/issues")) return json(200, []);
+    return json(404, {});
+  }) as typeof fetch;
+  const ok = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: REPO }, fakeVars(200));
+  assert.deepEqual(ok.switches, { sonnet: true, opus: true, codex: false, paused: false, window: "08:00-24:00" });
+  assert.deepEqual(calls, ["?per_page=100&page=1", "?per_page=100&page=2"], "stops at total_count");
+  assert.deepEqual(mergedSwitches([ok]).value, ok.switches);
+  const noTotal = await readRepo(REPO, ENV, fakeVars(200, undefined));
+  assert.equal(noTotal.switches?.codex, false, "without total_count a short page ends the listing");
+  const bad = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: REPO }, fakeVars(500));
+  assert.equal(bad.switches, null, "never defaults from a partial list");
+  assert.ok(bad.switchesError);
+  assert.equal(mergedSwitches([bad, { ...ok, repo: "o/other", isSelf: false }]).value, null);
 });
 
 // ---------------------------------------------------------------- changes not deployed yet

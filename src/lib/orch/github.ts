@@ -54,9 +54,29 @@ async function readRuns(f: Fetch, token: string, repo: string): Promise<OrchRun[
   return sortRuns(issues.map((i) => parseRun(repo, i)).filter((r): r is OrchRun => r !== null));
 }
 
+const VARS_PER_PAGE = 100;
+/** GitHub allows 500 repository variables, so 5 pages; more than this means the listing never ended. */
+const VARS_MAX_PAGES = 10;
+
+/**
+ * Every repository variable, page by page (stops at total_count or a short page). Any failing page throws,
+ * so the caller shows switches as unreadable (null) instead of guessing defaults from a partial list.
+ */
 async function readVars(f: Fetch, token: string, repo: string) {
-  const j = (await call(f, token, "GET", `/repos/${repo}/actions/variables?per_page=30`)) as { variables?: { name: string; value: string }[] };
-  const vars = Array.isArray(j?.variables) ? j.variables : [];
+  const vars: { name: string; value: string }[] = [];
+  for (let page = 1; ; page++) {
+    if (page > VARS_MAX_PAGES) throw new GitHubError(500, "variables: too many pages");
+    const j = (await call(f, token, "GET", `/repos/${repo}/actions/variables?per_page=${VARS_PER_PAGE}&page=${page}`)) as { total_count?: unknown; variables?: { name: string; value: string }[] } | null;
+    const list = Array.isArray(j?.variables) ? j.variables : [];
+    vars.push(...list);
+    const total = typeof j?.total_count === "number" && Number.isFinite(j.total_count) ? j.total_count : null;
+    if (total !== null && vars.length >= total) break;
+    if (list.length === 0) {
+      if (total !== null && page > 1) throw new GitHubError(500, "variables: listing ended before total_count");
+      break;
+    }
+    if (total === null && list.length < VARS_PER_PAGE) break;
+  }
   return { switches: switchesFromVars(vars), deployEvery: deployEveryFromVars(vars) };
 }
 
@@ -191,7 +211,10 @@ export async function requestUsageRun(repo: string, env: Env, nowMs = Date.now()
   }
 }
 
-/** Write one switch variable, then wake the engine so held work resumes now (best effort). */
+/**
+ * Write one switch variable, then wake the engine so held work resumes now (best effort).
+ * Save failure throws (GitHubError; 503 = no write token); saved but wake failed → { woke: false }.
+ */
 export async function writeSwitch(repo: string, name: string, value: string, env: Env, f: Fetch = fetch): Promise<{ woke: boolean }> {
   const token = writeToken(env);
   if (!token) throw new GitHubError(503, "ORCH_GITHUB_TOKEN not configured");

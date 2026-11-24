@@ -405,6 +405,30 @@ export function isSelfRepo(repo: string, env: Readonly<Record<string, string | u
   return repo === (env.ORCH_SELF_REPO?.trim() || SELF_REPO);
 }
 
+export interface MergedSwitches {
+  /** The dashboard's own repo (RepoView.isSelf) switches; null when that repo is missing or unreadable (never another repo's values). */
+  value: Switches | null;
+  /** Per key (FLAG_KEYS then window), readable repos whose value differs from `value`. Only keys with at least one repo. */
+  differs: { key: SwitchKey; repos: string[] }[];
+  /** Repos whose switches could not be read (switches null), the own repo included. */
+  unreadable: string[];
+}
+
+/** One switch set for "apply to every project": the own repo is the reference, the rest are compared to it. */
+export function mergedSwitches(repos: RepoView[]): MergedSwitches {
+  const self = repos.find((r) => r.isSelf);
+  const value = self?.switches ?? null;
+  const unreadable = repos.filter((r) => !r.switches).map((r) => r.repo);
+  const differs: MergedSwitches["differs"] = [];
+  if (value) {
+    for (const key of [...FLAG_KEYS, "window"] as SwitchKey[]) {
+      const list = repos.filter((r) => r.switches && r.switches[key] !== value[key]).map((r) => r.repo);
+      if (list.length) differs.push({ key, repos: list });
+    }
+  }
+  return { value: value ? { ...value } : null, differs, unreadable };
+}
+
 /** Active runs first (needs-user first), then recent finished ones. */
 export function sortRuns(runs: OrchRun[]): OrchRun[] {
   const rank = (r: OrchRun) => (r.needsUser ? 0 : ["done", "cancelled"].includes(r.status) ? 2 : 1);
