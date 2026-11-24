@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { githubFixtures, REPO, REPO2 } from "./fixtures.mjs";
+import { githubFixtures, REPO, REPO2, REPO3, REPO4 } from "./fixtures.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const OUT = path.resolve(process.env.SCREENS_DIR || path.join(ROOT, ".screens"));
@@ -85,7 +85,7 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     ADMIN_USERNAME: user, ADMIN_PASSWORD_HASH: `scrypt$131072$8$1$${salt.toString("hex")}$${key.toString("hex")}`,
     CONTROL_ADMIN_TOKEN: crypto.randomBytes(24).toString("hex"),
     CONTROL_READ_TOKEN: readToken, // 읽기 세션 확인용 (일회용)
-    ORCH_REPOS: [REPO, REPO2].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
+    ORCH_REPOS: [REPO, REPO2, REPO3, REPO4].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
     ORCH_SELF_REPO: REPO, // 자기 저장소 판정(서버): orch-screens 카드에는 '화면 열기' 링크가 없어야 함
   },
 });
@@ -132,7 +132,7 @@ try {
     { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 3", "완료 기록", "인프라", "확장", "추가 검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
-    { name: "architecture", path: "/architecture", nav: "구조", expect: ["아키텍처", "배포 · 비밀값", "보조 도구", "Impeccable", "Playwright"], forbid: [] },
+    { name: "architecture", path: "/architecture", nav: "구조", expect: ["요청만 하면 AI 팀이 계획부터 반영까지 알아서 개발", "둘째 프로젝트의 시험용 구조 문서", "구조 문서 없음", "구조 읽기 실패"], forbid: [] }, // 기존 문구 5개(아키텍처…Playwright)는 자기 카드를 펼친 뒤 검사
     { name: "patch-notes", path: "/patch-notes", nav: "패치노트", expect: [`v${CURRENT_VERSION}`, "ai-orchestrator", "v2.x", "v1.x", "새 디자인과 전체 흐름"], forbid: [] },
   ];
   const navLabels = (await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
@@ -323,8 +323,83 @@ try {
       shots.push(path.relative(ROOT, file));
     }
     await page.setViewportSize({ width: 390, height: 844 });
+    if (t.name === "architecture") {
+      // 구조 탭: 카드 4개(자기 · orch-second · orch-third · orch-fourth), 처음엔 모두 접힘. 기존 구조 문구 검사는 자기 카드를 '펼친 뒤'에 한다.
+      const cardOf = (n) => page.getByTestId(`arch-project-${n}`);
+      const tog = (n) => cardOf(n).getByTestId("arch-toggle");
+      const noteOf = async (n) => (((await cardOf(n).getByTestId("arch-note").textContent()) ?? "").replace(/\s+/g, " ").trim());
+      const SELF = "self";
+      if ((await page.getByTestId("arch-project-self").count()) !== 1) problems.push("[architecture] 자기 저장소 카드가 없음");
+      for (const n of [SELF, "orch-second", "orch-third", "orch-fourth"]) {
+        if (!(await cardOf(n).count())) { problems.push(`[architecture] '${n}' 카드가 없음`); continue; }
+        if ((await tog(n).getAttribute("aria-expanded")) !== "false") problems.push(`[architecture] '${n}' 카드가 처음부터 펼쳐져 있음`);
+        const ctl = await tog(n).getAttribute("aria-controls");
+        if (!ctl || ctl !== (await cardOf(n).getByTestId("arch-body").getAttribute("id"))) problems.push(`[architecture] '${n}' aria-controls 가 본문 id 와 다름`);
+        const box = await tog(n).boundingBox();
+        if (!box || box.height < 44) problems.push(`[architecture] '${n}' 머리 버튼 높이 ${box?.height}px < 44px`);
+      }
+      if (await page.getByTestId("arch-diagram").count()) problems.push("[architecture] 접힌 상태인데 구조도(arch-diagram)가 있음");
+      for (const h of ["배포 · 비밀값", "보조 도구", "둘째구조 글과 표 시험"]) if (await page.getByText(h, { exact: false }).count()) problems.push(`[architecture] 접힌 상태인데 섹션 머리 '${h}' 이 보임`);
+      if ((await noteOf(SELF)) !== "요청만 하면 AI 팀이 계획부터 반영까지 알아서 개발") problems.push(`[architecture] 자기 카드 목적 문구가 다름 (${await noteOf(SELF)})`);
+      if ((await noteOf("orch-second")) !== "둘째 프로젝트의 시험용 구조 문서") problems.push(`[architecture] orch-second purpose 가 다름 (${await noteOf("orch-second")})`);
+      if (!(await noteOf("orch-third")).startsWith("구조 문서 없음")) problems.push(`[architecture] orch-third 문구가 '구조 문서 없음' 이 아님 (${await noteOf("orch-third")})`);
+      if (!(await noteOf("orch-fourth")).startsWith("구조 읽기 실패")) problems.push(`[architecture] orch-fourth 문구가 '구조 읽기 실패' 가 아님 (${await noteOf("orch-fourth")})`);
+      if (!/text-danger/.test((await cardOf("orch-fourth").getByTestId("arch-note").getAttribute("class")) ?? "")) problems.push("[architecture] 구조 읽기 실패 문구가 danger 색이 아님");
+      // 자기 카드를 펼친다: 기존 구조 탭 문구 5개 + 구조도
+      await tog(SELF).click();
+      for (const text of ["아키텍처", "배포 · 비밀값", "보조 도구", "Impeccable", "Playwright"]) {
+        try { await page.getByText(text, { exact: false }).first().waitFor({ timeout: 15000 }); }
+        catch { problems.push(`[architecture] 자기 카드를 펼쳐도 '${text}' 가 보이지 않음`); }
+      }
+      if (!(await page.getByTestId("arch-diagram").count())) problems.push("[architecture] 자기 카드를 펼쳐도 arch-diagram 이 없음");
+      // orch-second 를 펼친다: 섹션 2개, 표, svg, 글자는 같은 g 의 rect 안
+      await tog("orch-second").click();
+      const sec2 = cardOf("orch-second");
+      try { await sec2.locator("svg[role=img]").waitFor({ timeout: 10000 }); } catch { problems.push("[architecture] orch-second 를 펼쳐도 svg[role=img] 가 없음"); }
+      if ((await sec2.locator("section").count()) !== 2) problems.push(`[architecture] orch-second 섹션이 2개가 아님 (${await sec2.locator("section").count()})`);
+      if ((await sec2.locator("table").count()) !== 1) problems.push("[architecture] orch-second 표가 1개가 아님");
+      if ((await sec2.locator("svg[role=img]").getAttribute("aria-label")) !== "둘째구조 시험 그림") problems.push("[architecture] 다이어그램 aria-label 이 다름");
+      if ((await sec2.locator("svg[role=img] g").count()) !== 4) problems.push(`[architecture] 다이어그램 상자(g)가 4개가 아님 (${await sec2.locator("svg[role=img] g").count()})`);
+      if ((await sec2.locator("svg[role=img] polyline").count()) !== 3) problems.push("[architecture] 다이어그램 화살표가 3개가 아님");
+      const bad = await sec2.locator("svg[role=img]").evaluate((svg) => {
+        const out = [];
+        let withText = 0;
+        svg.querySelectorAll("g").forEach((g, i) => {
+          const rect = g.querySelector("rect"), r = rect.getBBox();
+          g.querySelectorAll("text").forEach((t) => {
+            withText++;
+            const b = t.getBBox();
+            if (b.x < r.x - 0.5 || b.y < r.y - 0.5 || b.x + b.width > r.x + r.width + 0.5 || b.y + b.height > r.y + r.height + 0.5) out.push(`상자 ${i + 1}: 글자 ${JSON.stringify(t.textContent)} (${b.x.toFixed(1)},${b.y.toFixed(1)},${b.width.toFixed(1)}×${b.height.toFixed(1)}) 가 상자 (${r.x},${r.y},${r.width}×${r.height}) 밖`);
+          });
+        });
+        if (withText !== 3) out.push(`글자가 있는 줄이 3개가 아님 (${withText}): 폭 16 상자와 높이 18 상자는 글자가 없어야 함`);
+        return out;
+      });
+      for (const b of bad) problems.push(`[architecture] ${b}`);
+      const narrow = await sec2.locator("svg[role=img] g").nth(1).locator("text").allTextContents();
+      if (narrow.join("") !== "좁…") problems.push(`[architecture] 좁은 상자(w 40) 글자가 '좁…' 이 아님 (${narrow.join("|")})`);
+      const syncOpen = () => page.evaluate(() => localStorage.getItem("orch.arch.open"));
+      for (const w of WIDTHS) {
+        await page.setViewportSize({ width: w, height: 844 });
+        await page.waitForTimeout(150);
+        if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[architecture-expanded] ${w}px 에서 가로 넘침`);
+        const cell = await sec2.locator("td").filter({ hasText: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd" }).evaluate((td) => ({ r: td.getBoundingClientRect().right, tr: td.closest("table").getBoundingClientRect().right, vw: document.documentElement.clientWidth, sw: td.scrollWidth, cw: td.clientWidth }));
+        if (cell.r > cell.vw || cell.r > cell.tr + 0.5 || cell.sw > cell.cw + 1) problems.push(`[architecture-expanded] ${w}px 에서 긴 단일 문자열 칸이 넘침 (${JSON.stringify(cell)})`);
+        const file = path.join(OUT, `architecture-expanded-${w}.png`);
+        await page.screenshot({ path: file, fullPage: true });
+        shots.push(path.relative(ROOT, file));
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      const saved = JSON.parse((await syncOpen()) ?? "[]");
+      if (![SELF, "example/orch-second"].every((x) => saved.includes(x))) problems.push(`[architecture] localStorage 'orch.arch.open' 값이 다름 (${JSON.stringify(saved)})`);
+      await page.reload();
+      try { await page.waitForFunction(() => document.querySelector('[data-testid="arch-project-orch-second"] [data-testid="arch-toggle"]')?.getAttribute("aria-expanded") === "true", null, { timeout: 15000 }); }
+      catch { problems.push("[architecture] 새로고침 뒤 orch-second 펼침이 유지되지 않음"); }
+      if ((await tog(SELF).getAttribute("aria-expanded")) !== "true") problems.push("[architecture] 새로고침 뒤 자기 카드 펼침이 유지되지 않음");
+      if ((await tog("orch-third").getAttribute("aria-expanded")) !== "false") problems.push("[architecture] 새로고침 뒤 펼치지 않은 카드가 펼쳐져 있음");
+    }
     if (t.name === "projects") {
-      const card = page.getByTestId("orch-project-orch-screens"); // 저장소가 둘이므로 단계 줄·로드맵은 첫 카드 안에서만 찾는다
+      const card =page.getByTestId("orch-project-orch-screens"); // 저장소가 둘이므로 단계 줄·로드맵은 첫 카드 안에서만 찾는다
       // 펼친 상태: 인프라·확장 목록 · 단계 줄 4개(설명·세부 과정·항목 카드) · 작업 카드의 스텝 보기 · 대기 스텝
       const expand = async (summary, shown, what) => {
         await summary.click();

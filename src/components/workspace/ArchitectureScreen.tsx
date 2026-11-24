@@ -1,12 +1,12 @@
 // '구조' 탭: 오케스트레이터 아키텍처를 컨설팅 보고서 형식(요약 → 구조도 → 프로세스 → 역할 → 통제 → 자동 루틴 → 보조 도구)으로 설명합니다. 정적 내용.
 import type { ReactNode } from "react";
-import { CARD_TITLE, Card, PageTitle } from "@/components/ui";
+import { CARD_TITLE, Card } from "@/components/ui";
 import { DEPLOY_SVG, FLOW_SVG } from "./archDiagrams";
 
 const KICKER = "text-[11px] font-semibold uppercase tracking-[0.08em] text-accent";
 const H2 = "text-lg font-[750] leading-snug tracking-[-0.02em]";
 
-function Section({ no, kicker, title, children }: { no: string; kicker: string; title: string; children: ReactNode }) {
+export function Section({ no, kicker, title, children }: { no: string; kicker: string; title: string; children: ReactNode }) {
   return (
     <section aria-label={kicker} className="space-y-2.5">
       <div className="px-1">
@@ -144,11 +144,10 @@ const TOOLS: Tool[] = [
   },
 ];
 
-export function LiveArchitectureScreen() {
+/** ai-orchestrator 자체 구조 섹션 01~08 (정적). 프로젝트 카드를 펼치면 보인다. */
+export function SelfArchitectureSections() {
   return (
     <div className="space-y-7">
-      <PageTitle title="구조" subtitle="오케스트레이터가 일하는 방식과 붙어 있는 도구" />
-
       <Section no="01" kicker="요약" title="사람은 요청과 승인만, 나머지는 GitHub 위의 AI 팀이 처리합니다">
         <Card className="space-y-0 py-1.5">
           {KPIS.map(([n, t], i) => (
