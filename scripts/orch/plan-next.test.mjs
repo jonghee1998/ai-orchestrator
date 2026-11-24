@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { gate, parseNextPlan, humanBody, readNextState, codexPrompt, claudePrompt, PLAN_MARK, DEFAULT_DAILY_CAP } from "./plan-next.mjs";
+import { retryAt, gate, parseNextPlan, humanBody, readNextState, codexPrompt, claudePrompt, PLAN_MARK, DEFAULT_DAILY_CAP } from "./plan-next.mjs";
 
 const NOW = Date.parse("2026-11-25T03:00:00Z");   // 12:00 KST
 const iss = (n, o = {}) => ({ number: n, state: "open", title: "x", labels: [], body: "", created_at: "2026-11-20T00:00:00Z", ...o });
@@ -90,4 +90,12 @@ test("workflows: plan-review / idea-review take the shared orch-usage slot only 
     assert.doesNotMatch(y, /^concurrency:/m, `${f}: no workflow-level concurrency`);
     assert.match(y, /^    concurrency:\n      group: orch-usage/m, `${f}: job-level orch-usage`);
   }
+});
+
+test("retryAt: wake-up after the 1h cool-down, and the gate lets it through then", () => {
+  const fail = "2026-11-24T20:41:35.000Z";
+  assert.equal(retryAt(fail), "2026-11-24T21:42:35.000Z");
+  const st = { none: false, at: fail, mainSha: "a", failAt: fail };
+  const g = gate({ auto: true, issues: [], human: { body: humanBody("", { todos: [], state: st }) }, mainSha: "a", dailyCap: 8, nowMs: Date.parse(retryAt(fail)) });
+  assert.equal(g.skip, false, g.reason);
 });

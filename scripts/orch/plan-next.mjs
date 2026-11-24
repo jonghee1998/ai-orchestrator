@@ -146,6 +146,9 @@ async function claude() {
   setOutput("prompt", prompt);
 }
 
+/** When a failed plan-next may run again (gate cool-down + 1 minute). */
+export const retryAt = (failAtIso) => new Date(Date.parse(failAtIso) + 61 * 60 * 1000).toISOString();
+
 async function publish() {
   const { gh, issues, human, mainSha } = await context();
   const g = gate({ auto: C.readSwitches(env).auto, issues, human, mainSha, dailyCap: Number(env.ORCH_DAILY_PLANS) || DEFAULT_DAILY_CAP });
@@ -178,6 +181,8 @@ async function publish() {
     try { await gh.post("/labels", { name: HUMAN_LABEL, color: "fbca04", description: "자동 모드가 건너뛴 사람 할 일" }); } catch (e) { if (e.status !== 422) throw e; }
     await gh.post("/issues", { title: "사람 할 일 (자동 모드)", body: humanBody("", { todos, state }), labels: [HUMAN_LABEL] });
   }
+  // Schedules are unreliable (GitHub drops them for hours): wake the watchdog ourselves when the cool-down ends.
+  if (state.failAt) setOutput("retry_until", retryAt(now));
   if (state.none || todos.length) await notify(next.ok ? `🟡 사람 할 일 ${todos.length}개 추가` : "🟡 자동 모드: 다음 계획 없음", next.ok ? title : state.reason);
   console.log(`[plan-next] ${note}`);
 }
