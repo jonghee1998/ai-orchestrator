@@ -113,6 +113,13 @@ async function holdWork(run, mode, reason) {
     `⏸️ 대기 (Step ${run.state?.step ?? "-"}): ${reason}. 스위치가 다시 켜지면 자동으로 이어갑니다.`);
 }
 
+/** Claude hit the subscription usage limit: wait until it resets, then resume automatically (no block). */
+async function holdUntilLimit(run, mode, until) {
+  await save(run, { held: { mode, reason: "Claude 사용량 한도", since: now(), until } },
+    `⏸️ 대기 (Step ${run.state?.step ?? "-"}): Claude 사용량 한도. ${C.kst(until)}에 한도가 풀리면 자동으로 이어갑니다.`);
+  await ro().post("/actions/workflows/wait.yml/dispatches", { ref: "main", inputs: { until, issue: String(run.n) } });
+}
+
 async function releaseHold(run) {
   if (!run.state?.held) return;
   const was = run.state.held;
@@ -121,6 +128,9 @@ async function releaseHold(run) {
 
 /** Dispatch implement/fix work unless the ON/OFF switches hold it. Returns true if dispatched. */
 async function dispatchWork(run, mode) {
+  // Waiting for a Claude usage limit to lift: keep the hold until its reset time (wait.yml wakes the watchdog then).
+  const until = run.state?.held?.until;
+  if (until && Date.parse(until) > Date.now()) return false;
   const sw = SW();
   const pick = C.pickModel(run.plan, run.state.step, mode === "implement" ? 0 : run.state.retries ?? 0);
   const hold = C.gateReason(sw) ?? C.resolveModel(pick, sw).hold ?? null;
@@ -785,6 +795,8 @@ async function publish() {
     return log(`state moved on (${st?.status}); not publishing`);
   }
   if (env.WORK_RESULT !== "success") {
+    const until = env.LIMIT_UNTIL;
+    if (until && Date.parse(until) > Date.now()) return holdUntilLimit(run, mode, until);
     return block(run, `Claude 작업 실행이 실패했습니다 (${env.WORK_RESULT}).`, RUN_URL, "work");
   }
   if (env.BLOCKED) return block(run, `Claude 중단 보고: ${C.oneLine(env.BLOCKED, 600)}`, RUN_URL, "work");

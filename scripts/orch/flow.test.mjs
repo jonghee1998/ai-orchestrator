@@ -115,6 +115,7 @@ function fakeGitHub() {
     if (p === "/actions/workflows/claude-work.yml/dispatches") { db.dispatches.push(body.inputs); return json(204); }
     if (p === "/actions/workflows/claude-review.yml/dispatches") { db.reviews.push(body.inputs); return json(204); }
     if (p === "/actions/workflows/final-sync.yml/dispatches") { (db.syncs ??= []).push(body.inputs); return json(204); }
+    if (p === "/actions/workflows/wait.yml/dispatches") { (db.waits ??= []).push(body.inputs); return json(204); }
     if (p === "/actions/workflows/claude-work.yml/runs") {
       const status = u.searchParams.get("status");
       return json(200, { workflow_runs: page > 1 ? [] : (db.workRuns ?? []).filter((w) => !status || w.status === status) });
@@ -662,4 +663,36 @@ test("blocked on a final conflict, low risk: orch:go after the conflict is gone 
   await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue: db.issues[n] });
   assert.equal(state(n).status, "done", "auto path resumed and merged");
   assert.ok(final.merged_at);
+});
+
+test("usage limit: failed work with a reset time waits (no block) and resumes only after the reset", async () => {
+  const issue = db.newIssue(plan(1));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  const before = db.dispatches.length;
+  const until = new Date(Date.now() + 3600 * 1000).toISOString();
+  await publish(n, "implement", 1, { WORK_RESULT: "failure", LIMIT_UNTIL: until });
+  assert.equal(state(n).status, "implementing", "not blocked");
+  assert.equal(state(n).held.until, until);
+  assert.match(state(n).held.reason, /사용량 한도/);
+  assert.ok(!labels(n).includes("orch:blocked"));
+  assert.deepEqual(db.waits.at(-1), { until, issue: String(n) });
+  assert.ok(db.comments[n].some((c) => /한도가 풀리면 자동으로 이어갑니다/.test(c.body)));
+  await fire("schedule", {});
+  assert.equal(db.dispatches.length, before, "watchdog before the reset does not dispatch");
+  // reset time passes
+  const st = state(n); st.held.until = new Date(Date.now() - 1000).toISOString();
+  db.issues[n].body = db.issues[n].body.replace(/<!-- orch-state:v1 .* -->/, `<!-- orch-state:v1 ${JSON.stringify(st)} -->`);
+  await fire("workflow_dispatch", {});
+  assert.equal(db.dispatches.length, before + 1, "resumed after the reset");
+  assert.deepEqual(db.dispatches.at(-1), { issue: String(n), mode: "implement", step: "1" });
+  assert.equal(state(n).held, null);
+});
+
+test("usage limit: failure without a reset time (or a past one) still blocks as before", async () => {
+  const issue = db.newIssue(plan(1));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  await publish(n, "implement", 1, { WORK_RESULT: "failure", LIMIT_UNTIL: new Date(Date.now() - 1000).toISOString() });
+  assert.equal(state(n).status, "blocked");
 });

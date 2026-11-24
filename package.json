@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test $(find .test-build -name \"*.test.js\") scripts/orch/core.test.mjs scripts/orch/flow.test.mjs scripts/orch/usage.test.mjs scripts/orch/tools.test.mjs scripts/orch/plan-review.test.mjs scripts/orch/idea-review.test.mjs scripts/ecc-lock.test.mjs scripts/third-party-lock.test.mjs scripts/design-docs.test.mjs; result=$?; rm -rf .test-build; exit $result",
+    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test $(find .test-build -name \"*.test.js\") scripts/orch/core.test.mjs scripts/orch/flow.test.mjs scripts/orch/usage.test.mjs scripts/orch/limit.test.mjs scripts/orch/tools.test.mjs scripts/orch/plan-review.test.mjs scripts/orch/idea-review.test.mjs scripts/ecc-lock.test.mjs scripts/third-party-lock.test.mjs scripts/design-docs.test.mjs; result=$?; rm -rf .test-build; exit $result",
     "screens": "node scripts/screens/run.mjs"
   },
   "dependencies": {

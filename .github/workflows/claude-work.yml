@@ -30,6 +30,7 @@ jobs:
       summary: ${{ steps.commit.outputs.summary }}
       tools: ${{ steps.tools.outputs.tools }}
       model: ${{ steps.prep.outputs.model }}
+      limit_until: ${{ steps.limit.outputs.until }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,6 +74,11 @@ jobs:
             --max-turns 150
             ${{ steps.prep.outputs.model_args }}
             --allowedTools "Edit,Write,Read,Glob,Grep,LS,Skill,Task,Agent,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*)"
+      - name: Detect Claude usage limit (reset time)
+        id: limit
+        if: always() && steps.prep.outputs.skip != 'true'
+        continue-on-error: true
+        run: node "$RUNNER_TEMP/orch/limit.mjs" "$RUNNER_TEMP/claude-execution-output.json"
       - name: Summarize tool use (skills, sub-agents, verification commands)
         id: tools
         if: always() && steps.prep.outputs.skip != 'true'
@@ -107,6 +113,7 @@ jobs:
     # and only while that run is implementing/fixing the same step (checked before writing).
     permissions:
       contents: read
+      actions: write        # dispatch wait.yml (GITHUB_TOKEN may trigger workflow_dispatch)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -131,6 +138,8 @@ jobs:
           SUMMARY: ${{ needs.work.outputs.summary }}
           TOOLS: ${{ needs.work.outputs.tools }}
           MODEL: ${{ needs.work.outputs.model }}
+          LIMIT_UNTIL: ${{ needs.work.outputs.limit_until }}
+          READ_TOKEN: ${{ github.token }}   # dispatch wait.yml when waiting for a usage limit
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
