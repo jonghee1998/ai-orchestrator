@@ -65,6 +65,8 @@ export function runPosition(run: OrchRun): LifecyclePosition | null {
       return pos("3.10", join("검수 중", step));
     case "fixing":
       return pos("3.13", join("자동 수정 중", step, `수정 ${run.retries ?? 0}/${run.maxRetries ?? 3}`));
+    case "rechecking":
+      return pos("4.3", "Claude 재검수 중");
     case "finalizing":
       return pos("4.3", "통합 검사 중");
     case "awaiting_merge":

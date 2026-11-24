@@ -119,7 +119,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 
 **Claude 사용량 한도에 걸리면** 중단하지 않고 "⏸️ 대기"로 바꿉니다. 실행 기록에서 한도가 풀리는 시각을 읽어 이슈에 남기고, `wait` 워크플로가 그 시각(+1분)까지 기다렸다가 엔진을 깨워 같은 스텝을 이어 갑니다(7일 한도처럼 길면 5시간 45분씩 나눠 기다림). 풀리는 시각을 읽지 못한 실패는 지금처럼 "중단"입니다.
 
-**Codex 개발 대체 (`ORCH_CODEX_DEV`, 기본 on, `ORCH_CODEX`도 on일 때):** 한도에 걸리면 기다리지 않고 **Codex가 같은 스텝의 구현·수정을 이어서** 합니다(`claude-work`의 `impl=codex`). 같은 지시·같은 CLAUDE.md 규칙을 따르고, PR·댓글의 구현 모델에 `codex (Claude 사용량 한도로 대체)`로 남습니다. 한도가 풀린 뒤 Codex가 만든 스텝은 **Claude(Opus)가 독립 검수**하고, 다음 스텝부터는 다시 Claude가 구현합니다. 한도 중에는 Codex가 검수도 합니다. 계획 작성(`plan-next`)·감사 반영(`plan-revise`)도 Claude가 결과를 못 내면 Codex가 PM 역할을 대신합니다.
+**Codex 개발 대체 (`ORCH_CODEX_DEV`, 기본 on, `ORCH_CODEX`도 on일 때):** 한도에 걸리면 기다리지 않고 **Codex가 같은 스텝의 구현·수정을 이어서** 합니다(`claude-work`의 `impl=codex`). 같은 지시·같은 CLAUDE.md 규칙을 따르고, PR·댓글의 구현 모델에 `codex (Claude 사용량 한도로 대체)`로 남습니다. 한도가 풀린 뒤 Codex가 만든 스텝은 **Claude(Opus)가 독립 검수**하고, 다음 스텝부터는 다시 Claude가 구현합니다. 한도 중에는 Codex가 검수도 해서 밤새 멈추지 않지만, 이렇게 **Codex가 만들고 Codex가 검수한 스텝은 '임시 통과'**입니다. 모든 스텝이 끝나면 최종 PR을 main에 반영하기 전에 **Claude(Opus)가 임시 통과 스텝을 run 전체 diff로 다시 검수**합니다(상태 'Claude 재검수 중'). 한도가 아직이면 풀리는 시각까지 기다리고, FAIL이면 run 브랜치에서 Claude가 고쳐 다시 검수합니다(최대 수정 횟수 동일). 그래서 main에는 항상 만든 AI와 다른 AI의 검수를 거친 코드만 들어갑니다. 계획 작성(`plan-next`)·감사 반영(`plan-revise`)도 Claude가 결과를 못 내면 Codex가 PM 역할을 대신합니다.
 
 **반복 실패 원인 분석:** 같은 스텝이 검수에 2번 떨어지면, 3번째 수정 전에 Codex가 읽기 전용으로 근본 원인·꼭 바꿀 것·하지 말 것을 정리해 구현 지시 끝에 붙입니다(참고용).
 

@@ -64,6 +64,8 @@ export function activeAgents(runs: OrchRun[], switchesByRepo: Record<string, Swi
     } else if (r.status === "reviewing") {
       const who: AgentId | null = sw.codex ? "codex" : sw.opus ? "opus" : null;
       if (who) byId(who).items.push({ ...base, activity: "검수 중" });
+    } else if (r.status === "rechecking") {
+      if (sw.opus) byId("opus").items.push({ ...base, activity: "재검수 중" });
     } else if (r.status === "awaiting_merge") byId("user").items.push({ ...base, activity: "반영 승인 대기" });
     else if (r.status === "blocked") byId("user").items.push({ ...base, activity: "멈춤 확인 필요" });
   }

@@ -40,6 +40,7 @@ test("runPosition: status mapping", () => {
   assert.deepEqual(runPosition(run({ status: "reviewing" })), { stage: 3, sub: "3.10", label: "검수 중 · Step 2/3" });
   assert.deepEqual(runPosition(run({ status: "fixing", retries: 1, maxRetries: 3 })), { stage: 3, sub: "3.13", label: "자동 수정 중 · Step 2/3 · 수정 1/3" });
   assert.deepEqual(runPosition(run({ status: "finalizing" })), { stage: 4, sub: "4.3", label: "통합 검사 중" });
+  assert.deepEqual(runPosition(run({ status: "rechecking" })), { stage: 4, sub: "4.3", label: "Claude 재검수 중" });
   assert.deepEqual(runPosition(run({ status: "awaiting_merge" })), { stage: 4, sub: "4.7", label: "반영 승인 대기" });
   assert.deepEqual(runPosition(run({ status: "done" })), { stage: 4, sub: "4.8", label: "완료" });
   assert.equal(runPosition(run({ status: "cancelled" })), null);

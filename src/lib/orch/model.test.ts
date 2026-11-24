@@ -39,6 +39,8 @@ test("parseRun: plan + state marker → view model; non-plan issues ignored", ()
   assert.equal(merge.next, "완공 보고서 확인 후 반영 (최종 PR #20)");
   assert.equal(parseRun("o/r", issue(9, { status: "awaiting_merge" }))!.next, "완공 보고서 확인 후 반영 (최종 PR #?)");
   assert.equal(parseRun("o/r", issue(10, { status: "finalizing" }))!.next, "최종 CI 통과 시 자동 반영");
+  assert.equal(parseRun("o/r", issue(10, { status: "rechecking" }))!.status, "rechecking");
+  assert.match(parseRun("o/r", issue(10, { status: "rechecking" }))!.next, /Claude가 재검수/);
 
   const bogus = parseRun("o/r", issue(7, { status: "hacked" }))!;
   assert.equal(bogus.status, "waiting", "unknown status never shown as progress");
@@ -197,7 +199,7 @@ test("parseRun steps: blocked keeps the stopped step current", () => {
 });
 
 test("parseRun steps: done / awaiting_merge / finalizing → all passed, checks done", () => {
-  for (const status of ["done", "awaiting_merge", "finalizing"]) {
+  for (const status of ["done", "awaiting_merge", "finalizing", "rechecking"]) {
     const r = stepsOf(22, { status, step: 3 });
     assert.deepEqual(states(r), ["passed", "passed", "passed"]);
     assert.equal(r.passed, 3);
