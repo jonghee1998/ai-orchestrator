@@ -317,35 +317,67 @@ try {
       {
         const flat2 = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
         const head2 = await flat2(second.getByTestId("orch-project-summary"));
-        if (!head2.startsWith("단계 2/4 완료 · 남은 할 일")) problems.push(`[projects] orch-second 카드 머리가 '단계 2/4 완료 · 남은 할 일 …' 이 아님 (${head2})`);
-        const ph = second.getByTestId("orch-phases");
-        if ((await ph.count()) !== 1) problems.push(`[projects] orch-second 카드에 '진행 단계' 블록이 1개가 아님 (${await ph.count()})`);
+        if (!head2.startsWith("단계 2/6 완료 · 남은 할 일")) problems.push(`[projects] orch-second 카드 머리가 '단계 2/6 완료 · 남은 할 일 …' 이 아님 (${head2})`);
+        if (await second.getByTestId("orch-phases").count()) problems.push("[projects] orch-second 카드에 옛 '진행 단계' 단독 블록이 남아 있음");
+        // 줄을 모두 펼친다 (기본은 접힘)
+        await second.locator("details[data-testid^='orch-stage-']").evaluateAll((els) => els.forEach((e) => { e.open = true; }));
+        const group = (id) => second.locator(`[data-testid^="orch-phase-group-"][data-testid$="-${id}"]`);
+        const rowOf = (loc) => loc.evaluate((el) => el.closest("details")?.getAttribute("data-testid") ?? null);
+        const p3 = group("P3");
+        if ((await p3.count()) !== 1) problems.push(`[projects] 개발 줄에 'P3' 묶음이 1개가 아님 (${await p3.count()})`);
         else {
-          if (!(await ph.isVisible())) problems.push("[projects] orch-second '진행 단계' 블록이 보이지 않음");
-          const first = await second.getByTestId("orch-project-body").evaluate((el) => el.firstElementChild?.getAttribute("data-testid"));
-          if (first !== "orch-phases") problems.push(`[projects] '진행 단계' 블록이 카드 본문 맨 위가 아님 (${first})`);
-          const title = await flat2(ph.getByTestId("orch-phases-title"));
-          if (title !== "진행 단계 2/4") problems.push(`[projects] 진행 단계 제목이 '진행 단계 2/4' 가 아님 (${title})`);
-          const bar = ph.getByRole("progressbar");
-          if ((await bar.count()) !== 1 || (await bar.getAttribute("aria-valuenow")) !== "2" || (await bar.getAttribute("aria-valuemax")) !== "4") problems.push("[projects] 진행 단계 막대(progressbar 2/4)가 없음");
-          const items = ph.locator("li");
-          const states = await items.evaluateAll((els) => els.map((e) => `${/P\d/.exec(e.textContent ?? "")?.[0]}:${e.getAttribute("data-status")}`));
-          if (states.join() !== "P1:done,P2:done,P3:doing,P4:todo") problems.push(`[projects] 진행 단계 상태가 'P1 완료·P2 자동 완료·P3 자동 진행·P4 할 일' 이 아님 (${states.join()})`);
-          const p3 = items.nth(2).locator(":scope > p");
-          if (!/font-semibold/.test((await p3.getAttribute("class")) ?? "")) problems.push("[projects] 진행 중 단계 P3 가 굵게 표시되지 않음");
-          if (/font-semibold/.test((await items.nth(3).locator(":scope > p").getAttribute("class")) ?? "")) problems.push("[projects] 할 일 단계 P4 가 굵게 표시됨");
-          for (const n of [30, 31]) {
-            const a = ph.locator(`a[href="https://github.com/${REPO2}/issues/${n}"]`);
-            if ((await a.count()) !== 1) { problems.push(`[projects] 진행 단계에 '#${n}' 링크(${REPO2} Issue)가 없음`); continue; }
-            if (((await a.textContent()) ?? "").trim() !== `#${n}`) problems.push(`[projects] 진행 단계 링크 글자가 '#${n}' 이 아님`);
-            if ((await a.getAttribute("target")) !== "_blank" || !/noreferrer/.test((await a.getAttribute("rel")) ?? "")) problems.push(`[projects] 진행 단계 '#${n}' 링크가 새 탭이 아님`);
+          if ((await rowOf(p3)) !== "orch-stage-3") problems.push(`[projects] 'P3' 묶음이 개발 줄에 없음 (${await rowOf(p3)})`);
+          if (!/font-semibold/.test((await p3.locator(":scope > p").getAttribute("class")) ?? "")) problems.push("[projects] 진행 중 단계 P3 머리가 굵게 표시되지 않음");
+          const a = p3.locator(`a[href="https://github.com/${REPO2}/issues/31"]`);
+          if ((await a.count()) !== 1) problems.push("[projects] 'P3' 묶음에 '#31' 링크가 없음");
+          else {
+            if (((await a.textContent()) ?? "").trim() !== "#31") problems.push("[projects] 'P3' 묶음 링크 글자가 '#31' 이 아님");
+            if ((await a.getAttribute("target")) !== "_blank" || !/noreferrer/.test((await a.getAttribute("rel")) ?? "")) problems.push("[projects] '#31' 링크가 새 탭이 아님");
             const box = await a.boundingBox();
-            if (!box || box.height < 44) problems.push(`[projects] 진행 단계 '#${n}' 링크 터치 높이 ${box?.height}px < 44px`);
+            if (!box || box.height < 44) problems.push(`[projects] '#31' 링크 터치 높이 ${box?.height}px < 44px`);
           }
-          if ((await ph.locator("a").count()) !== 2) problems.push(`[projects] 진행 단계 링크가 ref 있는 2개가 아님 (${await ph.locator("a").count()})`);
-          if (await ph.getByTestId("orch-phases-done").count()) problems.push("[projects] 완료 2개인데 '완료 n개' 로 접혀 있음 (4개 이상일 때만 접음)");
+        }
+        const p4 = group("P4");
+        if ((await p4.count()) !== 1) problems.push(`[projects] 'P4' 묶음이 1개가 아님 (${await p4.count()})`);
+        else {
+          if ((await p4.locator(`a[href="https://github.com/${REPO2}/issues/32"]`).count()) !== 1) problems.push("[projects] 'P4' 묶음에 '#32' 링크가 없음 (계획 JSON phase)");
+          if (/font-semibold/.test((await p4.locator(":scope > p").getAttribute("class")) ?? "")) problems.push("[projects] 할 일 단계 P4 머리가 굵게 표시됨");
+          if (((await p4.locator(":scope > p").textContent()) ?? "").includes("예정")) problems.push("[projects] item 이 있는 'P4' 묶음에 '예정' 이 있음");
+        }
+        const none = group("none");
+        if ((await none.count()) !== 1) problems.push(`[projects] '단계 미지정' 묶음이 1개가 아님 (${await none.count()})`);
+        else {
+          if (!(await flat2(none.locator(":scope > p"))).startsWith("단계 미지정")) problems.push("[projects] 미지정 묶음 머리가 '단계 미지정' 이 아님");
+          if ((await none.locator(`a[href="https://github.com/${REPO2}/issues/33"]`).count()) !== 1) problems.push("[projects] '단계 미지정' 묶음에 '#33' 링크가 없음");
+        }
+        const p5 = group("P5"), p6 = group("P6");
+        if ((await p5.count()) !== 1 || (await p6.count()) !== 1) problems.push("[projects] 'P5'·'P6' 예정 묶음이 없음");
+        else {
+          if ((await rowOf(p5)) !== "orch-stage-2") problems.push(`[projects] 'P5' 묶음이 계획 줄에 없음 (${await rowOf(p5)})`);
+          for (const [id, g] of [["P5", p5], ["P6", p6]]) if (!(await flat2(g.locator(":scope > p"))).includes("예정")) problems.push(`[projects] '${id}' 묶음 머리에 '예정' 이 없음`);
+          const tt = await p5.getByTestId("orch-phase-tasks").locator("li").evaluateAll((els) => els.map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim()));
+          if (tt.join("|") !== "나다섯째 직접 확인|AI다섯째 AI 정리") problems.push(`[projects] 'P5' tasks 가 '나 칩·AI 칩' 이 아님 (${tt.join("|")})`);
+          if (await p6.getByTestId("orch-phase-tasks").count()) problems.push("[projects] tasks 없는 'P6' 에 tasks 목록이 있음");
+        }
+        const cell2 = await flat2(second.getByTestId("orch-cell-2"));
+        if (!cell2.includes("2단계")) problems.push(`[projects] 계획 칸에 '2단계'(P5·P6)가 없음 (${cell2})`);
+        const cell34 = (await flat2(second.getByTestId("orch-cell-3"))) + (await flat2(second.getByTestId("orch-cell-4")));
+        if (!/[1-9]단계/.test(cell34)) problems.push(`[projects] 개발·통합 칸에 'n단계' 가 없음 (${cell34})`);
+        const done = second.getByTestId("orch-stage-done");
+        if ((await done.count()) !== 1) problems.push("[projects] '완료' 줄이 1개가 아님");
+        else {
+          const sum = await flat2(done.locator("summary"));
+          if (!sum.startsWith("완료")) problems.push(`[projects] '완료' 줄 머리가 '완료' 로 시작하지 않음 (${sum})`);
+          const order = await second.locator("details[data-testid^='orch-stage-']").evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")).join());
+          if (!order.startsWith("orch-stage-2,orch-stage-3,orch-stage-4,orch-stage-done")) problems.push(`[projects] '완료' 줄이 통합 줄 바로 아래가 아님 (${order})`);
+          for (const [id, n] of [["P1", null], ["P2", 30]]) {
+            const li = done.getByTestId(`orch-done-phase-${id}`);
+            if ((await li.count()) !== 1) { problems.push(`[projects] '완료' 줄에 '${id}' 가 없음`); continue; }
+            if (n && (await li.locator(`a[href="https://github.com/${REPO2}/issues/${n}"]`).count()) !== 1) problems.push(`[projects] '완료' 줄 '${id}' 에 '#${n}' 링크가 없음`);
+          }
         }
         if (await card.getByTestId("orch-phases").count()) problems.push("[projects] phases 가 없는 orch-screens 카드에 '진행 단계' 블록이 있음");
+        if (await card.locator("[data-testid^='orch-phase-group-'], [data-testid='orch-stage-done'], [data-testid^='orch-cell-phases-']").count()) problems.push("[projects] phases 가 없는 orch-screens 카드에 phase 묶음·완료 줄·'n단계' 가 있음");
         if ((await flat2(card.getByTestId("orch-project-summary"))).includes("단계 ")) problems.push("[projects] phases 가 없는 orch-screens 카드 머리에 '단계' 문구가 있음");
         for (const w of WIDTHS) {
           await page.setViewportSize({ width: w, height: 800 });
