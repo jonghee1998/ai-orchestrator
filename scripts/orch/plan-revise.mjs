@@ -58,10 +58,24 @@ export function replacePlan(body, plan) {
   return body.replace(PLAN_BLOCK_RE, () => block);
 }
 
+/** A model the engine cannot read ("Opus", "claude opus", null) falls back to automatic choice instead of stopping the plan. */
+export function normalizeModels(plan) {
+  const fix = (o) => {
+    if (!o || typeof o !== "object" || !("model" in o)) return;
+    const m = typeof o.model === "string" ? o.model.trim().toLowerCase().replace(/^claude[\s-]+/, "").split(/[\s(]/)[0] : "";
+    if (/^[a-z0-9][a-z0-9.\-]{0,63}$/.test(m)) o.model = m;
+    else delete o.model;
+  };
+  fix(plan);
+  for (const s of Array.isArray(plan?.steps) ? plan.steps : []) fix(s);
+  return plan;
+}
+
 /** Validate Claude's output against the old plan. */
 export function checkRevised(text, oldPlan) {
   let raw;
   try { raw = JSON.parse(String(text ?? "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "")); } catch (e) { return { ok: false, error: `JSON 파싱 실패: ${e.message}` }; }
+  normalizeModels(raw);
   const v = C.validatePlan(raw);
   if (!v.ok) return v;
   if (v.plan.goal !== oldPlan.goal) return { ok: false, error: "목표(goal)가 바뀜" };
