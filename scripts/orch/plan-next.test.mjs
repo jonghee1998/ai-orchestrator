@@ -82,3 +82,12 @@ test("workflows: codex exec uses only flags the current CLI accepts (--full-auto
     for (const m of y.matchAll(/codex exec ([^\n]*)/g)) assert.match(m[1], /-s (read-only|workspace-write)/, `${f}: ${m[1]}`);
   }
 });
+
+test("workflows: plan-review / idea-review take the shared orch-usage slot only from the job (skipped events must not cancel a real review)", async () => {
+  const fs = await import("node:fs");
+  for (const f of ["plan-review.yml", "idea-review.yml"]) {
+    const y = fs.readFileSync(new URL(`../../.github/workflows/${f}`, import.meta.url), "utf8");
+    assert.doesNotMatch(y, /^concurrency:/m, `${f}: no workflow-level concurrency`);
+    assert.match(y, /^    concurrency:\n      group: orch-usage/m, `${f}: job-level orch-usage`);
+  }
+});
