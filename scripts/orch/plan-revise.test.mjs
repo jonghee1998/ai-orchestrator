@@ -65,3 +65,14 @@ test("noteComment: marker with the round, and what happens next", () => {
   assert.match(noteComment({ round: 1, final: false, notes: "", changed: false, start: true }), /그대로 두고 바로 시작/);
   assert.match(noteComment({ round: 1, final: false, notes: "", changed: false, start: false }), /사람이 확인/);
 });
+
+test("checkRevised: unreadable model names fall back instead of stopping the plan", async () => {
+  const { checkRevised, normalizeModels } = await import("./plan-revise.mjs");
+  const old = { goal: "g", steps: [{ id: 1, title: "t", task: "k", done_when: ["d"] }] };
+  const out = checkRevised(JSON.stringify({ goal: "g", model: "Opus (DB 변경)", steps: [{ id: 1, title: "t", task: "k", done_when: ["d"], model: null }, { id: 2, title: "t2", task: "k", done_when: ["d"], model: "Claude Sonnet" }] }), old);
+  assert.equal(out.ok, true);
+  assert.equal(out.plan.model, "opus");
+  assert.equal("model" in out.plan.steps[0], false);
+  assert.equal(out.plan.steps[1].model, "sonnet");
+  assert.equal("model" in normalizeModels({ model: "!!" }), false);
+});
