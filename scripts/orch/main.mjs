@@ -714,7 +714,7 @@ async function onEvent() {
   }
   // A closed orch/* PR (owner merge or close): run the watchdog now instead of waiting for the schedule,
   // which GitHub delays or drops for hours. watchOne() re-reads live state, so a duplicate is a no-op.
-  if (name === "schedule" || name === "workflow_dispatch" || name === "pull_request_target") return watchdog();
+  if (["schedule", "workflow_dispatch", "pull_request_target", "push"].includes(name)) return watchdog();
 }
 
 // ---------------------------------------------------------------- claude-work: prepare / commit / publish

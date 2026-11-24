@@ -1,5 +1,5 @@
 # State machine: decides the next step from GitHub state and writes it back to the run Issue.
-# Runs only default-branch code (issues / issue_comment / workflow_run / pull_request_target / schedule / workflow_dispatch).
+# Runs only default-branch code (issues / issue_comment / workflow_run / pull_request_target / push to main / schedule / workflow_dispatch).
 name: orchestrator
 
 on:
@@ -12,6 +12,8 @@ on:
     types: [completed]
   pull_request_target:
     types: [closed]                   # owner merged/closed a final PR -> finish the run now (no checkout of PR code)
+  push:
+    branches: [main]                # any merge to main wakes the watchdog (GitHub drops schedules for hours)
   schedule:
     - cron: "7,27,47 * * * *"         # watchdog: missed events, Codex nudge, idle timeout, final merge (off :00/:20/:40, which GitHub drops under load)
   workflow_dispatch:
@@ -46,6 +48,7 @@ jobs:
       (github.event_name == 'pull_request_target' &&
         startsWith(github.event.pull_request.head.ref, 'orch/') &&
         github.event.pull_request.head.repo.full_name == github.repository) ||
+      github.event_name == 'push' ||
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

@@ -762,6 +762,9 @@ test("auto mode: idle watchdog asks plan-next; not while a run or an open [plan]
     before = count();
     await fire("schedule", {});
     assert.equal(count(), before + 1, "idle → plan-next");
+    before = count();
+    await fire("push", { ref: "refs/heads/main" });
+    assert.equal(count(), before + 1, "a merge to main also wakes the watchdog");
     const p = db.newIssue(plan(1));
     p.title = "[plan] 대기 중 계획";
     before = count();
