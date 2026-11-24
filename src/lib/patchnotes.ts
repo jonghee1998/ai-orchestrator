@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.8.1", date: "2026-11-25", title: "Codex 임시 통과 → Claude 재검수", items: ["Claude 한도 중 Codex가 만들고 Codex가 검수한 스텝은 임시 통과", "최종 반영 전에 Claude(Opus)가 다시 검수, FAIL이면 수정 후 재검수", "상황판 상태 'Claude 재검수 중'"] },
   { version: "2.8.0", date: "2026-11-25", title: "Codex 개발 대체·원인 분석", items: ["Claude 사용량 한도면 Codex가 구현·수정·계획을 이어서 함 (AI 팀 탭 'Codex 개발 대체' 스위치)", "Codex가 만든 스텝은 한도가 풀리면 Claude가 검수", "2번 떨어진 스텝은 Codex가 근본 원인을 먼저 분석", "단계가 끝나 보이면 Codex 단계 통합 검수 후 다음 단계로"] },
   { version: "2.7.0", date: "2026-11-25", title: "다음 계획 자동 작성", items: ["자동 모드에서 run 이 끝나면 Codex 사전 분석 → PM(Claude)이 로드맵 기준으로 다음 계획을 써서 감사·시작까지 이어감", "사람만 할 수 있는 일은 '사람 할 일' Issue 에 쌓고 멈추지 않음", "하루 계획 상한·할 일 없음·실패 시 쉬는 장치"] },
   { version: "2.6.0", date: "2026-11-24", title: "자동 모드·사용량 한도 대기", items: ["AI 팀 탭에 자동 모드 스위치: 켜면 계획 감사 통과 시 바로 시작, 감사 지적은 PM(Claude)이 자동 반영, 최종 반영도 자동", "Claude 사용량 한도에 걸리면 중단 대신 풀리는 시각까지 대기 후 자동 재개"] },

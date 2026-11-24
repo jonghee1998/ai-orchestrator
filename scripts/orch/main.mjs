@@ -260,7 +260,7 @@ async function evaluatePR(prNumber, { reviewRunFailed = false } = {}) {
   const link = C.parsePrMarker(pr.body);
   if (!link) {
     const finalOf = C.parseFinalMarker(pr.body);
-    return finalOf ? evaluateFinal(pr, finalOf) : undefined;
+    return finalOf ? evaluateFinal(pr, finalOf, { reviewRunFailed }) : undefined;
   }
   const run = await loadRun(link.issue);
   const st = run?.state;
@@ -324,6 +324,7 @@ async function evaluatePR(prNumber, { reviewRunFailed = false } = {}) {
 
 const REVIEWER_TEXT = { codex: "Codex 지적 없음", claude: "Claude(Opus) 대체 검수 PASS" };
 const REVIEWER_SHORT = { codex: "Codex", claude: "Claude Opus (대체)" };
+const reviewerCell = (info) => (info.provisional ? "Codex (임시) → Claude 재검수" : REVIEWER_SHORT[info.reviewer] ?? "-");
 
 async function onPass(run, pr, reviewer = "codex") {
   const reviewNote = REVIEWER_TEXT[reviewer];
@@ -345,12 +346,14 @@ async function onPass(run, pr, reviewer = "codex") {
     log(`PR #${pr.number} merged by a concurrent run; continuing`);
   }
   const passed = { ...(st.passed ?? {}), [step.id]: pr.number };
-  const stepInfo = { ...(st.stepInfo ?? {}), [step.id]: { reviewer, retries: st.retries ?? 0, ...(st.impl ? { impl: st.impl } : {}) } };
+  // Codex built it and Codex reviewed it (Claude was limited): pass provisionally; Claude re-checks before main.
+  const provisional = st.impl === "codex" && reviewer === "codex";
+  const stepInfo = { ...(st.stepInfo ?? {}), [step.id]: { reviewer, retries: st.retries ?? 0, ...(st.impl ? { impl: st.impl } : {}), ...(provisional ? { provisional: true } : {}) } };
   const total = run.plan.steps.length;
 
   if (step.id < total) {
     await save(run, { status: "implementing", step: step.id + 1, attempt: 1, retries: 0, pr: null, passed, stepInfo, impl: null, requestedAt: now(), redispatchedAt: null },
-      `✅ Step ${step.id} 통과 (#${pr.number}, ${reviewNote} + CI 통과) → Step ${step.id + 1} 구현 시작`);
+      `✅ Step ${step.id} ${provisional ? "임시 통과" : "통과"} (#${pr.number}, ${reviewNote} + CI 통과${provisional ? ", Codex 구현·검수라 최종 반영 전 Claude 재검수" : ""}) → Step ${step.id + 1} 구현 시작`);
     await dispatchWork(run, "implement");
     return;
   }
@@ -394,7 +397,7 @@ async function openFinal(run) {
     }
     const info = st.stepInfo?.[s.id] ?? {};
     const usedModel = C.pickModel(plan, s.id, info.retries ?? 0).model;
-    steps.push({ id: s.id, title: s.title, pr: prNum, summary, unmet, model: usedModel, ecc: C.eccCell(prObj?.body), reviewer: REVIEWER_SHORT[info.reviewer] ?? "-", retries: info.retries ?? 0 });
+    steps.push({ id: s.id, title: s.title, pr: prNum, summary, unmet, model: usedModel, ecc: C.eccCell(prObj?.body), reviewer: reviewerCell(info), retries: info.retries ?? 0 });
   }
 
   const final = await gh().post("/pulls", {
@@ -404,6 +407,18 @@ async function openFinal(run) {
     body: C.finalReport({ n: run.n, plan, steps, risk, autoMerge }),
   });
 
+  const recheck = plan.steps.filter((s) => st.stepInfo?.[s.id]?.provisional).map((s) => s.id);
+  if (recheck.length) {
+    await save(run, { status: "rechecking", pr: final.number, finalPr: final.number, risk: risk.level, riskReasons: risk.reasons, autoMerge, recheck, retries: 0, impl: null, claudeReviewFor: null },
+      `🔎 전체 ${plan.steps.length}개 스텝 통과. Step ${recheck.join(", ")}은 Codex가 만들고 검수한 임시 통과라, 최종 PR #${final.number}을 반영하기 전에 Claude(Opus)가 다시 검수합니다.`);
+    return evaluateRecheck(await loadRun(run.n), final);
+  }
+  return afterFinal(run, final, { autoMerge, risk, auto });
+}
+
+/** Final PR is open and needs no more review: auto-merge path or owner approval. */
+async function afterFinal(run, final, { autoMerge, risk, auto = SW().auto }) {
+  const plan = run.plan;
   if (autoMerge) {
     const why = auto && (risk.level !== "low" || plan.auto_merge === false)
       ? `자동 모드 → 확인 필요 항목(${risk.reasons.map((r) => r.reason).join(", ") || "auto_merge: false"})도 완공 보고서에 남기고 자동 반영`
@@ -416,6 +431,51 @@ async function openFinal(run) {
   await save(run, { status: "awaiting_merge", pr: null, finalPr: final.number, risk: risk.level },
     `🟡 전체 ${plan.steps.length}개 스텝 통과. **확인 필요** (${why}) → 최종 PR #${final.number}의 완공 보고서를 보고 반영해 주세요 (PR의 Merge 버튼).`);
   await notify(`🟡 Run #${run.n} 승인 필요`, `${plan.goal} — ${why}. 최종 PR #${final.number}`, final.html_url);
+}
+
+/**
+ * Claude re-check of provisional (Codex-built + Codex-reviewed) steps on the final PR. Waits while Claude is still
+ * usage-limited; FAIL goes through the normal fix loop on the run branch (max_retries), PASS continues to merge.
+ */
+async function evaluateRecheck(run, pr, { reviewRunFailed = false } = {}) {
+  const st = run.state;
+  const sw = SW();
+  if (C.claudeLimited(st)) {
+    if (!st.held?.until) {
+      await save(run, { held: { mode: "recheck", reason: "Claude 사용량 한도", since: now(), until: st.claudeLimitedUntil } },
+        `⏸️ Claude 재검수 대기: ${C.kst(st.claudeLimitedUntil)}에 Claude 한도가 풀리면 재검수합니다.`);
+      await ro().post("/actions/workflows/wait.yml/dispatches", { ref: "main", inputs: { until: st.claudeLimitedUntil, issue: String(run.n) } });
+    }
+    return;
+  }
+  const gate = C.gateReason(sw) ?? (sw.opus ? null : "Opus OFF (재검수는 Claude Opus가 함)");
+  if (gate) return holdWork(run, "recheck", gate);
+  await releaseHold(run);
+  const head = pr.head.sha;
+  const cr = C.claudeReviewVerdict(await gh().all(`/issues/${pr.number}/comments`), head);
+  if (cr.result === "none") {
+    if (reviewRunFailed && st.claudeReviewFor === head) return block(run, "Claude 재검수 워크플로가 판정 없이 실패했습니다.", pr.html_url, "review");
+    if (st.claudeReviewFor !== head) {
+      await ro().post("/actions/workflows/claude-review.yml/dispatches", { ref: "main", inputs: { issue: String(run.n), pr: String(pr.number), sha: head } });
+      await save(run, { claudeReviewFor: head, reviewRequestedAt: now() }, `🔁 Claude(Opus) 재검수를 요청했습니다 (최종 PR #${pr.number}).`);
+    }
+    return;
+  }
+  if (cr.result === "error") return block(run, "Claude 재검수가 판정을 내지 못했습니다.", cr.url ?? pr.html_url, "review");
+  if (cr.result === "pass") {
+    const info = { ...(st.stepInfo ?? {}) };
+    for (const id of st.recheck ?? []) info[id] = { ...info[id], provisional: false, reviewer: "claude" };
+    await save(run, { recheck: null, stepInfo: info, pr: null }, `✅ Claude 재검수 PASS (Step ${(st.recheck ?? []).join(", ")}).`);
+    const fresh = await loadRun(run.n);
+    await afterFinal(fresh, pr, { autoMerge: st.autoMerge !== false, risk: { level: st.risk ?? "low", reasons: st.riskReasons ?? [] } });
+    if (st.autoMerge !== false) return evaluateFinal(await gh().get(`/pulls/${pr.number}`), run.n);
+    return;
+  }
+  const max = run.plan.max_retries;
+  if ((st.retries ?? 0) >= max) return block(run, `Claude 재검수 ${st.retries + 1}회 연속 FAIL`, pr.html_url, "review");
+  await save(run, { status: "fixing", retries: (st.retries ?? 0) + 1, fixFrom: head, requestedAt: now() },
+    `🔁 Claude 재검수 FAIL → run 브랜치에서 수정합니다 (${(st.retries ?? 0) + 1}/${max}).`);
+  await dispatchWork(run, "fix");
 }
 
 /** Final PR (run branch -> main) of a low-risk run: merge once its CI passes. */
@@ -444,9 +504,10 @@ async function handleFinalConflict(run, pr) {
   return true;
 }
 
-async function evaluateFinal(pr, n) {
+async function evaluateFinal(pr, n, opts = {}) {
   const run = await loadRun(n);
   const st = run?.state;
+  if (st?.status === "rechecking" && st.finalPr === pr.number) return evaluateRecheck(run, pr, opts);
   if (!st || st.status !== "finalizing" || st.finalPr !== pr.number) return;
   if (await handleFinalConflict(run, pr)) return;
   const ci = C.ciVerdict(await ro().all(`/commits/${pr.head.sha}/check-runs`), SELF_CHECKS);
@@ -583,7 +644,7 @@ async function watchOne(n) {
     }
   }
 
-  if (st.status === "finalizing" && st.finalPr) {
+  if (["finalizing", "rechecking"].includes(st.status) && st.finalPr) {
     const pr = await gh().get(`/pulls/${st.finalPr}`, { allow404: true });
     if (pr?.state === "open") return evaluateFinal(pr, n);
   }
@@ -865,6 +926,12 @@ async function publish() {
   if (env.IMPL) await save(run, { impl: env.IMPL });   // who wrote this step (review goes to the other AI when possible)
   if (mode === "implement") return openStepPR(run, env.BRANCH, env.SUMMARY);
 
+  if (st.recheck?.length) {
+    if (env.SUMMARY || env.MODEL) await gh().post(`/issues/${st.pr}/comments`, { body: `${C.LOG_MARK}\n**재검수 수정 ${st.retries}회차 반영**${env.MODEL ? ` · 구현 모델: ${env.MODEL}` : ""}\n\n${env.SUMMARY ?? ""}` });
+    await save(run, { status: "rechecking", reviewRequestedAt: now() }, `🔍 재검수 지적을 고쳐 푸시했습니다. Claude가 다시 검수합니다 (최종 PR #${st.pr}).`);
+    const pr = await gh().get(`/pulls/${st.pr}`);
+    return evaluateRecheck(await loadRun(n), pr);
+  }
   const resolved = await resolveCodexThreads(st.pr).catch((e) => (log("resolve threads failed", e.message), 0));
   if (env.SUMMARY || env.TOOLS || env.MODEL) await gh().post(`/issues/${st.pr}/comments`, { body: `${C.LOG_MARK}\n**수정 ${st.retries}회차 반영**${env.MODEL ? ` · 구현 모델: ${env.MODEL}` : ""}\n\n${env.SUMMARY ?? ""}${env.TOOLS ? `\n\n### 도구 사용 (자동 기록)\n${env.TOOLS}` : ""}` });
   await askCodex(st.pr);
@@ -882,13 +949,14 @@ async function reviewPrepare() {
   const run = await loadRun(n, ro());
   const st = run?.state;
   const pr = await ro().get(`/pulls/${prNumber}`, { allow404: true });
-  if (!run?.plan || !st || st.status !== "reviewing" || st.pr !== prNumber || pr?.head.sha !== sha) {
+  const recheck = st?.status === "rechecking" && st.finalPr === prNumber;
+  if (!run?.plan || !st || (st.status !== "reviewing" && !recheck) || st.pr !== prNumber || pr?.head.sha !== sha) {
     log(`skip review: state=${st?.status} pr=${st?.pr} head=${pr?.head.sha?.slice(0, 7)}`);
     setOutput("skip", "true");
     return;
   }
   setOutput("skip", "false");
-  setOutput("prompt", C.reviewPrompt(run.plan, st.step, `origin/${pr.base.ref}`));
+  setOutput("prompt", recheck ? C.recheckPrompt(run.plan, st.recheck ?? [], `origin/${pr.base.ref}`) : C.reviewPrompt(run.plan, st.step, `origin/${pr.base.ref}`));
 }
 
 async function reviewPublish() {

@@ -813,3 +813,49 @@ test("Codex-implemented step is reviewed by Claude when Claude is available", as
   assert.ok(db.comments[n].some((c) => /Codex가 구현한 스텝이라 독립 검수/.test(c.body)));
   delete process.env.IMPL;
 });
+
+test("Codex built + Codex reviewed while Claude limited → provisional; Claude re-checks the final PR (FAIL → fix on run branch → PASS → merge)", async () => {
+  const issue = db.newIssue(plan(1));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  const until = new Date(Date.now() + 3600 * 1000).toISOString();
+  await publish(n, "implement", 1, { WORK_RESULT: "failure", LIMIT_UNTIL: until });
+  db.refs[C.stepBranch(n, 1)] = sha("e");
+  await publish(n, "implement", 1, { IMPL: "codex", LIMIT_UNTIL: "" });
+  const pr = state(n).pr;
+  ciPass(sha("e"));
+  const reviews0 = db.reviews.length;
+  await codexSays(pr, sha("e"), "completed", false);
+  let st = state(n);
+  assert.equal(st.status, "rechecking", "not merged to main yet");
+  assert.equal(st.stepInfo[1].provisional, true);
+  assert.deepEqual(st.recheck, [1]);
+  assert.equal(db.reviews.length, reviews0, "Claude still limited → no review yet");
+  assert.equal(st.held.until, until);
+  assert.equal(db.waits.at(-1).until, until, "wakes up when the limit resets");
+  const final = db.issues[st.finalPr];
+  assert.match(final.body, /Codex \(임시\) → Claude 재검수/);
+  assert.equal(final.merged_at ?? null, null);
+
+  // limit over → Claude re-check requested on the final PR
+  db.issues[n].body = db.issues[n].body.replace(/<!-- orch-state:v1 .* -->/, C.stateMarker({ ...state(n), claudeLimitedUntil: new Date(Date.now() - 1000).toISOString() }));
+  ciPass(final.head.sha);
+  await fire("schedule", {});
+  assert.deepEqual(db.reviews.at(-1), { issue: String(n), pr: String(final.number), sha: final.head.sha });
+  assert.equal(state(n).held, null);
+
+  // FAIL → fix on the run branch
+  await claudeReviewSays(final.number, final.head.sha, "FAIL", [{ path: "a.ts", line: 1, body: "경계값 누락" }]);
+  assert.equal(state(n).status, "fixing");
+  assert.deepEqual(db.dispatches.at(-1), { issue: String(n), mode: "fix", step: "1" }, "Claude fixes (not Codex)");
+  final.head.sha = sha("9");
+  await publish(n, "fix", 1, { IMPL: "", BRANCH: C.runBranch(n) });
+  assert.equal(state(n).status, "rechecking");
+  assert.equal(db.reviews.at(-1).sha, sha("9"), "re-check the new head");
+
+  ciPass(sha("9"));
+  await claudeReviewSays(final.number, sha("9"), "PASS");
+  assert.ok(final.merged_at, "merged after Claude re-check");
+  assert.equal(state(n).status, "done");
+  delete process.env.IMPL;
+});

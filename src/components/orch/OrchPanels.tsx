@@ -45,7 +45,7 @@ function StateNote({ kind }: { kind: string }) {
 }
 
 function RunCard({ r }: { r: OrchRun }) {
-  const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${r.step && !["done", "awaiting_merge", "finalizing"].includes(r.status) ? ` · 지금 ${r.step}번` : ""}`;
+  const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${r.step && !["done", "awaiting_merge", "finalizing", "rechecking"].includes(r.status) ? ` · 지금 ${r.step}번` : ""}`;
   return (
     <a href={r.url} target="_blank" rel="noreferrer" className={`block ${ROW} text-sm`} data-testid={`orch-run-${short(r.repo)}-${r.number}`}>
       <div className="flex items-start justify-between gap-2">
@@ -88,7 +88,7 @@ function StepDetails({ s, blocked }: { s: RunStep; blocked: boolean }) {
 
 /** Run details (item card '스텝 보기'): status, step progress, next action, steps → checks. */
 function RunDetails({ r }: { r: OrchRun }) {
-  const showNow = !!r.step && !["done", "awaiting_merge", "finalizing"].includes(r.status) && r.steps.some((s) => s.state === "current");
+  const showNow = !!r.step && !["done", "awaiting_merge", "finalizing", "rechecking"].includes(r.status) && r.steps.some((s) => s.state === "current");
   const stepText = r.status === "waiting" ? `${r.total}개 스텝` : `스텝 ${r.passed}/${r.total} 통과${showNow ? ` · 지금 ${r.step}번` : ""}`;
   const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
   return (

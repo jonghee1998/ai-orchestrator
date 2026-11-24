@@ -688,6 +688,26 @@ export function reviewPrompt(plan, stepId, baseRef) {
   ].join("\n\n");
 }
 
+/** Claude re-checks steps that Codex both implemented and reviewed (while Claude was limited) on the whole run diff. */
+export function recheckPrompt(plan, stepIds, baseRef) {
+  const steps = plan.steps.filter((s) => stepIds.includes(s.id));
+  return [
+    "너는 이 저장소의 독립 검수자다. 아래 스텝들은 Claude 사용량 한도 동안 Codex가 구현하고 Codex가 검수해 '임시 통과'한 것이다.",
+    "main에 반영하기 전에, 만든 AI와 다른 AI로서 다시 검수한다. 코드는 수정하지 않는다. 판정 파일 하나만 작성한다.",
+    `## 전체 목표\n${plan.goal}`,
+    ...steps.map((s) => `## 재검수 대상: Step ${s.id}. ${s.title}\n${s.task}\n\n완료 기준 (done_when):\n${s.done_when.map((x) => `- ${x}`).join("\n")}`),
+    "## 검수 방법",
+    `- 변경 범위: \`git diff ${baseRef}...HEAD\` (run 전체). 위 스텝이 바꾼 부분을 중심으로 보되, 다른 스텝과의 충돌도 본다.`,
+    "- `npm test`를 실행해 결과를 확인한다.",
+    "- 완료 기준을 실제 코드와 테스트로 하나씩 확인한다. 버그, 엣지 케이스 누락, 보안 문제, 범위 밖 변경을 찾는다. 스타일만으로는 FAIL하지 않는다.",
+    ...REVIEW_AGENT_RULES,
+    "## 결과 (반드시 작성)",
+    "`.orch/REVIEW.json`에 아래 JSON만 쓴다:",
+    '{"verdict":"PASS"|"FAIL","summary":"판정 근거 2~4줄","findings":[{"path":"src/x.mjs","line":12,"body":"무엇이 왜 문제이고 기대 동작은 무엇인지"}]}',
+    "- FAIL이면 findings에 고쳐야 할 항목을 1개 이상 구체적으로 적는다. PASS면 findings는 빈 배열.",
+  ].join("\n\n");
+}
+
 export function claudeReviewComment({ sha, verdict, summary, findings, runUrl, tools = "" }) {
   const head = verdict === "PASS" ? "✅ PASS" : verdict === "FAIL" ? "❌ FAIL" : "⚠️ ERROR";
   const list = (findings ?? []).map((f, i) => `${i + 1}. \`${f.path}${f.line ? `:${f.line}` : ""}\` — ${f.body}`);

@@ -5,7 +5,7 @@ import type { PatchNote } from "@/lib/patchnotes";
 
 export type OrchStatus =
   | "waiting" | "implementing" | "reviewing" | "fixing" | "blocked"
-  | "finalizing" | "awaiting_merge" | "done" | "cancelled";
+  | "rechecking" | "finalizing" | "awaiting_merge" | "done" | "cancelled";
 
 export const STATUS_LABEL: Record<OrchStatus, string> = {
   waiting: "시작 전",
@@ -13,6 +13,7 @@ export const STATUS_LABEL: Record<OrchStatus, string> = {
   reviewing: "검수 중",
   fixing: "수정 중",
   blocked: "중단 · 판단 필요",
+  rechecking: "Claude 재검수 중",
   finalizing: "최종 확인 중",
   awaiting_merge: "반영 승인 대기",
   done: "완료",
@@ -107,7 +108,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
   const status: OrchStatus = raw && STATUSES.has(raw) ? (raw as OrchStatus) : "waiting";
   const passedMap = obj(st?.passed) ?? {};
   const curStep = num(st?.step);
-  const allPassed = status === "done" || status === "awaiting_merge" || status === "finalizing";
+  const allPassed = status === "done" || status === "awaiting_merge" || status === "finalizing" || status === "rechecking";
   const runSteps: RunStep[] = [];
   for (const item of steps) {
     const s = obj(item);
@@ -132,6 +133,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
     : status === "blocked" ? "사유 확인 후 orch:go(재개) 또는 orch:cancel"
     : status === "awaiting_merge" ? `완공 보고서 확인 후 반영 (최종 PR #${finalPr ?? "?"})`
     : held ? "스위치가 켜지면 자동으로 이어감"
+    : status === "rechecking" ? "Codex 임시 통과 스텝을 Claude가 재검수한 뒤 반영"
     : status === "finalizing" ? "최종 CI 통과 시 자동 반영"
     : status === "done" || status === "cancelled" ? "없음"
     : "자동 진행 중";
