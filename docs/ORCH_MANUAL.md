@@ -2,6 +2,8 @@
 
 코드를 직접 읽지 않아도 운영할 수 있도록 쓴 사용 설명서입니다. 저장소마다 같은 엔진(`scripts/orch/` + 워크플로 4개)이 설치되어 있고, 이 문서는 그 공통 사용법입니다.
 
+새 프로젝트(저장소)를 올릴 때는 먼저 [새 프로젝트 시작 절차](NEW_PROJECT.md)를 순서대로 따릅니다.
+
 ## 1. 한눈에 보기
 
 | 역할 | 누가 | 하는 일 |
@@ -116,6 +118,8 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 **결과 화면 테스트 (Playwright):** 모든 PR의 CI에서 `screens` 검사가 실제 빌드를 띄우고 실제 로그인으로 5개 탭(프로젝트·AI 팀·PM 브리핑·패치노트·구조)을 폰 폭 360/390/430px로 엽니다. 기대 문구가 보이는지, 가로로 넘치는지, 페이지 오류·외부 요청·GitHub 쓰기가 없는지 확인합니다. GitHub API는 가짜 서버(`scripts/screens/fixtures.mjs`)를 씁니다. 스크린샷 18장은 해당 CI 실행의 **Artifacts → screens**에서 받을 수 있습니다. 로컬에서는 `npm run build && npm run screens`. 스위치 저장을 머지 전에 확인하려면 `SCREENS_SWITCH=ok npm run screens`(모두 저장 성공 → 'n개 프로젝트에 적용', `switch-ok.png`)와 `SCREENS_SWITCH=partial npm run screens`(한 저장소 저장 실패 → '일부 실패: …', `switch-partial.png`)를 따로 실행합니다. 이 쓰기는 테스트 안의 가짜 GitHub 서버에만 가고 실제 저장소 설정은 바꾸지 않습니다.
 
 ## 8. 처음 한 번 설정 (저장소마다)
+
+새 저장소 전체 순서(기본 환경 → 진행 단계 → 아키텍처 확인 → 작업 시작)는 [새 프로젝트 시작 절차](NEW_PROJECT.md)를 봅니다.
 
 | 설정 | 위치 | 내용 |
 | --- | --- | --- |

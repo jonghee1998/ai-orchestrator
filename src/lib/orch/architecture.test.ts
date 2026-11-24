@@ -128,3 +128,21 @@ test("parseArchitecture: broken blocks/sections dropped; nothing valid left → 
   assert.equal(parseArchitecture(doc([section([text])], { purpose: 5, version: "x" }))?.purpose, null, "purpose optional");
   assert.equal(parseArchitecture(doc([section([text])], { version: "x" }))?.version, 1);
 });
+
+test("docs/NEW_PROJECT.md: the sample architecture.json parses with nothing dropped", async () => {
+  const { readFileSync } = await import("node:fs");
+  const md = readFileSync("docs/NEW_PROJECT.md", "utf8");
+  const m = md.match(/```json\n([\s\S]*?)\n```/);
+  assert.ok(m, "json sample present");
+  const raw = JSON.parse(m[1]);
+  const a = parseArchitecture(m[1]);
+  assert.ok(a);
+  assert.equal(a.purpose, raw.purpose);
+  assert.equal(a.sections.length, 1);
+  assert.equal(a.sections[0].no, "01");
+  assert.deepEqual(a.sections[0].blocks.map((b) => b.type), ["text", "diagram", "table"]);
+  const d = a.sections[0].blocks[1];
+  assert.ok(d.type === "diagram");
+  assert.equal(d.boxes.length, raw.sections[0].blocks[1].boxes.length);
+  assert.equal(d.arrows.length, raw.sections[0].blocks[1].arrows.length);
+});
