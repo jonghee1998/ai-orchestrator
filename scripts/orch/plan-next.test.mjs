@@ -73,3 +73,12 @@ test("prompts: Codex is read-only fact finding; Claude gets the facts, the human
   assert.match(p, /HUMAN_TODO\.md/);
   assert.match(claudePrompt({ repo: "o/r", facts: "" }), /Codex 를 쓰지 못함/);
 });
+
+test("workflows: codex exec uses only flags the current CLI accepts (--full-auto was removed)", async () => {
+  const fs = await import("node:fs");
+  for (const f of ["claude-work.yml", "plan-next.yml", "plan-revise.yml", "plan-review.yml"]) {
+    const y = fs.readFileSync(new URL(`../../.github/workflows/${f}`, import.meta.url), "utf8");
+    assert.doesNotMatch(y, /--full-auto/, f);
+    for (const m of y.matchAll(/codex exec ([^\n]*)/g)) assert.match(m[1], /-s (read-only|workspace-write)/, `${f}: ${m[1]}`);
+  }
+});
