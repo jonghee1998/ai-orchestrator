@@ -25,7 +25,7 @@ const freePort = () => new Promise((ok) => { const s = net.createServer().listen
 const listen = (srv) => new Promise((ok) => srv.listen(0, "127.0.0.1", () => ok(srv.address().port)));
 
 // 스위치 쓰기 시나리오 (머지 전 확인용, 기본 읽기 전용 실행과 분리): SCREENS_SWITCH=ok|partial
-//   ok      = 가짜 GitHub 가 두 저장소의 변수 PATCH·dispatch 를 모두 받아들임 → '2개 프로젝트에 적용'
+//   ok      = 가짜 GitHub 가 두 저장소의 변수 PATCH·dispatch 를 모두 받아들임 → '4개 프로젝트에 적용'
 //   partial = 두 번째 저장소 PATCH 만 403 → '일부 실패: orch-second · …'
 // 쓰기는 이 프로세스 안의 가짜 서버에만 간다 (운영 저장소 설정은 바꾸지 않음).
 const SWITCH = process.env.SCREENS_SWITCH || "";
@@ -624,14 +624,14 @@ try {
       const before = ghCalls.length;
       const win = sc.sec.locator("input#win-all");
       if ((await win.inputValue()) !== "") problems.push(`[switch-${SWITCH}] 처음 작업 시간대 입력이 비어 있지 않음 (${await win.inputValue()})`);
-      if (SWITCH === "ok") for (const r of [REPO, REPO2]) setVar(r, "ORCH_WINDOW", "09:00-21:00"); // 화면이 읽은 뒤 바뀐 기준값
+      if (SWITCH === "ok") for (const r of [REPO, REPO2, REPO3, REPO4]) setVar(r, "ORCH_WINDOW", "09:00-21:00"); // 화면이 읽은 뒤 바뀐 기준값
       await sc.sec.getByRole("switch", { name: "Codex (독립 검수)" }).click();
       const msg = sc.sec.getByTestId("orch-switch-msg");
       try { await msg.waitFor({ timeout: 15000 }); } catch { problems.push(`[switch-${SWITCH}] 저장 결과 문구가 나오지 않음`); }
       const text = ((await msg.textContent().catch(() => "")) ?? "").trim();
       const cls = (await msg.getAttribute("class").catch(() => "")) ?? "";
       if (SWITCH === "ok") {
-        if (text !== "2개 프로젝트에 적용") problems.push(`[switch-ok] 결과 문구가 '2개 프로젝트에 적용' 이 아님 (${text})`);
+        if (text !== "4개 프로젝트에 적용") problems.push(`[switch-ok] 결과 문구가 '4개 프로젝트에 적용' 이 아님 (${text})`);
         if (/text-warn/.test(cls)) problems.push("[switch-ok] 전체 성공 문구가 warn 색");
       } else {
         if (!text.startsWith("일부 실패: orch-second · ")) problems.push(`[switch-partial] 결과 문구가 '일부 실패: orch-second · …' 이 아님 (${text})`);
@@ -639,8 +639,8 @@ try {
         if (!/text-warn/.test(cls)) problems.push("[switch-partial] 일부 실패 문구가 warn 색이 아님");
       }
       const writes = ghCalls.slice(before).filter((c) => !c.startsWith("GET"));
-      const want = [`PATCH /repos/${REPO}/actions/variables/ORCH_CODEX`, `POST /repos/${REPO}/actions/workflows/orchestrator.yml/dispatches`, `PATCH /repos/${REPO2}/actions/variables/ORCH_CODEX`];
-      if (SWITCH === "ok") want.push(`POST /repos/${REPO2}/actions/workflows/orchestrator.yml/dispatches`);
+      const want = [`PATCH /repos/${REPO}/actions/variables/ORCH_CODEX`, `POST /repos/${REPO}/actions/workflows/orchestrator.yml/dispatches`, `PATCH /repos/${REPO2}/actions/variables/ORCH_CODEX`, `PATCH /repos/${REPO3}/actions/variables/ORCH_CODEX`, `PATCH /repos/${REPO4}/actions/variables/ORCH_CODEX`];
+      if (SWITCH === "ok") for (const r of [REPO2, REPO3, REPO4]) want.push(`POST /repos/${r}/actions/workflows/orchestrator.yml/dispatches`);
       for (const w of want) if (!writes.includes(w)) problems.push(`[switch-${SWITCH}] 가짜 GitHub 에 '${w}' 가 없음 (${writes.join(", ")})`);
       if (SWITCH === "partial" && writes.some((w) => w.startsWith(`POST /repos/${REPO2}/actions/workflows`))) problems.push("[switch-partial] 저장 실패한 저장소에 dispatch 를 보냄");
       if (!ghCalls.slice(before).some((c) => c.startsWith(`GET /repos/${REPO}/actions/variables`))) problems.push(`[switch-${SWITCH}] 저장 뒤 다시 읽지 않음`);
