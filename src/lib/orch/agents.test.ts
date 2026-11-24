@@ -8,7 +8,7 @@ const step = (id: number, o: Partial<RunStep> = {}): RunStep => ({ id, title: `ì
 function run(o: Partial<OrchRun> = {}): OrchRun {
   return {
     repo: "o/a", number: 1, url: "u1", goal: "g", status: "implementing", statusLabel: "", step: 1, total: 1, passed: 0, steps: [step(1)],
-    pr: null, finalPr: null, retries: 0, maxRetries: 3, planModel: null, held: null, reason: null, updatedAt: null, needsUser: false, next: "", ...o,
+    pr: null, finalPr: null, retries: 0, maxRetries: 3, planModel: null, held: null, reason: null, updatedAt: null, needsUser: false, next: "", phase: null, ...o,
   };
 }
 const row = (rows: ReturnType<typeof activeAgents>, a: string) => rows.find((r) => r.agent === a)!;

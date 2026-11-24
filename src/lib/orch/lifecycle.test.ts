@@ -29,7 +29,7 @@ function run(over: Partial<OrchRun>): OrchRun {
   return {
     steps: steps("passed", "current", "pending"), repo: "o/r", number: 1, url: "u", goal: "g", status: "waiting", statusLabel: "",
     step: 2, total: 3, passed: 1, pr: null, finalPr: null, retries: 0, maxRetries: 3, planModel: null, held: null, reason: null, updatedAt: null,
-    needsUser: false, next: "", ...over,
+    needsUser: false, next: "", phase: null, ...over,
   };
 }
 
@@ -58,7 +58,7 @@ test("runPosition: unknown status does not throw", () => {
 });
 
 function plan(review: PendingPlan["review"]): PendingPlan {
-  return { repo: "o/r", number: 2, url: "u", goal: "g", steps: 3, hash: "h", review };
+  return { repo: "o/r", number: 2, url: "u", goal: "g", steps: 3, hash: "h", phase: null, review };
 }
 const rv = (over: Partial<NonNullable<PendingPlan["review"]>>) => ({ round: 1, verdict: "OK" as const, reviewer: "codex", at: null, hash: "h", stale: false, ...over });
 
@@ -157,7 +157,7 @@ test("stageBoard: columns newest first (null last)", () => {
 
 const col = (n: 1 | 2 | 3 | 4, items: Partial<BoardItem>[]): BoardColumn => ({
   n, title: (["검토", "계획", "개발", "통합"] as const)[n - 1],
-  items: items.map((x, i) => ({ kind: "run", key: `k${i}`, title: "t", url: "u", sub: "1.1", label: "", at: null, ...x })),
+  items: items.map((x, i) => ({ kind: "run", key: `k${i}`, title: "t", url: "u", sub: "1.1", label: "", at: null, number: i + 1, phase: null, ...x })),
 });
 
 test("boardNeedsUser: counts run items that need the user", () => {

@@ -16,10 +16,10 @@ test("parseRoadmap: valid file → items with null for missing note/ref", () => 
   }))!;
   assert.equal(r.version, 1);
   assert.deepEqual(r.setup, [
-    { id: "0.1", title: "목적", status: "done", note: "PRODUCT.md", ref: "PRODUCT.md" },
-    { id: "0.2", title: "스택", status: "doing", note: null, ref: null },
+    { id: "0.1", title: "목적", status: "done", note: "PRODUCT.md", ref: "PRODUCT.md", tasks: [] },
+    { id: "0.2", title: "스택", status: "doing", note: null, ref: null, tasks: [] },
   ]);
-  assert.deepEqual(r.expansion, [{ id: "6.1", title: "연결", status: "todo", note: null, ref: 267 }]);
+  assert.deepEqual(r.expansion, [{ id: "6.1", title: "연결", status: "todo", note: null, ref: 267, tasks: [] }]);
 });
 
 test("parseRoadmap: not JSON / not an object → null; missing lists → []", () => {
@@ -65,7 +65,7 @@ test("parseRoadmap: long strings are cut (title 24, note 80)", () => {
 });
 
 test("roadmapCount: na left out of the total", () => {
-  const it = (status: RoadmapItem["status"]): RoadmapItem => ({ id: "x", title: "x", status, note: null, ref: null });
+  const it = (status: RoadmapItem["status"]): RoadmapItem => ({ id: "x", title: "x", status, note: null, ref: null, tasks: [] });
   assert.deepEqual(roadmapCount([it("done"), it("done"), it("doing"), it("todo"), it("na")]), { done: 2, doing: 1, todo: 1, total: 4, text: "2/4" });
   assert.deepEqual(roadmapCount([]), { done: 0, doing: 0, todo: 0, total: 0, text: "0/0" });
   assert.deepEqual(roadmapCount([it("na")]), { done: 0, doing: 0, todo: 0, total: 0, text: "0/0" });
@@ -86,7 +86,7 @@ test("docs/roadmap.json: passes parseRoadmap unchanged, setup 20 + expansion 5",
   assert.deepEqual(r.setup.map((i) => i.id), Array.from({ length: 20 }, (_, i) => `0.${i + 1}`));
   assert.deepEqual(r.expansion.map((i) => i.id), ["6.1", "6.2", "6.3", "6.4", "6.5"]);
   // nothing cut or defaulted: parsed items equal the file (missing note/ref → null)
-  const norm = (i: Record<string, unknown>) => ({ id: i.id, title: i.title, status: i.status, note: i.note ?? null, ref: i.ref ?? null });
+  const norm = (i: Record<string, unknown>) => ({ id: i.id, title: i.title, status: i.status, note: i.note ?? null, ref: i.ref ?? null, tasks: [] });
   assert.deepEqual(r.setup, (raw.setup as Record<string, unknown>[]).map(norm));
   assert.deepEqual(r.expansion, (raw.expansion as Record<string, unknown>[]).map(norm));
   assert.deepEqual(roadmapCount(r.setup), { done: 16, doing: 3, todo: 0, total: 19, text: "16/19" });
@@ -138,7 +138,7 @@ test("readRepo: roadmap read from contents API (base64), deployPending counts me
   const commits = [{ parents: [{}, {}] }, { parents: [{}] }, { parents: [{}, {}] }, { parents: [{}, {}, {}] }, {}, null];
   const g = fake({ compare: { status: 200, body: { commits } }, vars: [{ name: "ORCH_DEPLOY_EVERY", value: "7" }, { name: "ORCH_PAUSED", value: "on" }] });
   const v = await readRepo(REPO, ENV, g.f);
-  assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null }], expansion: [], phases: [], app: null });
+  assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null, tasks: [] }], expansion: [], phases: [], app: null });
   assert.equal(v.roadmapError, null);
   assert.equal(v.deployPending, 3);
   assert.equal(v.deployEvery, 7);
@@ -210,8 +210,8 @@ test("parseRoadmap phases: normal, missing, malformed skipped, ref number/string
     { id: "3" }, "x", null,
   ] }))!;
   assert.deepEqual(r.phases, [
-    { id: "1", title: "기획", status: "done", note: null, ref: 2 },
-    { id: "2", title: "문서", status: "todo", note: null, ref: "docs/a.md" },
+    { id: "1", title: "기획", status: "done", note: null, ref: 2, tasks: [] },
+    { id: "2", title: "문서", status: "todo", note: null, ref: "docs/a.md", tasks: [] },
   ]);
   assert.deepEqual(parseRoadmap("{}")!.phases, []);
   assert.deepEqual(parseRoadmap(JSON.stringify({ phases: "no" }))!.phases, []);
@@ -219,7 +219,7 @@ test("parseRoadmap phases: normal, missing, malformed skipped, ref number/string
 });
 
 test("phaseStatus: run status overrides, no run keeps value, cancelled keeps, input untouched", () => {
-  const it = (id: string, status: RoadmapItem["status"], ref: number | string | null): RoadmapItem => ({ id, title: id, status, note: null, ref });
+  const it = (id: string, status: RoadmapItem["status"], ref: number | string | null): RoadmapItem => ({ id, title: id, status, note: null, ref, tasks: [] });
   const run = (number: number, status: OrchStatus) => ({ number, status }) as unknown as OrchRun;
   const doing: OrchStatus[] = ["implementing", "reviewing", "fixing", "finalizing", "awaiting_merge", "waiting", "blocked"];
   for (const s of doing) assert.equal(phaseStatus([it("a", "todo", 5)], [run(5, s)])[0].status, "doing", s);

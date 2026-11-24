@@ -1,6 +1,6 @@
 // Work lifecycle (stages 1~5) and where a run / plan / idea currently sits in it.
 // Pure: imports only model.ts (pure), safe for client components.
-import { PLAN_REVIEW_ROUNDS, type Idea, type OrchRun, type PendingPlan } from "./model";
+import { PLAN_REVIEW_ROUNDS, type Idea, type OrchRun, type PendingPlan, type RoadmapItem, type RoadmapTask } from "./model";
 
 export type LifecycleStage = 1 | 2 | 3 | 4 | 5;
 
@@ -150,6 +150,10 @@ export interface BoardItem {
   at: string | null;
   run?: OrchRun;
   blocked?: boolean;
+  /** Issue number (run / plan / idea). */
+  number: number;
+  /** Explicit plan JSON "phase" (run / plan only), null otherwise. */
+  phase: string | null;
 }
 
 export type BoardStage = 1 | 2 | 3 | 4;
@@ -179,12 +183,12 @@ export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Id
   for (const i of v.ideas ?? []) {
     if (!i || i.closed) continue;
     const p = ideaPosition(i);
-    put(p.stage, { kind: "idea", key: `idea-${i.number}`, title: i.title, url: i.url, sub: p.sub, label: p.label, at: i.review?.at ?? i.createdAt ?? null });
+    put(p.stage, { kind: "idea", key: `idea-${i.number}`, title: i.title, url: i.url, sub: p.sub, label: p.label, at: i.review?.at ?? i.createdAt ?? null, number: i.number, phase: null });
   }
   for (const pl of v.plans ?? []) {
     if (!pl) continue;
     const p = planPosition(pl);
-    put(p.stage, { kind: "plan", key: `plan-${pl.number}`, title: pl.goal, url: pl.url, sub: p.sub, label: p.label, at: pl.review?.at ?? null });
+    put(p.stage, { kind: "plan", key: `plan-${pl.number}`, title: pl.goal, url: pl.url, sub: p.sub, label: p.label, at: pl.review?.at ?? null, number: pl.number, phase: pl.phase ?? null });
   }
   for (const run of v.runs ?? []) {
     if (!run || run.status === "cancelled" || run.status === "done") continue;
@@ -192,7 +196,7 @@ export function stageBoard(v: { runs: OrchRun[]; plans: PendingPlan[]; ideas: Id
     if (!p) continue;
     put(p.stage, {
       kind: "run", key: `run-${run.number}`, title: run.goal, url: run.url, at: run.updatedAt ?? null, run,
-      sub: p.sub, label: p.label, ...(run.status === "blocked" ? { blocked: true } : {}),
+      sub: p.sub, label: p.label, number: run.number, phase: run.phase ?? null, ...(run.status === "blocked" ? { blocked: true } : {}),
     });
   }
   for (const c of cols) {
@@ -283,4 +287,71 @@ export function boardRemaining(cols: BoardColumn[]): number | null {
  */
 export function boardNeedsUser(c: BoardColumn): number {
   return c.items.filter((i) => !!i.run?.needsUser).length;
+}
+
+export interface PhaseGroup {
+  /** null = '단계 미지정'. */
+  phase: RoadmapItem | null;
+  items: BoardItem[];
+  /** Open (todo) tasks; only on the group of the first column where the phase appears. */
+  tasks: RoadmapTask[];
+}
+export interface PhaseColumn { n: BoardStage; title: BoardTitle; groups: PhaseGroup[] }
+/** A finished phase with the numbers of its finished runs. */
+export interface DonePhase { phase: RoadmapItem; runs: number[] }
+export interface PhaseBoard { columns: PhaseColumn[]; done: DonePhase[] }
+
+/**
+ * Groups stage-board items by roadmap phase. `phases` must already have phaseStatus applied.
+ * Link: explicit item.phase === phase.id wins; otherwise phase.ref === the item's Issue number; else '단계 미지정' (last).
+ * Ideas never link. A done phase leaves the columns and goes to `done` (with its finished run numbers); a non-done phase
+ * with no item shows in 2 계획 as '예정' (no items, tasks only). Open tasks go to the first column the phase appears in.
+ * Groups follow the phases order. Callers skip this when phases is empty. Does not mutate the input.
+ *
+ * Auto-complete rule: phaseStatus (model.ts) turns a phase 'done' only when its ref points at a done run. A phase linked
+ * only through the plan "phase" field may hold several plans, so the PM sets that phase to 'done' in roadmap.json.
+ */
+export function phaseBoard(cols: BoardColumn[], phases: RoadmapItem[], runs: OrchRun[]): PhaseBoard {
+  /** Index into phases, or -1 for '단계 미지정'. */
+  const link = (kind: BoardItem["kind"], phase: string | null, number: number): number => {
+    if (kind === "idea") return -1;
+    const byId = phase ? phases.findIndex((p) => p.id === phase) : -1;
+    return byId >= 0 ? byId : phases.findIndex((p) => typeof p.ref === "number" && p.ref === number);
+  };
+  const columns: PhaseColumn[] = cols.map((c) => {
+    const by = new Map<number, BoardItem[]>();
+    for (const it of c.items) {
+      // Live work never disappears: an item still linked to a done phase is shown as '단계 미지정'.
+      const linked = link(it.kind, it.phase, it.number);
+      const k = linked >= 0 && phases[linked].status === "done" ? -1 : linked;
+      by.set(k, [...(by.get(k) ?? []), it]);
+    }
+    const groups: PhaseGroup[] = [];
+    phases.forEach((phase, k) => {
+      if (phase.status !== "done" && by.has(k)) groups.push({ phase, items: by.get(k)!, tasks: [] });
+    });
+    if (by.has(-1)) groups.push({ phase: null, items: by.get(-1)!, tasks: [] });
+    return { n: c.n, title: c.title, groups };
+  });
+  const plan = columns.find((c) => c.n === 2);
+  phases.forEach((phase, k) => {
+    if (phase.status === "done") return;
+    let target: PhaseGroup | undefined;
+    for (const c of columns) {
+      target = c.groups.find((g) => g.phase === phase);
+      if (target) break;
+    }
+    if (!target && plan) {
+      target = { phase, items: [], tasks: [] };
+      const at = plan.groups.findIndex((g) => g.phase === null || phases.indexOf(g.phase) > k);
+      plan.groups.splice(at < 0 ? plan.groups.length : at, 0, target);
+    }
+    if (target) target.tasks = phase.tasks.filter((t) => t.status === "todo");
+  });
+  const done: DonePhase[] = phases.flatMap((phase, k) =>
+    phase.status === "done"
+      ? [{ phase, runs: (runs ?? []).filter((r) => r.status === "done" && link("run", r.phase, r.number) === k).map((r) => r.number) }]
+      : [],
+  );
+  return { columns, done };
 }
