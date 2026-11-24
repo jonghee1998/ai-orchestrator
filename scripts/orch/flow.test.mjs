@@ -56,7 +56,7 @@ function fakeGitHub() {
     }
     if (p === "/issues" && method === "GET") {
       const label = u.searchParams.get("labels");
-      return paged(Object.values(db.issues).filter((i) => i.state === "open" && i.labels.some((l) => l.name === label)));
+      return paged(Object.values(db.issues).filter((i) => i.state === "open" && (!label || i.labels.some((l) => l.name === label))));
     }
     if ((m = /^\/issues\/(\d+)$/.exec(p))) {
       const it = db.issues[m[1]];
@@ -116,6 +116,7 @@ function fakeGitHub() {
     if (p === "/actions/workflows/claude-review.yml/dispatches") { db.reviews.push(body.inputs); return json(204); }
     if (p === "/actions/workflows/final-sync.yml/dispatches") { (db.syncs ??= []).push(body.inputs); return json(204); }
     if (p === "/actions/workflows/wait.yml/dispatches") { (db.waits ??= []).push(body.inputs); return json(204); }
+    if (p === "/actions/workflows/plan-next.yml/dispatches") { db.nexts = (db.nexts ?? 0) + 1; return json(204); }
     if (p === "/actions/workflows/claude-work.yml/runs") {
       const status = u.searchParams.get("status");
       return json(200, { workflow_runs: page > 1 ? [] : (db.workRuns ?? []).filter((w) => !status || w.status === status) });
@@ -717,6 +718,7 @@ test("auto mode: a high-risk final PR merges itself after CI (no owner merge)", 
       await ciDone(final.number);
       assert.ok(final.merged_at, "merged automatically");
       assert.equal(state(n).status, "done");
+      assert.ok((db.nexts ?? 0) >= 1, "plan-next asked for the next plan");
       assert.ok(db.comments[n].some((c) => /자동 모드, CI 통과/.test(c.body)));
     });
   } finally {
@@ -742,4 +744,24 @@ test("auto mode switched on later: a run awaiting the owner is merged by the wat
   });
   assert.ok(final.merged_at);
   assert.equal(state(n).status, "done");
+});
+
+test("auto mode: idle watchdog asks plan-next; not while a run or an open [plan] exists, not when auto is off", async () => {
+  // close everything left open by earlier tests
+  for (const it of Object.values(db.issues)) if (it.state === "open") it.state = "closed";
+  const count = () => db.nexts ?? 0;
+  let before = count();
+  await fire("schedule", {});
+  assert.equal(count(), before, "auto off → no dispatch");
+  await withSwitches({ ORCH_AUTO: "on" }, async () => {
+    before = count();
+    await fire("schedule", {});
+    assert.equal(count(), before + 1, "idle → plan-next");
+    const p = db.newIssue(plan(1));
+    p.title = "[plan] 대기 중 계획";
+    before = count();
+    await fire("schedule", {});
+    assert.equal(count(), before, "open [plan] → no dispatch");
+    p.state = "closed";
+  });
 });

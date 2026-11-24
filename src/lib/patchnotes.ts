@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.7.0", date: "2026-11-25", title: "다음 계획 자동 작성", items: ["자동 모드에서 run 이 끝나면 Codex 사전 분석 → PM(Claude)이 로드맵 기준으로 다음 계획을 써서 감사·시작까지 이어감", "사람만 할 수 있는 일은 '사람 할 일' Issue 에 쌓고 멈추지 않음", "하루 계획 상한·할 일 없음·실패 시 쉬는 장치"] },
   { version: "2.6.0", date: "2026-11-24", title: "자동 모드·사용량 한도 대기", items: ["AI 팀 탭에 자동 모드 스위치: 켜면 계획 감사 통과 시 바로 시작, 감사 지적은 PM(Claude)이 자동 반영, 최종 반영도 자동", "Claude 사용량 한도에 걸리면 중단 대신 풀리는 시각까지 대기 후 자동 재개"] },
   { version: "2.5.0", date: "2026-11-24", title: "프로젝트별 구조·스위치 일괄 적용", items: ["구조 탭을 프로젝트별로 접고 펴기, 머리에 프로젝트 목적", "다른 프로젝트 구조는 각 저장소 architecture.json 에서 읽음", "AI ON/OFF 를 모든 프로젝트에 한 번에 적용", "새 프로젝트 시작 절차 문서"] },
   { version: "2.4.0", date: "2026-11-24", title: "단계별로 묶인 작업 흐름", items: ["계획·개발·통합 칸 안에 진행 단계와 세부 할 일", "끝난 단계는 완료 줄에", "지금 일하는 AI 를 AI 팀 탭으로 옮김"] },
