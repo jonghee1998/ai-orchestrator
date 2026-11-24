@@ -79,6 +79,7 @@ export function claudePrompt({ repo, facts }) {
     "- 한 계획은 스텝 2~4개. 서로 관련 없는 작은 일은 한 스텝으로 묶어 스텝 수를 줄인다. 데이터 계층과 화면은 나눈다.",
     "- docs/PM_HANDOFF.md 의 '계획 작성 체크리스트'를 지킨다(실제 코드 확인, 기존 테스트 충돌, 기계로 확인할 수 있는 done_when, 실패·경계 경우, 보호 경로, 보안·공개 저장소).",
     "- 계획 JSON 최상위에 \"phase\": \"<단계 id>\" 를 넣는다. .github/·scripts/orch/ 수정은 넣지 않는다.",
+    "- 계획 JSON 형식(엔진이 이 키만 읽는다): {\"phase\":\"9\",\"goal\":\"한 문장 목표\",\"context\":\"공통 맥락\",\"max_retries\":2,\"steps\":[{\"id\":1,\"title\":\"…\",\"task\":\"…\",\"done_when\":[\"기계로 확인할 기준\"],\"stop_if\":[\"…\"]}]}. id 는 1부터 차례로, done_when 은 1개 이상. 다른 이름(목표·plan 감싸기 등)을 쓰지 않는다. 기존 [plan] Issue 의 JSON 을 열어 보고 같은 모양으로 쓴다.",
     "- 모든 단계가 done 이거나, 남은 일이 사람만 할 수 있는 일뿐이면 계획을 쓰지 않는다.",
     "## 결과 (해당하는 것만 쓴다)",
     "1. 계획을 쓸 때: `.orch/NEXT_PLAN.md` — 첫 줄은 Issue 제목(`[plan] ` 로 시작), 빈 줄 뒤 본문(한두 문단 설명 + ```json 계획 블록 하나. 다른 JSON 예시는 ```text 로 쓴다).",
@@ -172,6 +173,7 @@ async function publish() {
   let state, title, note;
   if (!next.ok && !none) {
     // Claude wrote nothing usable (usage limit, error, bad format): no plan, retry after a cool-down.
+    console.log(`[plan-next] NEXT_PLAN.md 앞부분 (형식 확인용):\n${read(".orch/NEXT_PLAN.md").slice(0, 1500)}`);
     state = { none: false, at: now, mainSha, failAt: now, reason: next.error.slice(0, 300) };
     note = `🤖 자동 모드: 다음 계획 작성 실패 — ${state.reason} (1시간 뒤 다시 시도)`;
   } else if (next.ok) {
