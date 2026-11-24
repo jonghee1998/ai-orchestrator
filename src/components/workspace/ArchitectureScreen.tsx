@@ -1,7 +1,7 @@
 // '구조' 탭: 오케스트레이터 아키텍처를 컨설팅 보고서 형식(요약 → 구조도 → 프로세스 → 역할 → 통제 → 자동 루틴 → 보조 도구)으로 설명합니다. 정적 내용.
 import type { ReactNode } from "react";
 import { CARD_TITLE, Card } from "@/components/ui";
-import { DEPLOY_SVG, FLOW_SVG } from "./archDiagrams";
+import { DEPLOY_SVG, LAYER1_SVG, LAYER2_SVG, LAYER3_SVG } from "./archDiagrams";
 
 const KICKER = "text-[11px] font-semibold uppercase tracking-[0.08em] text-accent";
 const H2 = "text-lg font-[750] leading-snug tracking-[-0.02em]";
@@ -41,49 +41,67 @@ const SECRET_RULES: [string, string][] = [
 ];
 
 const KPIS: [string, string][] = [
-  ["2곳", "사람이 결정하는 지점 (계획 승인 · 위험 변경 반영)"],
-  ["3중", "자동 품질 확인 (독립 검수 · CI · 결과 화면)"],
+  ["1곳", "사람이 결정하는 지점 (대화로 방향 · 사람 할 일). 자동 모드를 끄면 계획 승인 · 위험 변경 반영도"],
+  ["3중", "자동 품질 확인 (만든 AI와 다른 AI의 검수 · CI · 결과 화면)"],
   ["0대", "켜 둘 서버 (GitHub Actions 위에서 동작)"],
+];
+type Layer = { name: string; who: string; svg: string; note: string };
+const LAYERS: Layer[] = [
+  { name: "1층 · 방향 정하기", who: "사용자 + PM", svg: LAYER1_SVG, note: "대화로 로드맵(전체 단계)을 정하고 기록합니다. 사람만 할 수 있는 일은 '사람 할 일' Issue에 쌓였다가 대화할 때 처리합니다." },
+  { name: "2층 · 단계 진행", who: "PM + Codex · 단계마다 반복", svg: LAYER2_SVG, note: "계획을 하나씩 써서 실행하고, 반영되면 다음 계획을 씁니다. 단계가 끝나 보이면 Codex가 통합 검수한 뒤 다음 단계로 넘어갑니다." },
+  { name: "3층 · 계획 1개 실행", who: "엔진 · 스텝마다 반복", svg: LAYER3_SVG, note: "스텝마다 구현 → 독립 검수 + CI → 통합. Claude 한도면 Codex가 대신 만들고, 그 스텝은 main 반영 전에 Claude가 다시 검수합니다." },
 ];
 
 type Stage = { name: string; owner: string; out: string; control: string };
 const PROCESS: Stage[] = [
-  { name: "아이디어", owner: "사용자 → Codex · PM", out: "의견 2개 + 종합 의견", control: "개발 여부는 사용자가 결정" },
-  { name: "계획", owner: "PM (Claude)", out: "계획 Issue (스텝 · 완료 기준 · 위험)", control: "계획 감사 최대 3회 (claudex)" },
-  { name: "승인", owner: "사용자", out: "orch:go", control: "감사 OK 뒤에만 승인 버튼" },
+  { name: "대화 · 로드맵", owner: "사용자 → PM", out: "roadmap.json 단계 · PM_HANDOFF", control: "방향과 단계 순서는 사용자와 대화로 결정" },
+  { name: "다음 계획", owner: "Codex 분석 → PM", out: "계획 Issue (스텝 · 완료 기준 · 위험)", control: "Claude 한도면 Codex가 작성 · 하루 8개 상한" },
+  { name: "감사 · 시작", owner: "Codex → PM", out: "감사 의견 · 자동 orch:go", control: "최대 3회, 지적은 PM이 반영 · 자동 모드 OFF면 사용자 승인" },
   { name: "스텝 실행", owner: "엔진 → 구현 AI", out: "스텝 PR", control: "독립 검수 + CI, 실패 시 최대 3회 자동 수정 · 2회 실패 시 Opus 승격" },
   { name: "통합", owner: "엔진", out: "최종 PR + 완공 보고서", control: "충돌 자동 정리(패치노트) · 위험 판정" },
-  { name: "반영 · 배포", owner: "엔진 / 사용자", out: "main 반영 → Vercel", control: "위험 낮음 자동 반영 · 높음 사용자 승인 · 10건마다 배포" },
+  { name: "반영 · 배포", owner: "엔진", out: "main 반영 → Vercel", control: "임시 통과 스텝은 Claude 재검수 · 자동 모드면 자동 반영 · 10건마다 배포" },
+  { name: "단계 넘기기", owner: "Codex → PM", out: "단계 통합 검수", control: "빠진 것이 있으면 그것부터 계획, 없을 때만 다음 단계" },
 ];
 
 type Role = { who: string; does: string; not: string };
 const ROLES: Role[] = [
-  { who: "사용자", does: "요청 · 아이디어, 계획 승인, 위험 변경 반영, 배포 실행", not: "코드 작성 · 검수" },
-  { who: "PM · Claude", does: "요청 정리, 계획 Issue 작성, 감사 반영, 진행 보고, 막힘 진단", not: "main 반영 · 스위치 변경 · 실행 생성" },
+  { who: "사용자", does: "대화로 방향 · 단계 결정, 사람 할 일(운영 배포 · 비밀값 · 외부 콘솔)", not: "코드 작성 · 검수 · 매번 승인 (자동 모드)" },
+  { who: "PM · Claude", does: "로드맵, 다음 계획 작성, 감사 지적 반영, 막힘 진단, 엔진 수정 PR", not: "운영 배포 · 비밀값 변경" },
   { who: "Claude Sonnet", does: "일반 구현 (기본)", not: ".github · 엔진 파일 수정" },
-  { who: "Claude Opus", does: "위험 작업 구현, 2회 실패 시 승격, Codex 대신 검수 · 감사", not: "자기 작업 검수" },
-  { who: "Codex", does: "독립 검수, 계획 감사, 아이디어 의견 (기본)", not: "구현" },
+  { who: "Claude Opus", does: "위험 작업 구현, 2회 실패 시 승격, Codex 대신 검수, 임시 통과 재검수", not: "자기 작업 검수" },
+  { who: "Codex", does: "독립 검수 · 계획 감사 (기본), Claude 한도면 구현 · 수정 · 계획, 반복 실패 원인 분석, 단계 통합 검수", not: "임시 통과를 main에 바로 반영" },
   { who: "GitHub Actions", does: "엔진 · CI · 사용량 확인 · 배포 호출 (PC 꺼져도 동작)", not: "판단 (규칙대로만 실행)" },
 ];
 
 const CONTROLS: [string, string][] = [
-  ["승인 게이트", "계획은 사용자 승인(orch:go) 뒤에만 실행. 로그인 · DB · Actions · 의존성 같은 위험 변경은 최종 반영도 사용자 승인."],
-  ["독립 검수", "만든 AI와 다른 AI(Codex, 없으면 Opus)가 검수. 검수 에이전트는 구현 단계에서 쓰지 않음."],
+  ["자동 모드", "켜면 감사 통과 시 자동 시작 · 최종 자동 반영(CI 필수). 끄면 계획 승인과 위험 변경 반영을 사용자가."],
+  ["독립 검수", "만든 AI와 다른 AI가 검수. Codex가 만들고 Codex가 검수한 스텝은 임시 통과 → main 반영 전 Claude 재검수."],
+  ["한도 대응", "Claude 한도면 Codex가 이어서 개발(스위치로 끄면 풀리는 시각까지 대기). 중단하지 않음."],
   ["재시도 · 승격", "스텝마다 최대 3회 자동 수정, 2회 실패하면 Opus로 올림. 그래도 안 되면 멈추고 PM이 원인 보고."],
   ["보호 파일", "구현 AI는 .github · scripts/orch(엔진)를 고칠 수 없음. 고치면 푸시가 거부됨."],
-  ["스위치", "Sonnet · Opus · Codex ON/OFF, 전체 일시정지, 작동 시간대. 끄면 새 작업만 막고 돌던 일은 마침."],
+  ["스위치", "Sonnet · Opus · Codex · Codex 개발 대체 · 자동 모드 ON/OFF, 일시정지, 시간대. 끄면 새 작업만 막음."],
+  ["자동 계획 상한", "하루 8개, 열린 계획 · 진행 · 중단된 run이 있으면 새 계획을 쓰지 않음."],
   ["비밀 정보", "토큰 · 비밀번호는 GitHub · Vercel 비밀 설정에만. 코드 · 로그 · 테스트에 넣지 않음."],
   ["작업 한도", "구현 1회당 150동작. 무한 반복을 막는 안전장치."],
 ];
 
 const ROUTINES: [string, string][] = [
-  ["이벤트 즉시", "PR · 검수 · CI 결과가 나오면 엔진이 바로 다음 단계로"],
-  ["20분마다", "엔진 순찰: 멈춘 작업 재시도 · 상태판 갱신 · 최종 PR 충돌 확인"],
-  ["1시간마다", "PM 점검: 막힌 작업 원인 진단 후 Issue에 선택지 보고"],
+  ["이벤트 즉시", "PR · 검수 · CI · 머지 결과가 나오면 엔진이 바로 다음 단계로, run이 끝나면 다음 계획"],
+  ["매시 7·27·47분", "엔진 순찰: 멈춘 작업 재시도 · 최종 PR 충돌 확인 · 할 일 없으면 다음 계획 요청"],
+  ["매시 3분", "PM 점검 (Claude 예약 작업): 막힌 작업 진단 · 일시 문제는 스스로 재개"],
+  ["한도 해제 시각", "wait가 그 시각에 엔진을 깨워 이어감 (재검수 · Codex 대체 OFF일 때)"],
   ["사용량", "Claude · Codex 남은 사용량 자동 확인, 상황판에서 즉시 확인 가능"],
   ["10건마다", "main에 10건 쌓이면 Vercel 운영 배포 (수동 즉시 배포도 가능)"],
 ];
 
+const REPO_SETTINGS: [string, string][] = [
+  ["Secrets", "CLAUDE_CODE_OAUTH_TOKEN · BOT_PAT(소유자 토큰) · CODEX_AUTH_KEY(Codex 로그인 암호화) · NTFY_TOPIC(폰 알림). 두 저장소 같음"],
+  ["Variables", "ORCH_AUTO · ORCH_CODEX_DEV · ORCH_SONNET · ORCH_OPUS · ORCH_CODEX · ORCH_PAUSED · ORCH_WINDOW. 상황판 스위치가 모든 저장소에 한 번에 씀"],
+  ["필수 검사", "ai-orchestrator: test · screens / Personal-dashboard: test · screens · db · pii"],
+  ["main 규칙", "자동 머지 허용 · 필수 검사 통과해야 반영 · 브랜치 삭제 금지 · 강제 push 금지"],
+  ["Codex 앱", "저장소 Code review 켜짐. Actions의 Codex는 로그인을 캐시에 암호화해 씀"],
+  ["PM 예약 작업", "Claude 예약 작업이 1시간마다 orch-sandbox · ai-orchestrator · Personal-dashboard 점검"],
+];
 type Tool = { name: string; role: string; where: string; how: string[]; files: string };
 const TOOLS: Tool[] = [
   {
@@ -144,11 +162,11 @@ const TOOLS: Tool[] = [
   },
 ];
 
-/** ai-orchestrator 자체 구조 섹션 01~08 (정적). 프로젝트 카드를 펼치면 보인다. */
+/** ai-orchestrator 자체 구조 섹션 01~09 (정적). 프로젝트 카드를 펼치면 보인다. */
 export function SelfArchitectureSections() {
   return (
     <div className="space-y-7">
-      <Section no="01" kicker="요약" title="사람은 요청과 승인만, 나머지는 GitHub 위의 AI 팀이 처리합니다">
+      <Section no="01" kicker="요약" title="사람은 대화로 방향만, 나머지는 GitHub 위의 AI 팀이 이어서 처리합니다">
         <Card className="space-y-0 py-1.5">
           {KPIS.map(([n, t], i) => (
             <div key={n} className={`flex items-baseline gap-3 py-3 ${i ? "border-t border-border" : ""}`}>
@@ -159,11 +177,20 @@ export function SelfArchitectureSections() {
         </Card>
       </Section>
 
-      <Section no="02" kicker="아키텍처" title="요청에서 배포까지 한 흐름">
-        <Card>
-          <div data-testid="arch-diagram" dangerouslySetInnerHTML={{ __html: FLOW_SVG }} />
-          <Legend items={[["bg-text", "사람이 결정"], ["bg-ok", "통과"], ["bg-danger", "실패 · 멈춤"], ["dash", "반복"]]} />
-        </Card>
+      <Section no="02" kicker="아키텍처" title="대화에서 배포까지, 3층으로 돕니다">
+        <div className="space-y-3">
+          {LAYERS.map((l, i) => (
+            <Card key={l.name} className="space-y-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <h3 className={CARD_TITLE}>{l.name}</h3>
+                <span className="text-[12px] text-text-muted">{l.who}</span>
+              </div>
+              <p className="text-[13px] leading-snug text-text-muted">{l.note}</p>
+              <div data-testid={i === 0 ? "arch-diagram" : `arch-layer-${i + 1}`} dangerouslySetInnerHTML={{ __html: l.svg }} />
+            </Card>
+          ))}
+          <Legend items={[["bg-text", "사람 · 시작"], ["bg-ok", "통과 · 반영"], ["bg-danger", "실패 · 멈춤"], ["bg-accent", "Claude 한도일 때 Codex"], ["bg-warn", "사람 할 일"], ["dash", "반복"]]} />
+        </div>
       </Section>
 
       <Section no="03" kicker="배포 · 비밀값" title="비밀값은 GitHub와 Vercel 설정에만 있습니다">
@@ -181,7 +208,7 @@ export function SelfArchitectureSections() {
         </Card>
       </Section>
 
-      <Section no="04" kicker="프로세스" title="여섯 단계, 단계마다 산출물과 통제가 있습니다">
+      <Section no="04" kicker="프로세스" title="일곱 단계, 단계마다 산출물과 통제가 있습니다">
         <Card className="py-1.5">
           <ol>
             {PROCESS.map((s, i) => (
@@ -214,7 +241,7 @@ export function SelfArchitectureSections() {
         </Card>
       </Section>
 
-      <Section no="06" kicker="통제 장치" title="사고를 막는 일곱 가지 안전장치">
+      <Section no="06" kicker="통제 장치" title="사고를 막는 아홉 가지 안전장치">
         <Card className="py-1.5">
           {CONTROLS.map(([k, v], i) => (
             <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
@@ -256,6 +283,17 @@ export function SelfArchitectureSections() {
             </Card>
           ))}
         </div>
+      </Section>
+
+      <Section no="09" kicker="저장소 설정" title="저장소마다 해 둔 설정">
+        <Card className="py-1.5">
+          {REPO_SETTINGS.map(([k, v], i) => (
+            <div key={k} className={`grid grid-cols-[5.5rem_1fr] gap-x-2 py-3 text-[13px] ${i ? "border-t border-border" : ""}`}>
+              <span className="font-bold">{k}</span>
+              <span className="break-words text-text-muted">{v}</span>
+            </div>
+          ))}
+        </Card>
       </Section>
     </div>
   );
