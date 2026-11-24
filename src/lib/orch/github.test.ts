@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import path from "node:path";
 import Module from "node:module";
-import { approvePlan, createIdea, GitHubError, readRepo } from "./github";
+import { ArchitectureFormatError, approvePlan, createIdea, GitHubError, readArchitecture, readRepo } from "./github";
 import { parsePlan, planHash, type PlanComment, type PlanIssue } from "./plans";
-import { SELF_REPO, mergedSwitches } from "./model";
+import { ARCH_MAX_BYTES, SELF_REPO, mergedSwitches } from "./model";
 import { cookieName, csrfToken, issueSession } from "../session/session";
 
 const REPO = "o/r";
@@ -18,7 +18,7 @@ const issue = (extra: Partial<PlanIssue> = {}): PlanIssue => ({
 
 type Call = { method: string; path: string; body: unknown };
 /** Fake GitHub: serves the Issue + comments, records every request. */
-type FakeOpts = { labelStatus?: number; issueStatus?: number; saveFail?: Record<string, number>; wakeFail?: string[] };
+type FakeOpts = { labelStatus?: number; issueStatus?: number; saveFail?: Record<string, number>; wakeFail?: string[]; architecture?: Record<string, { status: number; body?: unknown }> };
 function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: FakeOpts = {}) {
   const calls: Call[] = [];
   const f = (async (url: string | URL, init?: RequestInit) => {
@@ -34,6 +34,9 @@ function fakeGitHub(i: PlanIssue, comments: PlanComment[] = [], opts: FakeOpts =
     const sw = /^\/repos\/([^/]+\/[^/]+)\/actions\/(variables\/ORCH_[A-Z]+|workflows\/orchestrator\.yml\/dispatches)$/.exec(u.pathname);
     if (sw && method === "PATCH") return opts.saveFail?.[sw[1]] ? json(opts.saveFail[sw[1]], { message: "no" }) : new Response(null, { status: 204 });
     if (sw && method === "POST") return opts.wakeFail?.includes(sw[1]) ? json(500, { message: "no" }) : new Response(null, { status: 204 });
+    // docs/architecture.json per repo (architecture[repo] = { status, body }); missing → 404.
+    const arch = /^\/repos\/([^/]+\/[^/]+)\/contents\/docs\/architecture\.json$/.exec(u.pathname);
+    if (arch && method === "GET" && opts.architecture?.[arch[1]]) return json(opts.architecture[arch[1]].status, opts.architecture[arch[1]].body ?? { message: "x" });
     return json(404, { message: "Not Found" });
   }) as typeof fetch;
   const labelPosts = () => calls.filter((c) => c.method === "POST" && c.path.endsWith("/labels"));
@@ -408,4 +411,86 @@ test("readRepo: deployPending from compare merge commits since prod-deployed; no
   assert.equal(noTag.deployPending, null);
   const err = await readRepo(REPO, ENV, fakeRepo({ status: 500 }));
   assert.equal(err.deployPending, null);
+});
+
+// ---------------------------------------------------------------- docs/architecture.json (readArchitecture + GET /api/architecture)
+
+const ARCH = { version: 1, purpose: "예시 목적", sections: [{ no: "01", kicker: "개요", title: "한눈에", blocks: [{ type: "text", lines: ["문장"] }] }] };
+const BIG_ARCH = JSON.stringify({ ...ARCH, pad: "a".repeat(ARCH_MAX_BYTES) });
+const archFile = (text: string, extra: Record<string, unknown> = {}) => ({
+  status: 200,
+  // GitHub wraps base64 content every 60 chars.
+  body: { size: Buffer.byteLength(text), encoding: "base64", content: Buffer.from(text).toString("base64").replace(/(.{60})/g, "$1\n"), ...extra },
+});
+const archFake = (file: { status: number; body?: unknown }) => fakeGitHub(issue(), [], { architecture: { [REPO]: file } }).f;
+
+test("readArchitecture: file → parsed; 404 → null; malformed / no content → ArchitectureFormatError; 500 → GitHubError", async () => {
+  const ok = fakeGitHub(issue(), [], { architecture: { [REPO]: archFile(JSON.stringify(ARCH)) } });
+  assert.deepEqual(await readArchitecture(REPO, ENV, ok.f), ARCH);
+  assert.deepEqual(ok.calls.map((c) => `${c.method} ${c.path}`), [`GET /repos/${REPO}/contents/docs/architecture.json`]);
+  assert.equal(await readArchitecture(REPO, ENV, fakeGitHub(issue()).f), null, "404 = no file");
+  for (const file of [archFile("not json"), archFile(JSON.stringify({ version: 1, sections: [] })), archFile("{}", { content: undefined }), archFile("{}", { encoding: "none" })]) {
+    await assert.rejects(readArchitecture(REPO, ENV, archFake(file)), (e) => e instanceof ArchitectureFormatError && !/크기/.test(e.message));
+  }
+  await assert.rejects(readArchitecture(REPO, ENV, archFake({ status: 500 })), (e) => e instanceof GitHubError && e.status === 500);
+});
+
+test("readArchitecture: over 65,536 bytes rejected by size metadata or by base64 length (before decoding)", async () => {
+  const tooBig = (file: { status: number; body: unknown }) =>
+    assert.rejects(readArchitecture(REPO, ENV, archFake(file)), (e) => e instanceof ArchitectureFormatError && /크기 초과/.test(e.message));
+  await tooBig(archFile(JSON.stringify(ARCH), { size: ARCH_MAX_BYTES + 1 }));
+  await tooBig(archFile(BIG_ARCH, { size: undefined }));
+  await tooBig(archFile(BIG_ARCH, { size: 10 }));
+});
+
+const READ = "test-read-token-for-route";
+const ARCH_ENV = { ...LIVE, ORCH_REPOS: `${REPO},${R2},${R3}`, CONTROL_READ_TOKEN: READ };
+type ArchJson = { repos: { repo: string; architecture: unknown; error: string | null }[] };
+async function getArch(h: Record<string, string> = { "x-admin-token": READ }) {
+  const { GET } = await import("../../app/api/architecture/route");
+  return GET(new Request("http://localhost/api/architecture", { headers: h }));
+}
+
+test("route GET /api/architecture: needs read auth; responses are no-store", async () => {
+  await withRoute(ARCH_ENV, issue(), async (_post, g) => {
+    for (const h of [{}, { "x-admin-token": "wrong-token-but-long-enough" }, { cookie: "orch_session=forged" }] as Record<string, string>[]) {
+      const r = await getArch(h);
+      assert.equal(r.status, 401, JSON.stringify(h));
+      assert.equal(r.headers.get("cache-control"), "no-store");
+    }
+    assert.equal(g.calls.length, 0, "no GitHub call without auth");
+    const ok = await getArch();
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get("cache-control"), "no-store");
+    assert.equal(g.writes().length, 0, "read only");
+  });
+});
+
+test("route GET /api/architecture: own repo (ORCH_SELF_REPO) skipped; one repo's 500 does not hide others; >64KB rejected", async () => {
+  const opts: FakeOpts = { architecture: { [REPO]: archFile(JSON.stringify(ARCH)), [R2]: { status: 500 }, [R3]: archFile(BIG_ARCH) } };
+  await withRoute({ ...ARCH_ENV, ORCH_REPOS: `${REPO},${R2},o/self,${R3}`, ORCH_SELF_REPO: " o/self " }, issue(), async (_post, g) => {
+    const r = await getArch();
+    assert.equal(r.status, 200);
+    const j = (await r.json()) as ArchJson;
+    assert.deepEqual(j.repos.map((x) => x.repo), [REPO, R2, R3], "own repo is not in the list");
+    assert.deepEqual(j.repos[0], { repo: REPO, architecture: ARCH, error: null });
+    assert.deepEqual(j.repos[1], { repo: R2, architecture: null, error: "GitHub 오류 500" });
+    assert.equal(j.repos[2].architecture, null);
+    assert.match(j.repos[2].error ?? "", /크기 초과/);
+    assert.ok(!g.calls.some((c) => c.path.startsWith("/repos/o/self/")), "own repo's file is never read");
+  }, opts);
+  // ORCH_SELF_REPO unset → SELF_REPO is the own repo; a repo without the file → architecture null, error null.
+  await withRoute({ ...ARCH_ENV, ORCH_REPOS: `${SELF_REPO},${R2}` }, issue(), async (_post, g) => {
+    const j = (await (await getArch()).json()) as ArchJson;
+    assert.deepEqual(j.repos, [{ repo: R2, architecture: null, error: null }]);
+    assert.ok(!g.calls.some((c) => c.path.startsWith(`/repos/${SELF_REPO}/`)));
+  });
+});
+
+test("route GET /api/architecture: no read token → every repo gets an error and GitHub is not called", async () => {
+  await withRoute({ ...ARCH_ENV, ORCH_GITHUB_TOKEN: undefined }, issue(), async (_post, g) => {
+    const j = (await (await getArch()).json()) as ArchJson;
+    assert.deepEqual(j.repos.map((x) => [x.repo, x.architecture, Boolean(x.error)]), [[REPO, null, true], [R2, null, true], [R3, null, true]]);
+    assert.equal(g.calls.length, 0);
+  });
 });

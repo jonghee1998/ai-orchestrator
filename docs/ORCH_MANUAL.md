@@ -152,7 +152,14 @@ PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류,
 
 - 상황판 스위치는 4장의 저장소 변수를 등록된 모든 저장소에 저장하고 저장소마다 엔진을 바로 깨웁니다(한 저장소가 실패해도 나머지는 계속, 실패한 저장소는 따로 표시). 그래서 대기 작업이 20분을 기다리지 않고 이어집니다.
 - 상황판이 꺼져 있거나 고장 나도 엔진은 GitHub 변수만 보고 움직입니다.
-- 서버 설정(Vercel): `ORCH_REPOS`(보여줄 저장소, 쉼표 구분), `ORCH_GITHUB_TOKEN`(해당 저장소 Issues 읽기, Variables 읽기·쓰기, Actions 읽기·쓰기). 토큰이 없으면 읽기만 됩니다.
+- 서버 설정(Vercel): `ORCH_REPOS`(보여줄 저장소, 쉼표 구분), `ORCH_GITHUB_TOKEN`(해당 저장소 Issues 읽기, Variables 읽기·쓰기, Actions 읽기·쓰기, **등록 저장소 Contents 읽기(docs/architecture.json)** — roadmap.json·patchnotes.json도 같은 권한). 토큰이 없으면 읽기만 됩니다.
+
+  | 토큰 권한 | 용도 |
+  | --- | --- |
+  | Issues 읽기·쓰기 | run·계획·아이디어 읽기, 계획 승인, 아이디어 등록 |
+  | Variables 읽기·쓰기 | ON/OFF 스위치 (모든 등록 저장소) |
+  | Actions 읽기·쓰기 | 엔진 깨우기, 사용량 갱신 |
+  | Contents 읽기 | 등록 저장소 `docs/roadmap.json`·`docs/patchnotes.json`·**`docs/architecture.json`**(구조 탭, 상황판 자기 저장소는 읽지 않음, 64KB 초과는 형식 오류) |
 
 ### 사용량은 어떻게 재나요
 - `usage` 워크플로가 매시 17분에 돌아요. Claude Code를 Haiku로 한 번("OK" 한 단어) 실행하면 Claude가 돌려주는 한도 정보(5시간·7일 사용률, 리셋 시각)가 나오고, 그걸 `orch:usage` 라벨 Issue에 저장해요. 값은 **구독 계정 전체** 기준이라 직접 대화로 쓴 양도 포함돼요. 전체 일시정지 중에는 확인을 건너뛰고 마지막 값을 유지해요.
