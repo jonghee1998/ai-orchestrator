@@ -126,6 +126,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
             | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
       - name: Open the plan Issue (owner PAT) or record "nothing to do"
+        id: publish
         if: steps.prep.outputs.skip == 'false'
         run: node "$RUNNER_TEMP/orch/plan-next.mjs" publish
         env:
@@ -133,3 +134,9 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ORCH_AUTO: ${{ vars.ORCH_AUTO }}
           ORCH_DAILY_PLANS: ${{ vars.ORCH_DAILY_PLANS }}
+      - name: Writing failed → wake the watchdog when the 1h cool-down ends (schedules are unreliable)
+        if: steps.publish.outputs.retry_until != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNTIL: ${{ steps.publish.outputs.retry_until }}
+        run: gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/wait.yml/dispatches" -f ref=main -f "inputs[until]=$UNTIL"
