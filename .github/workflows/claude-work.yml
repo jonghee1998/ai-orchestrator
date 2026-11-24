@@ -2,7 +2,7 @@
 #   implement: branch from orch/run-<n>, Claude implements step k, push, open PR
 #   fix:       check out the step PR branch, Claude fixes Codex/CI findings, push, request re-review
 name: claude-work
-run-name: "claude-work #${{ inputs.issue }} ${{ inputs.mode }} step ${{ inputs.step }}"
+run-name: "claude-work #${{ inputs.issue }} ${{ inputs.mode }} step ${{ inputs.step }}${{ inputs.impl == 'codex' && ' (codex)' || '' }}"
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ on:
       issue: { required: true, type: string }
       mode: { required: true, type: choice, options: [implement, fix] }
       step: { required: true, type: string }
+      impl: { required: false, type: string, default: claude }   # codex: Codex develops while Claude is usage-limited
 
 permissions: {}
 
@@ -17,6 +18,10 @@ jobs:
   work:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Codex shares one encrypted login cache with plan-review/usage/plan-next: serialize with them.
+    concurrency:
+      group: ${{ (inputs.impl == 'codex' || inputs.mode == 'fix') && 'orch-usage' || format('work-{0}', github.run_id) }}
+      cancel-in-progress: false
     permissions:
       contents: read
       checks: read
@@ -30,6 +35,7 @@ jobs:
       summary: ${{ steps.commit.outputs.summary }}
       tools: ${{ steps.tools.outputs.tools }}
       model: ${{ steps.prep.outputs.model }}
+      impl: ${{ steps.prep.outputs.impl }}
       limit_until: ${{ steps.limit.outputs.until }}
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +60,7 @@ jobs:
           ISSUE: ${{ inputs.issue }}
           MODE: ${{ inputs.mode }}
           STEP: ${{ inputs.step }}
+          IMPL: ${{ inputs.impl }}
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
@@ -63,21 +70,100 @@ jobs:
       - name: Install dependencies
         if: steps.prep.outputs.skip != 'true'
         run: if [ -f package-lock.json ]; then npm ci; fi
-      - name: Claude
+      # ---- Same step failed review twice: Codex (read-only) diagnoses the root cause first.
+      - name: Restore encrypted Codex login (diagnosis)
+        if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.diagnose == 'true' && steps.prep.outputs.impl != 'codex' && vars.ORCH_CODEX != 'off'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-latest
+          restore-keys: codex-auth-
+      - name: Codex root-cause analysis
+        id: diag
+        if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.diagnose == 'true' && steps.prep.outputs.impl != 'codex' && vars.ORCH_CODEX != 'off'
+        continue-on-error: true
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          [ -f ~/.orch/codex-auth.enc ] || exit 0
+          mkdir -p ~/.codex
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null || { rm -f ~/.codex/auth.json; exit 0; }
+          before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          npm i -g @openai/codex >/dev/null 2>&1
+          codex exec -s read-only --skip-git-repo-check -o "$RUNNER_TEMP/codex-diag.md" \
+            "$(cat "$RUNNER_TEMP/diag-prompt.md")" > "$RUNNER_TEMP/codex-diag.log" 2>&1 || echo "Codex 분석 실패"
+          after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
+          if [ -n "$after" ] && [ "$before" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          rm -rf ~/.codex
+      - name: Save refreshed encrypted login (diagnosis)
+        if: steps.diag.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-diag-${{ github.run_id }}
+      - name: Developer prompt (+ diagnosis)
+        id: final
         if: steps.prep.outputs.skip != 'true'
+        run: node "$RUNNER_TEMP/orch/diag.mjs"
+      - name: Claude
+        if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.impl != 'codex'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.BOT_PAT }}
-          prompt: ${{ steps.prep.outputs.prompt }}
+          prompt: ${{ steps.final.outputs.prompt }}
           allowed_bots: "*"   # dispatched by the orchestrator (github-actions[bot]); workflow_dispatch needs write access anyway
           claude_args: >-
             --max-turns 150
             ${{ steps.prep.outputs.model_args }}
             --allowedTools "Edit,Write,Read,Glob,Grep,LS,Skill,Task,Agent,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*)"
+      # ---- Codex develops (Claude usage-limited). Same prompt, same commit/push checks as Claude.
+      - name: Restore encrypted Codex login
+        if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.impl == 'codex'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-latest
+          restore-keys: codex-auth-
+      - name: Codex
+        id: codex
+        if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.impl == 'codex'
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          [ -f ~/.orch/codex-auth.enc ] || { echo "Codex 로그인 없음"; exit 1; }
+          mkdir -p ~/.codex
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null \
+            || { rm -f ~/.codex/auth.json; echo "Codex 로그인 복호화 실패"; exit 1; }
+          before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          npm i -g @openai/codex >/dev/null 2>&1
+          status=0
+          codex exec --full-auto --skip-git-repo-check -o "$RUNNER_TEMP/codex-last.md" \
+            "$(cat "$RUNNER_TEMP/work-prompt.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || status=$?
+          tail -n 40 "$RUNNER_TEMP/codex.log" || true
+          after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
+          if [ -n "$after" ] && [ "$before" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          exit $status
+      - name: Remove Codex credentials from the runner
+        if: always() && steps.prep.outputs.impl == 'codex'
+        run: rm -rf ~/.codex
+      - name: Save refreshed encrypted login
+        if: always() && steps.codex.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-${{ github.run_id }}
       - name: Detect Claude usage limit (reset time)
         id: limit
-        if: always() && steps.prep.outputs.skip != 'true'
+        if: always() && steps.prep.outputs.skip != 'true' && steps.prep.outputs.impl != 'codex'
         continue-on-error: true
         run: node "$RUNNER_TEMP/orch/limit.mjs" "$RUNNER_TEMP/claude-execution-output.json"
       - name: Summarize tool use (skills, sub-agents, verification commands)
@@ -140,6 +226,7 @@ jobs:
           TOOLS: ${{ needs.work.outputs.tools }}
           MODEL: ${{ needs.work.outputs.model }}
           LIMIT_UNTIL: ${{ needs.work.outputs.limit_until }}
+          IMPL: ${{ needs.work.outputs.impl }}
           READ_TOKEN: ${{ github.token }}   # dispatch wait.yml when waiting for a usage limit
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}

@@ -60,7 +60,7 @@ export function codexPrompt({ repo }) {
     "1. 지금 진행 중인 단계(roadmap.json phases 중 done 이 아닌 첫 단계)와, 그 단계에서 아직 안 끝난 일 목록(완료 근거가 된 PR·파일을 함께).",
     "2. 다음에 할 만한 일 1~3개 후보: 각각 관련 파일·함수·줄 번호, 기존 테스트 파일과 바뀔 기대값, 재사용할 수 있는 기존 코드, 영향 범위, 위험(DB·인증·배포·외부 서비스).",
     "3. 사람이 해야 하는 일(운영 배포, 비밀값·환경변수 설정, 외부 콘솔 작업, 사용자 확인)이 섞여 있으면 따로 표시.",
-    "4. 그 단계의 AI 몫이 모두 끝났다고 보이면 '단계 완료로 보임'과 근거.",
+    "4. 그 단계의 AI 몫이 모두 끝났다고 보이면 단계 통합 검수를 한다: 단계 목표(roadmap.json 의 note, DIAGNOSIS 등 관련 문서의 해당 절)·매뉴얼·실제 코드·테스트가 서로 맞는지 보고, 빠진 것·어긋난 것을 목록으로 쓴다. 빠진 것이 없을 때만 '단계 완료로 보임'과 근거를 쓴다.",
     "추측은 '추측'이라고 쓰고, 파일·줄 번호는 실제로 열어 본 것만 쓴다.",
   ].join("\n\n");
 }
@@ -73,6 +73,7 @@ export function claudePrompt({ repo, facts }) {
     facts?.trim() ? facts.trim().slice(0, 12000) : "(없음 — Codex 를 쓰지 못함. 직접 분석한다)",
     "## 고르는 규칙",
     "- roadmap.json 에서 done 이 아닌 첫 단계를 이어 간다. PM_HANDOFF.md 의 결정(예: 미룬 일)을 따른다.",
+    "- Codex 통합 검수에 빠진 것·어긋난 것이 있으면 단계를 넘기기 전에 그것부터 계획한다.",
     "- 그 단계의 AI 몫이 다 끝났으면: 다음 계획의 첫 스텝에 'docs/roadmap.json 의 그 단계 status 를 done, 다음 단계를 doing 으로' 를 넣고 다음 단계 일을 이어서 계획한다.",
     "- 사람만 할 수 있는 일(운영 배포, 비밀값·환경변수, 외부 콘솔, 사용자 확인)은 계획에 넣지 않는다. 그 일이 끝났다고 가정하고 AI 가 할 수 있는 코드·테스트·문서를 계획한다. 사람 일은 .orch/HUMAN_TODO.md 에 적는다.",
     "- 한 계획은 스텝 2~4개. 서로 관련 없는 작은 일은 한 스텝으로 묶어 스텝 수를 줄인다. 데이터 계층과 화면은 나눈다.",
@@ -140,7 +141,9 @@ async function prepare() {
 async function claude() {
   const read = (f) => { try { return fs.readFileSync(f, "utf8"); } catch { return ""; } };
   const facts = read(path.join(env.RUNNER_TEMP ?? ".", "codex-facts.md"));
-  setOutput("prompt", claudePrompt({ repo: env.GITHUB_REPOSITORY, facts }));
+  const prompt = claudePrompt({ repo: env.GITHUB_REPOSITORY, facts });
+  fs.writeFileSync(path.join(env.RUNNER_TEMP ?? ".", "plan-next-pm.md"), prompt);   // Codex fallback uses the same prompt
+  setOutput("prompt", prompt);
 }
 
 async function publish() {

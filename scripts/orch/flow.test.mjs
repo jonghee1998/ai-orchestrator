@@ -537,7 +537,7 @@ test("stale publish after cancel is a no-op; forged Codex marker is ignored", as
 // ---------------------------------------------------------------- ON/OFF switches
 
 const withSwitches = async (vars, fn) => {
-  const keys = ["ORCH_SONNET", "ORCH_OPUS", "ORCH_CODEX", "ORCH_PAUSED", "ORCH_WINDOW", "ORCH_AUTO"];
+  const keys = ["ORCH_SONNET", "ORCH_OPUS", "ORCH_CODEX", "ORCH_PAUSED", "ORCH_WINDOW", "ORCH_AUTO", "ORCH_CODEX_DEV"];
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   Object.assign(process.env, vars);
   try { await fn(); } finally { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
@@ -667,6 +667,11 @@ test("blocked on a final conflict, low risk: orch:go after the conflict is gone 
 });
 
 test("usage limit: failed work with a reset time waits (no block) and resumes only after the reset", async () => {
+  process.env.ORCH_CODEX_DEV = "off";   // Codex not allowed to develop → wait for Claude
+  try { await usageWaitScenario(); } finally { delete process.env.ORCH_CODEX_DEV; }
+});
+
+async function usageWaitScenario() {
   const issue = db.newIssue(plan(1));
   const n = issue.number;
   await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
@@ -688,7 +693,7 @@ test("usage limit: failed work with a reset time waits (no block) and resumes on
   assert.equal(db.dispatches.length, before + 1, "resumed after the reset");
   assert.deepEqual(db.dispatches.at(-1), { issue: String(n), mode: "implement", step: "1" });
   assert.equal(state(n).held, null);
-});
+}
 
 test("usage limit: failure without a reset time (or a past one) still blocks as before", async () => {
   const issue = db.newIssue(plan(1));
@@ -764,4 +769,47 @@ test("auto mode: idle watchdog asks plan-next; not while a run or an open [plan]
     assert.equal(count(), before, "open [plan] → no dispatch");
     p.state = "closed";
   });
+});
+
+test("Claude usage limit with Codex development ON: Codex takes over the step, Claude reviews it after the limit", async () => {
+  const issue = db.newIssue(plan(2));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  const until = new Date(Date.now() + 3600 * 1000).toISOString();
+  await publish(n, "implement", 1, { WORK_RESULT: "failure", LIMIT_UNTIL: until });
+  assert.equal(state(n).status, "implementing");
+  assert.equal(state(n).held, null, "no wait");
+  assert.equal(state(n).claudeLimitedUntil, until);
+  assert.deepEqual(db.dispatches.at(-1), { issue: String(n), mode: "implement", step: "1", impl: "codex" });
+  assert.ok(db.comments[n].some((c) => /Codex가 이어서 구현/.test(c.body)));
+  // Codex finishes the step
+  db.refs[C.stepBranch(n, 1)] = sha("e");
+  await publish(n, "implement", 1, { IMPL: "codex", LIMIT_UNTIL: "" });
+  assert.equal(state(n).impl, "codex");
+  const pr = state(n).pr;
+  ciPass(sha("e"));
+  // Claude still limited → the Codex review app reviews (night continues)
+  const reviewsBefore = db.reviews.length;
+  await codexSays(pr, sha("e"), "completed", false);
+  assert.equal(db.reviews.length, reviewsBefore, "no Claude review while Claude is limited");
+  assert.equal(state(n).step, 2, "step 1 passed on the Codex review");
+  assert.equal(state(n).impl, null, "implementer resets for the next step");
+  assert.deepEqual(db.dispatches.at(-1), { issue: String(n), mode: "implement", step: "2", impl: "codex" }, "still limited → Codex again");
+  delete process.env.IMPL;
+});
+
+test("Codex-implemented step is reviewed by Claude when Claude is available", async () => {
+  const issue = db.newIssue(plan(1));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  db.refs[C.stepBranch(n, 1)] = sha("f");
+  await publish(n, "implement", 1, { IMPL: "codex", LIMIT_UNTIL: "" });
+  const pr = state(n).pr;
+  ciPass(sha("f"));
+  const before = db.reviews.length;
+  await codexSays(pr, sha("f"), "completed", false);
+  assert.equal(db.reviews.length, before + 1, "Claude review requested");
+  assert.equal(state(n).status, "reviewing");
+  assert.ok(db.comments[n].some((c) => /Codex가 구현한 스텝이라 독립 검수/.test(c.body)));
+  delete process.env.IMPL;
 });

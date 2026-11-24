@@ -141,6 +141,7 @@ export function readSwitches(e = {}) {
     codex: flag(e.ORCH_CODEX, true),
     paused: flag(e.ORCH_PAUSED, false),
     auto: flag(e.ORCH_AUTO, false),
+    codexDev: flag(e.ORCH_CODEX_DEV, true),
     window: String(e.ORCH_WINDOW ?? "").trim(),
   };
 }
@@ -180,6 +181,36 @@ export function resolveModel(pick, sw) {
 }
 
 /** Who reviews a step PR given the switches: codex first, Opus fallback. */
+/**
+ * Who implements/fixes now: Codex takes over while Claude is usage-limited (state.claudeLimitedUntil in the
+ * future), if Codex is ON and allowed to develop (ORCH_CODEX_DEV, default on). Otherwise Claude.
+ */
+export function pickImpl(st, sw, nowMs = Date.now()) {
+  const until = st?.claudeLimitedUntil ? Date.parse(st.claudeLimitedUntil) : NaN;
+  return sw.codex && sw.codexDev && until > nowMs ? "codex" : "claude";
+}
+
+/** Claude is usage-limited right now (per the run state). */
+export const claudeLimited = (st, nowMs = Date.now()) => !!st?.claudeLimitedUntil && Date.parse(st.claudeLimitedUntil) > nowMs;
+
+/** Codex root-cause prompt for a step that failed review twice (read-only; the fixer gets its answer). */
+export function diagnosePrompt(fixPrompt) {
+  return [
+    "너는 독립 분석가다. 코드는 바꾸지 않는다(읽기 전용). 아래는 같은 스텝이 검수에서 두 번 이상 떨어진 뒤 개발자에게 줄 수정 지시다.",
+    "왜 반복해서 떨어지는지 근본 원인을 찾는다: 지적이 가리키는 코드·테스트를 직접 읽고, 지난 수정이 증상만 고쳤는지, 완료 기준과 구현 방향이 어긋났는지, 테스트·환경 문제인지 본다.",
+    "## 출력 (마크다운, 2000자 안팎)",
+    "1. 근본 원인 (파일·줄 근거)  2. 이번 수정에서 꼭 바꿔야 할 것  3. 하지 말아야 할 것(또 실패하는 방향)",
+    "## 수정 지시",
+    fixPrompt,
+  ].join("\n\n");
+}
+
+/** Append the Codex diagnosis (if any) to the developer prompt. */
+export function withDiagnosis(prompt, diag) {
+  const d = String(diag ?? "").trim();
+  return d ? `${prompt}\n\n## 반복 실패 원인 분석 (Codex, 참고)\n같은 스텝이 두 번 떨어져 Codex가 원인을 분석했다. 근거를 직접 확인하고 반영한다.\n\n${d.slice(0, 6000)}` : prompt;
+}
+
 export function reviewRoute(sw, codexUnavailable) {
   if (sw.codex && !codexUnavailable) return "codex";
   if (sw.opus) return "claude";

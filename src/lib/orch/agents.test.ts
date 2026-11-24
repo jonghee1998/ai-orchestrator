@@ -3,7 +3,7 @@ import test from "node:test";
 import { activeAgents, pickModel, resolveModel } from "./agents";
 import type { OrchRun, OrchStatus, RunStep, Switches } from "./model";
 
-const sw = (o: Partial<Switches> = {}): Switches => ({ sonnet: true, opus: true, codex: true, paused: false, auto: false, window: "", ...o });
+const sw = (o: Partial<Switches> = {}): Switches => ({ sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "", ...o });
 const step = (id: number, o: Partial<RunStep> = {}): RunStep => ({ id, title: `스텝 ${id}`, state: "current", checks: [], model: null, task: null, ...o });
 function run(o: Partial<OrchRun> = {}): OrchRun {
   return {

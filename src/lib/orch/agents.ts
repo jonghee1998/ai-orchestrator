@@ -25,7 +25,7 @@ const ESCALATE_AFTER = 2;
 const HEAVY_TEXT_RE = /(migration|schema|\bsql\b|database|\bdb\b|auth|login|session|password|token|oauth|payment|billing|permission|security|deploy|DB|데이터베이스|스키마|인증|로그인|비밀번호|결제|권한|보안|배포|마이그레이션)/i;
 
 /** Engine default when switches could not be read: everything on. */
-const DEFAULT_SWITCHES: Switches = { sonnet: true, opus: true, codex: true, paused: false, auto: false, window: "" };
+const DEFAULT_SWITCHES: Switches = { sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "" };
 
 const isHeavy = (model: string) => /opus/i.test(model);
 
