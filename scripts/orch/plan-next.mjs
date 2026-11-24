@@ -81,7 +81,7 @@ export function claudePrompt({ repo, facts }) {
     "- 계획 JSON 최상위에 \"phase\": \"<단계 id>\" 를 넣는다. .github/·scripts/orch/ 수정은 넣지 않는다.",
     "- 모든 단계가 done 이거나, 남은 일이 사람만 할 수 있는 일뿐이면 계획을 쓰지 않는다.",
     "## 결과 (해당하는 것만 쓴다)",
-    "1. 계획을 쓸 때: `.orch/NEXT_PLAN.md` — 첫 줄은 Issue 제목(`[plan] ` 로 시작), 빈 줄 뒤 본문(한두 문단 설명 + ```json 계획 블록 하나).",
+    "1. 계획을 쓸 때: `.orch/NEXT_PLAN.md` — 첫 줄은 Issue 제목(`[plan] ` 로 시작), 빈 줄 뒤 본문(한두 문단 설명 + ```json 계획 블록 하나. 다른 JSON 예시는 ```text 로 쓴다).",
     "2. 계획을 쓰지 않을 때: `.orch/NEXT_NONE.md` — 이유 한두 줄.",
     "3. 사람 할 일이 있으면: `.orch/HUMAN_TODO.md` — 한 줄에 하나, '- ' 로 시작, 무엇을 어디서(링크) 하는지 쉬운 말로.",
   ].join("\n\n");
@@ -94,8 +94,18 @@ export function parseNextPlan(text) {
   const nl = s.indexOf("\n");
   const title = (nl < 0 ? s : s.slice(0, nl)).trim();
   if (!/^\[plan\] \S/.test(title) || title.length > 120) return { ok: false, error: "제목이 '[plan] …' 형식이 아님" };
-  const body = nl < 0 ? "" : s.slice(nl + 1).trim();
-  const p = C.parsePlan(body);
+  let body = nl < 0 ? "" : s.slice(nl + 1).trim();
+  let p = C.parsePlan(body);
+  if (!p.ok) {
+    // The body may quote other JSON (an API payload, a sample) before the plan. Use the block that is a valid plan and
+    // turn the other ```json fences into ```text so the engine (which reads the first ```json block) finds the plan.
+    const blocks = [...body.matchAll(/```json[^\n]*\n[\s\S]*?```/g)];
+    const hit = blocks.find((m) => C.parsePlan(m[0]).ok);
+    if (hit) {
+      body = body.replace(/```json[^\n]*\n[\s\S]*?```/g, (blk, at) => (at === hit.index ? blk : blk.replace(/^```json[^\n]*/, "```text")));
+      p = C.parsePlan(body);
+    }
+  }
   if (!p.ok) return { ok: false, error: p.error };
   return { ok: true, title, body, plan: p.plan };
 }
