@@ -7,7 +7,7 @@ import { formatKstDate } from "@/lib/time/kst";
 import { BackIcon, ChevronIcon } from "@/components/icons";
 import { Account } from "./Account";
 import { OrchIdeasPanel } from "@/components/orch/IdeasPanel";
-import { OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel, useOrch } from "@/components/orch/OrchPanels";
+import { OrchAgentsNowPanel, OrchDecisionsPanel, OrchPlansPanel, OrchRunsPanel, OrchSwitchesPanel, OrchUsagePanel, useOrch } from "@/components/orch/OrchPanels";
 import { SELF_REPO } from "@/lib/orch/model";
 import { useState } from "react";
 
@@ -18,7 +18,7 @@ export function LiveProjectsScreen({ projectId }: { projectId?: string; taskId?:
 }
 export function LiveAgentsScreen({ agentId }: { agentId?: string }) {
   if (agentId) return <div className="space-y-4"><Link href="/agents" className="inline-flex min-h-11 items-center gap-1 text-accent"><BackIcon />AI 팀</Link><Card><p>AI 상세는 AI 팀 화면으로 통합되었습니다</p></Card><Account /></div>;
-  return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="AI 사용량과 ON/OFF" /><OrchUsagePanel /><OrchSwitchesPanel /><Account /></div>;
+  return <div className="space-y-4"><PageTitle title="AI 팀" subtitle="AI 사용량과 ON/OFF" /><OrchAgentsNowPanel /><OrchUsagePanel /><OrchSwitchesPanel /><Account /></div>;
 }
 export function LiveBriefingScreen() {
   return <div className="space-y-4"><PageTitle title="PM 브리핑" subtitle="결정·승인·사건·다음 단계" /><OrchPlansPanel /><OrchIdeasPanel /><OrchDecisionsPanel /></div>;

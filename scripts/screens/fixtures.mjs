@@ -10,8 +10,9 @@ const OWNER = { login: "example" }; // REPO owner — the engine and the dashboa
 const ACTIONS_BOT = { login: "github-actions[bot]", id: 41898282, type: "Bot" };
 
 // tag: 스텝 제목·할 일 문구를 화면의 다른 문구와 겹치지 않게 만드는 고유 접두어.
-const plan = (goal, steps = 2, tag = "베타") => "```json\n" + JSON.stringify({
+const plan = (goal, steps = 2, tag = "베타", phase = undefined) => "```json\n" + JSON.stringify({
   goal,
+  ...(phase ? { phase } : {}),
   steps: Array.from({ length: steps }, (_, i) => ({ id: i + 1, title: `${tag}공정 ${i + 1}단계 제목`, task: "x", done_when: [`${tag}공정 ${i + 1}단계 확인항목`] })),
 }, null, 2) + "\n```";
 const state = (s) => `<!-- orch-state:v1 ${JSON.stringify({ v: 1, ...s })} -->`;
@@ -115,7 +116,7 @@ function secondRepoFixtures(iso, usage) {
   const mk = (number, title, body) => ({ number, title, body, html_url: `https://github.com/${REPO2}/issues/${number}`, state: "open", user: OWNER });
   const runs = [
     mk(31, "[plan] 둘째저장소 구현 작업", `${plan("둘째저장소 구현 작업", 2, "시그마")}\n${state({ status: "implementing", step: 1, passed: {}, updatedAt: iso(2) })}`),
-    mk(32, "[plan] 둘째저장소 검수 작업", `${plan("둘째저장소 검수 작업", 2, "오메가")}\n${state({ status: "reviewing", step: 2, passed: { 1: true }, updatedAt: iso(4) })}`),
+    mk(32, "[plan] 둘째저장소 검수 작업", `${plan("둘째저장소 검수 작업", 2, "오메가", "P4")}\n${state({ status: "reviewing", step: 2, passed: { 1: true }, updatedAt: iso(4) })}`),
     mk(33, "[plan] 둘째저장소 승인 작업", `${plan("둘째저장소 승인 작업", 1, "람다")}\n${state({ status: "awaiting_merge", step: 1, passed: { 1: true }, finalPr: 77, updatedAt: iso(8) })}`),
   ];
   // 끝난 run #30: orch:done(state=closed) 응답에만 있음. 진행 단계 P2(ref 30)가 이것으로 자동 완료된다.
@@ -125,7 +126,8 @@ function secondRepoFixtures(iso, usage) {
   const usageIssue = mk(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
   const variables = [{ name: "ORCH_CODEX", value: "on" }, { name: "ORCH_PAUSED", value: "off" }];
   // app: 다른 프로젝트 화면 링크 (label 없음 → '화면 열기')
-  // phases 4개: P1 완료 · P2 할 일이지만 ref 30(끝난 run) → 자동 완료 · P3 할 일이지만 ref 31(구현 중) → 자동 진행(굵게) · P4 할 일 → '단계 2/4 완료'
+  // phases 6개: P1 완료 · P2 ref 30(끝난 run) → 자동 완료 · P3 ref 31(구현 중) → 자동 진행(굵게) · P4 는 #32 계획 JSON phase 로 연결
+  // · P5(tasks)·P6 은 item 없는 '예정' · #33 은 단계 미지정 → '단계 2/6 완료'
   const roadmap = {
     version: 1, setup: [{ id: "0.1", title: "둘째로드맵 저장소", status: "done", note: null }], expansion: [], app: { url: "https://example.com/" },
     phases: [
@@ -133,6 +135,8 @@ function secondRepoFixtures(iso, usage) {
       { id: "P2", title: "둘째진행 연결 완료", status: "todo", note: "끝난 작업으로 자동 완료", ref: 30 },
       { id: "P3", title: "둘째진행 연결 구현", status: "todo", note: null, ref: 31 },
       { id: "P4", title: "둘째진행 마무리", status: "todo", note: null },
+      { id: "P5", title: "다섯째 단계", status: "todo", note: null, tasks: [{ title: "다섯째 직접 확인", owner: "me", status: "todo" }, { title: "다섯째 AI 정리", owner: "ai", status: "todo" }] },
+      { id: "P6", title: "여섯째 단계", status: "todo", note: null },
     ],
   };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap)).toString("base64") };

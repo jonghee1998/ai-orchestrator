@@ -54,6 +54,8 @@ export interface OrchRun {
   updatedAt: string | null;
   needsUser: boolean;
   next: string;
+  /** Plan JSON top-level "phase" (roadmap phases[].id), null when unset or malformed. */
+  phase: string | null;
 }
 
 export interface IssueLike {
@@ -79,6 +81,12 @@ type Json = Record<string, unknown>;
 const obj = (v: unknown): Json | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+/** Plan JSON top-level "phase": a string or integer (-> string), 1~10 chars after trim; anything else -> null. */
+export function phaseOf(v: unknown): string | null {
+  const s = typeof v === "number" ? (Number.isInteger(v) ? String(v) : null) : str(v);
+  return s && s.length <= 10 ? s : null;
+}
 
 function parseJson(text: string | undefined): Json | null {
   if (!text) return null;
@@ -148,6 +156,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
     updatedAt: str(st?.updatedAt),
     needsUser,
     next,
+    phase: phaseOf(plan.phase),
   };
 }
 
@@ -289,6 +298,8 @@ export interface PendingPlan {
   steps: number;
   /** Same as scripts/orch/plan-review.mjs planHash of the normalized plan. */
   hash: string;
+  /** Plan JSON top-level "phase" (not part of the normalized plan / hash), null when unset or malformed. */
+  phase: string | null;
   review: {
     round: number;
     verdict: "OK" | "REVISE" | "ERROR";
@@ -429,6 +440,21 @@ export interface RoadmapItem {
   note: string | null;
   /** PR number or file path. */
   ref: number | string | null;
+  /** PM-managed to-dos (phases only; same format everywhere). Empty when unset. */
+  tasks: RoadmapTask[];
+}
+export interface RoadmapTask { title: string; owner: "me" | "ai"; status: "done" | "todo" }
+export const ROADMAP_TASK_TITLE_MAX = 40;
+
+function roadmapTasks(v: unknown): RoadmapTask[] {
+  const out: RoadmapTask[] = [];
+  for (const t of Array.isArray(v) ? v : []) {
+    const o = obj(t);
+    const title = str(o?.title);
+    if (!o || !title || (o.owner !== "me" && o.owner !== "ai") || (o.status !== "done" && o.status !== "todo")) continue;
+    out.push({ title: title.slice(0, ROADMAP_TASK_TITLE_MAX), owner: o.owner, status: o.status });
+  }
+  return out;
 }
 /** Link to the project's own app screen (roadmap.json top-level "app"). label null → shown as '화면 열기'. */
 export interface RoadmapApp { label: string | null; url: string }
@@ -452,6 +478,7 @@ function roadmapItem(v: unknown): RoadmapItem | null {
     status: status && ROADMAP_STATUSES.has(status) ? (status as RoadmapStatus) : "todo",
     note: str(o.note)?.slice(0, ROADMAP_NOTE_MAX) ?? null,
     ref,
+    tasks: roadmapTasks(o.tasks),
   };
 }
 

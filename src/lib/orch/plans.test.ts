@@ -22,7 +22,7 @@ test("plans: a valid owner plan is pending, with its latest bot review", () => {
   const p = parsePendingPlan(REPO, issue(), [comment(1, H, "OK")])!;
   assert.deepEqual(
     { ...p, review: p.review },
-    { repo: REPO, number: 7, url: `https://github.com/${REPO}/issues/7`, goal: "목표", steps: 2, hash: H,
+    { repo: REPO, number: 7, url: `https://github.com/${REPO}/issues/7`, goal: "목표", steps: 2, hash: H, phase: null,
       review: { round: 1, verdict: "OK", reviewer: "codex", at: "2026-11-21T00:00:00Z", hash: H, stale: false } },
   );
   assert.match(p.hash, /^[0-9a-f]{16}$/);
@@ -63,6 +63,18 @@ test("plans: forged markers by people are ignored; the last round wins; changed 
 
 type Engine = { parsePlan: (b: string) => { ok: boolean; plan?: unknown; error?: string }; planHash?: (p: unknown) => string };
 const load = (rel: string) => (new Function("p", "return import(p)") as (p: string) => Promise<Engine>)(pathToFileURL(path.resolve(rel)).href);
+
+test("plans: top-level phase is read from the raw JSON and never changes the hash", () => {
+  const withPhase = (phase: unknown) => parsePendingPlan(REPO, issue({ body: body({ ...plan, phase }) }), [])!;
+  const base = parsePendingPlan(REPO, issue(), [])!;
+  assert.equal(base.phase, null);
+  assert.equal(withPhase("6").phase, "6");
+  assert.equal(withPhase(6).phase, "6");
+  assert.equal(withPhase("12345678901").phase, null);
+  assert.equal(withPhase({}).phase, null);
+  for (const v of ["6", 6, "12345678901", {}]) assert.equal(withPhase(v).hash, base.hash);
+  assert.equal(planHash((parsePlan(body({ ...plan, phase: "6" })) as { plan: Parameters<typeof planHash>[0] }).plan), base.hash);
+});
 
 test("plans: validation, normalization and hash match the engine (core.mjs parsePlan + plan-review.mjs planHash)", async () => {
   const core = await load("scripts/orch/core.mjs");

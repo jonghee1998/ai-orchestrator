@@ -12,7 +12,7 @@ import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, P
 import { FLAG_KEYS, approveMessage, latestUsage, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { activeAgents, type AgentId } from "@/lib/orch/agents";
 import { readCollapsed, toggleCollapsed, writeCollapsed } from "@/lib/orch/collapse";
-import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
+import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, phaseBoard, stageBoard, type BoardColumn, type BoardItem, type DonePhase, type PhaseColumn, type PhaseGroup } from "@/lib/orch/lifecycle";
 
 type OrchData = { generatedAt: string; canWrite: boolean; repos: RepoView[] };
 
@@ -147,37 +147,6 @@ function RoadmapList({ title, items, testid }: { title: string; items: RoadmapIt
   );
 }
 
-/**
- * 카드 본문 맨 위 '진행 단계 a/b' + 얇은 막대(RoadmapLine 과 같은 모양) + 단계 목록.
- * 완료가 4개 이상이면 완료 항목은 '완료 n개' 한 줄로 접힌다(눌러서 펼침).
- */
-function PhaseBlock({ phases, repo }: { phases: RoadmapItem[]; repo: string }) {
-  const c = roadmapCount(phases);
-  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
-  const done = phases.filter((i) => i.status === "done");
-  const fold = done.length >= 4;
-  const rest = fold ? phases.filter((i) => i.status !== "done") : phases;
-  return (
-    <section aria-label="진행 단계" className="mt-3" data-testid="orch-phases">
-      <p className="flex items-center gap-2.5 text-[13px] text-text-muted">
-        <span className="shrink-0 tabular-nums" data-testid="orch-phases-title"><b className="font-semibold text-text">진행 단계</b> {c.text}</span>{" "}
-        <span className="block h-1 flex-1 overflow-hidden rounded-sm bg-border" role="progressbar" aria-label="완료한 진행 단계" aria-valuemin={0} aria-valuemax={c.total} aria-valuenow={c.done}>
-          <span className="block h-full bg-text" style={{ width: `${pct}%` }} />
-        </span>
-      </p>
-      {fold && (
-        <details className="text-xs" data-testid="orch-phases-done">
-          <summary className={`${SUMMARY} text-text-muted`}>완료 <span className="tabular-nums">{done.length}개</span><ChevronIcon className="h-3.5 w-3.5" /></summary>
-          <ul className="space-y-1 pb-1">{done.map((i) => <RoadmapRow key={i.id} i={i} repo={repo} />)}</ul>
-        </details>
-      )}
-      <ul className="space-y-1 py-1 text-xs">
-        {rest.map((i) => <RoadmapRow key={i.id} i={i} repo={repo} />)}
-      </ul>
-    </section>
-  );
-}
-
 /** '인프라 a/b ─── 확장 c/d' 한 줄 (막대 = 인프라 완료 비율). 펼치면 두 체크리스트. */
 function RoadmapLine({ setup, expansion }: { setup: RoadmapItem[]; expansion: RoadmapItem[] }) {
   const s = roadmapCount(setup);
@@ -291,11 +260,75 @@ function StageProcess({ c }: { c: BoardColumn }) {
   );
 }
 
-/** One stage row ('번호 단계 · #번호 상태 · 개수'), collapsed by default (card height limit); opening it shows desc, process, items. */
-function StageRow({ c, repo }: { c: BoardColumn; repo: string }) {
+const issueLink = (repo: string, n: number) => (
+  <a href={`https://github.com/${repo}/issues/${n}`} target="_blank" rel="noreferrer"
+    className="-my-3 inline-flex min-h-11 items-center tabular-nums text-accent">#{n}</a>
+);
+
+/** 단계 줄 안 phase 묶음: '{id} {title}' 머리 · 세부 할 일(항목 줄) · tasks(나/AI 칩). 묶음 사이 얇은 구분. */
+function PhaseGroupView({ g, colN, repo }: { g: PhaseGroup; colN: number; repo: string }) {
+  const p = g.phase;
+  const upcoming = p !== null && g.items.length === 0;
+  return (
+    <li className="border-t border-border py-2 first:border-t-0" data-testid={`orch-phase-group-${colN}-${p ? p.id : "none"}`} data-status={p?.status}>
+      <p className={`flex flex-wrap items-baseline gap-x-1.5 text-[13px] ${p?.status === "doing" ? "font-semibold" : "font-medium"}`}>
+        {p ? <><span className="font-normal tabular-nums text-text-muted">{p.id}</span><span className="min-w-0 break-words">{p.title}</span></>
+          : <span className="text-text-muted">단계 미지정</span>}
+        {upcoming && <span className="text-xs font-normal text-text-muted">예정</span>}
+      </p>
+      {g.items.length > 0 && (
+        <ul className="mt-0.5 space-y-0.5 text-xs">
+          {g.items.map((item) => (
+            <li key={item.key} className="flex min-w-0 flex-wrap items-baseline gap-x-1.5" data-testid={`orch-phase-item-${itemNumber(item)}`}>
+              <span className="shrink-0 text-text-muted">{item.label}</span>
+              {item.kind === "idea" ? <span className="tabular-nums">#{itemNumber(item)}</span> : issueLink(repo, itemNumber(item))}
+              <span className="min-w-0 break-words">{item.title}</span>
+              {item.blocked && <span className="inline-flex items-center gap-1 text-danger"><StopIcon className="h-3 w-3" />멈춤</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {g.tasks.length > 0 && (
+        <ul className="mt-0.5 space-y-0.5 text-xs" data-testid="orch-phase-tasks">
+          {g.tasks.map((t, i) => (
+            <li key={i} className="flex min-w-0 items-baseline gap-1.5">
+              <span className={`shrink-0 rounded-full px-1.5 py-px text-[11px] font-medium ${t.owner === "me" ? "bg-warn/10 text-warn" : "bg-bg text-text-muted"}`}>{t.owner === "me" ? "나" : "AI"}</span>
+              <span className="min-w-0 break-words">{t.title}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/** 통합 줄 아래 '완료' 줄(단계 번호 없음, 기본 접힘): 끝난 phase '{id} {title}' + 끝난 run 번호 링크. */
+function DoneRow({ done, repo }: { done: DonePhase[]; repo: string }) {
+  return (
+    <details className="group border-t border-border" data-testid="orch-stage-done">
+      <summary className="flex min-h-11 cursor-pointer items-baseline gap-2 py-[13px] text-[15px]">
+        <b className="shrink-0 font-bold">완료</b>{" "}
+        <span className="ml-auto shrink-0 font-bold tabular-nums"><span className="sr-only"> · </span>{done.length}</span>
+        <ChevronIcon className="h-4 w-4 self-center" />
+      </summary>
+      <ul className="ml-[22px] pb-3 text-[13px]">
+        {done.map(({ phase, runs }) => (
+          <li key={phase.id} className="flex flex-wrap items-baseline gap-x-1.5 border-t border-border py-1.5 first:border-t-0" data-testid={`orch-done-phase-${phase.id}`}>
+            <span className="tabular-nums text-text-muted">{phase.id}</span>
+            <span className="min-w-0 break-words">{phase.title}</span>
+            {runs.map((n) => <span key={n} className="text-xs">{issueLink(repo, n)}</span>)}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** One stage row ('번호 단계 · #번호 상태 · 개수'), collapsed by default (card height limit); opening it shows desc, process, items (phase groups when `pc`). */
+function StageRow({ c, repo, pc }: { c: BoardColumn; repo: string; pc?: PhaseColumn }) {
   const needs = boardNeedsUser(c);
-  const empty = c.items.length === 0;
-  const note = empty ? "지금 없음" : `${c.items.map((i) => `#${itemNumber(i)}`).join(" · ")} ${c.items[0].label}`;
+  const empty = c.items.length === 0 && !(pc && pc.groups.length > 0);
+  const note = c.items.length === 0 ? (empty ? "지금 없음" : "예정 단계") : `${c.items.map((i) => `#${itemNumber(i)}`).join(" · ")} ${c.items[0].label}`;
   return (
     <details className="group border-t border-border" data-testid={`orch-stage-${c.n}`}>
       <summary className="flex min-h-11 cursor-pointer items-baseline gap-2 py-[13px] text-[15px]">
@@ -310,14 +343,18 @@ function StageRow({ c, repo }: { c: BoardColumn; repo: string }) {
         <p className="ml-[22px] text-xs text-text-muted">{LIFECYCLE[c.n - 1].desc}</p>
         <StageProcess c={c} />
         {empty && <p className="ml-[22px] mt-2 text-xs text-text-muted">이 단계에서 남은 일 없음</p>}
-        {c.items.map((item) => <ItemCard key={item.key} item={item} repo={repo} />)}
+        {pc ? (
+          <ul className="ml-[22px] mt-2" data-testid={`orch-phase-groups-${c.n}`}>
+            {pc.groups.map((g) => <PhaseGroupView key={g.phase?.id ?? "none"} g={g} colN={c.n} repo={repo} />)}
+          </ul>
+        ) : c.items.map((item) => <ItemCard key={item.key} item={item} repo={repo} />)}
       </div>
     </details>
   );
 }
 
 /** Stage cell: big '남은 과정' (largest among its items) + small '/세부 개수'; no items → 0 (nothing left there). 0 is gray. */
-function StageCell({ c }: { c: BoardColumn }) {
+function StageCell({ c, phaseCount }: { c: BoardColumn; phaseCount?: number }) {
   const n = columnRemaining(c);
   return (
     <div className="rounded-xl bg-bg px-2 py-2.5" data-testid={`orch-cell-${c.n}`}>
@@ -325,6 +362,7 @@ function StageCell({ c }: { c: BoardColumn }) {
       <b className={`text-xl font-bold tabular-nums ${n ? "text-text" : "text-text-faint"}`}>
         {n ?? 0}<small className="ml-0.5 text-[13px] font-medium text-text-faint">/{LIFECYCLE[c.n - 1].sub.length}</small>
       </b>
+      {phaseCount ? <span className="block text-[11px] tabular-nums text-text-muted" data-testid={`orch-cell-phases-${c.n}`}>{phaseCount}단계</span> : null}
     </div>
   );
 }
@@ -348,6 +386,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
   // 진행 단계: roadmap.json 'phases' + 연결된 run 상태로 자동 완료/진행 (없으면 화면은 그대로)
   const phases = phaseStatus(v.roadmap?.phases ?? [], v.runs);
   const phaseCount = roadmapCount(phases);
+  const pb = phases.length > 0 ? phaseBoard(board, phases, v.runs) : null;
   const roadmapNote = v.roadmapError ? `로드맵 읽기 실패 · ${v.roadmapError}` : !v.roadmap ? "로드맵 없음(docs/roadmap.json)" : null;
   return (
     <Card>
@@ -381,13 +420,12 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
           </div>
         </div>
         <div id={bodyId} hidden={!open} data-testid="orch-project-body">
-        {phases.length > 0 && <PhaseBlock phases={phases} repo={v.repo} />}
         <p className="mt-3 text-[13px] tabular-nums text-text-muted" data-testid="orch-remaining">
           {left === null ? "개발 남은 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
           {todo.length > 0 && <> · 직접 할 일 <b className="font-semibold text-text">{todo.length}건</b></>}
         </p>
         <div className="mt-2 grid grid-cols-3 gap-1.5">
-          {flow.map((c) => <StageCell key={c.n} c={c} />)}
+          {flow.map((c) => <StageCell key={c.n} c={c} phaseCount={pb?.columns.find((x) => x.n === c.n)?.groups.filter((g) => g.phase).length} />)}
         </div>
         {todo.length > 0 && (
           <div className="mt-3 rounded-xl bg-warn/10 px-3 py-2" data-testid="orch-todo">
@@ -408,7 +446,8 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
           {v.runsError && <p className="pb-1 text-xs text-danger">작업 불러오기 실패 · {v.runsError}</p>}
           {v.plansError && <p className="pb-1 text-xs text-danger">계획 불러오기 실패 · {v.plansError}</p>}
           {v.ideasError && <p className="pb-1 text-xs text-danger">아이디어 불러오기 실패 · {v.ideasError}</p>}
-          {flow.map((c) => <StageRow key={c.n} c={c} repo={v.repo} />)}
+          {flow.map((c) => <StageRow key={c.n} c={c} repo={v.repo} pc={pb?.columns.find((x) => x.n === c.n)} />)}
+          {pb && <DoneRow done={pb.done} repo={v.repo} />}
         </section>
         <section aria-label="추가 검토" className="mt-4" data-testid="orch-review">
           <p className="pb-1 text-xs font-semibold text-text-muted">추가 검토 · 개발 여부를 정하기 전 아이디어 <span className="tabular-nums">{review.items.length}건</span></p>
@@ -423,7 +462,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
 /** 프로젝트 탭: 프로젝트마다 남은 할 일 · 3칸(계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 3개 · 추가 검토(아이디어) 줄 (모두 접고 펼 수 있음). */
 const AGENT_NAME: Record<AgentId, string> = { sonnet: "Sonnet", opus: "Opus", codex: "Codex", user: "사용자" };
 
-/** 홈 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
+/** AI 팀 탭 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
 function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
   const rows = activeAgents(repos.flatMap((v) => v.runs), Object.fromEntries(repos.map((v) => [v.repo, v.switches])));
   return (
@@ -451,6 +490,12 @@ function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
       </ul>
     </Card>
   );
+}
+
+export function OrchAgentsNowPanel() {
+  const { state } = useOrch();
+  if (state.kind !== "ok") return <section aria-label="지금 일하는 AI" className="space-y-2"><h2 className={SECTION_TITLE}>지금 일하는 AI</h2><Card><StateNote kind={state.kind} /></Card></section>;
+  return <ActiveAgentsCard repos={state.data.repos} />;
 }
 
 export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
@@ -494,7 +539,6 @@ export function OrchRunsPanel({ pmChatUrl }: { pmChatUrl?: string } = {}) {
       <section aria-label="자동 진행 작업" className="space-y-3" data-testid="orch-runs">
         {failed && <p role="status" className="px-1 text-xs text-danger">새로고침 실패 · 잠시 후 다시</p>}
         {state.kind !== "ok" ? <Card><StateNote kind={state.kind} /></Card> : <>
-          <ActiveAgentsCard repos={state.data.repos} />
           {state.data.repos.map((v) => <ProjectCard key={v.repo} v={v} open={!collapsed.includes(v.repo)} onToggle={() => toggleProject(v.repo)} />)}
         </>}
       </section>

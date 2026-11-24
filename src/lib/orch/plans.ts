@@ -3,7 +3,7 @@
 // hash = scripts/orch/plan-review.mjs planHash, review marker = plan-review.mjs previousReviews.
 // plans.test.ts checks both against the .mjs originals; change them together.
 import { createHash } from "node:crypto";
-import type { PendingPlan } from "./model";
+import { phaseOf, type PendingPlan } from "./model";
 
 export const MAX_STEPS = 10;
 export const DEFAULT_MAX_RETRIES = 3;
@@ -80,6 +80,14 @@ export function parsePlan(body: string | null | undefined): PlanResult {
   return validatePlan(raw);
 }
 
+/** Top-level "phase" of the raw (un-normalized) plan JSON; the engine ignores it, so it stays out of Plan and the hash. */
+function rawPhase(body: string | null | undefined): unknown {
+  try {
+    const raw = JSON.parse(PLAN_RE.exec(body ?? "")?.[1] ?? "");
+    return raw && typeof raw === "object" ? (raw as { phase?: unknown }).phase : undefined;
+  } catch { return undefined; }
+}
+
 /** Same as plan-review.mjs planHash. */
 export const planHash = (plan: Plan) => createHash("sha256").update(JSON.stringify(plan)).digest("hex").slice(0, 16);
 
@@ -146,6 +154,7 @@ export function parsePendingPlan(repo: string, issue: PlanIssue, comments: PlanC
     goal: parsed.plan.goal,
     steps: parsed.plan.steps.length,
     hash,
+    phase: phaseOf(rawPhase(issue.body)),
     review: r ? { ...r, stale: r.hash !== hash } : null,
   };
 }
