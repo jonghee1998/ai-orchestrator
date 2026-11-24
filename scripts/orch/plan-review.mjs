@@ -78,7 +78,7 @@ export function reviewPrompt({ plan, round, previous, reviewer }) {
     "너는 이 저장소의 계획 감사자다. PM(Claude)이 쓴 오케스트레이터 계획을, 구현에 들어가기 전에 감사한다. 저장소 코드는 바꾸지 않는다 (결과 파일 외에는 아무것도 쓰지 않는다).",
     `라운드 ${round}/${MAX_ROUNDS}.`,
     "## 계획 (JSON)",
-    "```json\n" + JSON.stringify(plan, null, 2) + "\n```",
+    "```json\n" + JSON.stringify(plan, (_k, v) => (v === null ? undefined : v), 2) + "\n```",
     previous ? `## 이전 라운드 지적 (PM이 반영했는지 확인)\n${previous.findings.map((f, i) => `${i + 1}. [${f.severity}] ${f.step ? `Step ${f.step}: ` : ""}${f.body}`).join("\n") || "(없음)"}` : "",
     "## 감사 기준",
     "- 저장소 코드(`CLAUDE.md`, `docs/ORCH_MANUAL.md`, 관련 소스)를 직접 읽고 계획이 실제 코드와 맞는지 본다. 없는 파일·함수를 가정하면 지적한다.",
