@@ -77,7 +77,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 
 - **이미 돌고 있는 작업은 끝까지 마칩니다.** 스위치는 새로 시작하는 일만 막습니다.
 - 꺼서 멈춘 작업은 Issue에 "⏸️ 대기"로 한 번 기록되고, 시간 초과로 중단되지 않습니다.
-- 다시 켜면 **최대 20분 안에**(순찰 주기) 자동으로 이어집니다. 바로 이어가려면 Actions → `orchestrator` → **Run workflow**를 누르면 됩니다.
+- 다시 켜면 다음 순찰(매시 7·27·47분) 때 자동으로 이어집니다. GitHub가 정기 실행을 몇 시간씩 미루거나 건너뛸 때가 있으니, 바로 이어가려면 Actions → `orchestrator` → **Run workflow**를 누르면 됩니다.
 - 한계: Codex 앱이 PR을 보고 스스로 리뷰하는 것은 GitHub 밖 설정이라 막을 수 없습니다. 꺼져 있을 때는 그 결과를 판정에 쓰지 않을 뿐입니다. 완전히 막으려면 Codex 설정에서 이 저장소의 Code review를 끄세요.
 
 ## 5. 승인 — 자동 머지와 확인 필요
@@ -98,7 +98,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 | --- | --- |
 | 이어가기 | 원인을 해결한 뒤 계획 Issue에 `orch:go` 라벨 |
 | 취소 | `orch:cancel` 라벨 |
-| 위험 변경 머지 | 최종 PR의 "주의할 점"을 읽고 Merge |
+| 위험 변경 머지 | 최종 PR의 "주의할 점"을 읽고 Merge. 머지하거나 닫으면 엔진이 바로 run을 완료·취소 처리합니다(순찰을 기다리지 않음) |
 
 PM(Claude)이 1시간마다 점검합니다. 일시적인 문제(Actions 오류, 사용량 한도 등)는 스스로 재개하고(같은 run에 최대 2회), 사람 판단이 필요하면 "무슨 일인지 / 선택지 / 추천"을 Issue에 남기고 폰으로 알립니다.
 
