@@ -432,7 +432,7 @@ export interface RoadmapItem {
 }
 /** Link to the project's own app screen (roadmap.json top-level "app"). label null → shown as '화면 열기'. */
 export interface RoadmapApp { label: string | null; url: string }
-export interface Roadmap { version: number; setup: RoadmapItem[]; expansion: RoadmapItem[]; app: RoadmapApp | null }
+export interface Roadmap { version: number; setup: RoadmapItem[]; expansion: RoadmapItem[]; phases: RoadmapItem[]; app: RoadmapApp | null }
 
 export const ROADMAP_TITLE_MAX = 24;
 export const ROADMAP_NOTE_MAX = 80;
@@ -471,7 +471,7 @@ export function parseRoadmap(text: string | null | undefined): Roadmap | null {
   if (!j) return null;
   const list = (v: unknown) => (Array.isArray(v) ? v : []).map(roadmapItem).filter((i): i is RoadmapItem => i !== null);
   const version = num(j.version);
-  return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, setup: list(j.setup), expansion: list(j.expansion), app: roadmapApp(j.app) };
+  return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, setup: list(j.setup), expansion: list(j.expansion), phases: list(j.phases), app: roadmapApp(j.app) };
 }
 
 /**
@@ -494,6 +494,22 @@ export function parsePatchNotes(text: string | null | undefined): PatchNote[] | 
   if (!ok.length) return null;
   const key = (v: string) => v.split(".").map((n) => n.padStart(6, "0")).join(".");
   return ok.sort((a, b) => key(b.version).localeCompare(key(a.version)));
+}
+
+/**
+ * Phase status derived from linked runs. An item whose ref is a positive integer and that matches an OrchRun number
+ * takes the run's state: done → 'done'; implementing/reviewing/fixing/finalizing/awaiting_merge/waiting/blocked → 'doing';
+ * cancelled keeps the roadmap value. With no matching run (an old run pushed out of the recent-20 list, or a plan Issue
+ * that is not a run yet) the roadmap.json value is used as is — so the PM also sets finished phases to 'done' in roadmap.json.
+ * Does not mutate the input.
+ */
+export function phaseStatus(items: RoadmapItem[], runs: OrchRun[]): RoadmapItem[] {
+  return items.map((i) => {
+    if (typeof i.ref !== "number" || !Number.isInteger(i.ref) || i.ref <= 0) return { ...i };
+    const run = runs.find((r) => r.number === i.ref);
+    if (!run || run.status === "cancelled") return { ...i };
+    return { ...i, status: run.status === "done" ? "done" : "doing" };
+  });
 }
 
 /** Checklist progress. 'na' items are left out of the total; text = '완료/전체'. */
