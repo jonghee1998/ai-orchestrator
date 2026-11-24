@@ -312,6 +312,56 @@ try {
       }
       if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
 
+      // 진행 단계(roadmap.json phases): orch-second 는 P1 완료 + P2(ref 30, 끝난 run) 자동 완료 → '단계 2/4 완료', P3(ref 31, 구현 중) 자동 진행(굵게).
+      // orch-screens 는 phases 가 없으므로 블록도 머리 문구도 없음(위 머리 요약 '남은 할 일 46과정 · 확인 필요 1' 그대로).
+      {
+        const flat2 = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
+        const head2 = await flat2(second.getByTestId("orch-project-summary"));
+        if (!head2.startsWith("단계 2/4 완료 · 남은 할 일")) problems.push(`[projects] orch-second 카드 머리가 '단계 2/4 완료 · 남은 할 일 …' 이 아님 (${head2})`);
+        const ph = second.getByTestId("orch-phases");
+        if ((await ph.count()) !== 1) problems.push(`[projects] orch-second 카드에 '진행 단계' 블록이 1개가 아님 (${await ph.count()})`);
+        else {
+          if (!(await ph.isVisible())) problems.push("[projects] orch-second '진행 단계' 블록이 보이지 않음");
+          const first = await second.getByTestId("orch-project-body").evaluate((el) => el.firstElementChild?.getAttribute("data-testid"));
+          if (first !== "orch-phases") problems.push(`[projects] '진행 단계' 블록이 카드 본문 맨 위가 아님 (${first})`);
+          const title = await flat2(ph.getByTestId("orch-phases-title"));
+          if (title !== "진행 단계 2/4") problems.push(`[projects] 진행 단계 제목이 '진행 단계 2/4' 가 아님 (${title})`);
+          const bar = ph.getByRole("progressbar");
+          if ((await bar.count()) !== 1 || (await bar.getAttribute("aria-valuenow")) !== "2" || (await bar.getAttribute("aria-valuemax")) !== "4") problems.push("[projects] 진행 단계 막대(progressbar 2/4)가 없음");
+          const items = ph.locator("li");
+          const states = await items.evaluateAll((els) => els.map((e) => `${/P\d/.exec(e.textContent ?? "")?.[0]}:${e.getAttribute("data-status")}`));
+          if (states.join() !== "P1:done,P2:done,P3:doing,P4:todo") problems.push(`[projects] 진행 단계 상태가 'P1 완료·P2 자동 완료·P3 자동 진행·P4 할 일' 이 아님 (${states.join()})`);
+          const p3 = items.nth(2).locator(":scope > p");
+          if (!/font-semibold/.test((await p3.getAttribute("class")) ?? "")) problems.push("[projects] 진행 중 단계 P3 가 굵게 표시되지 않음");
+          if (/font-semibold/.test((await items.nth(3).locator(":scope > p").getAttribute("class")) ?? "")) problems.push("[projects] 할 일 단계 P4 가 굵게 표시됨");
+          for (const n of [30, 31]) {
+            const a = ph.locator(`a[href="https://github.com/${REPO2}/issues/${n}"]`);
+            if ((await a.count()) !== 1) { problems.push(`[projects] 진행 단계에 '#${n}' 링크(${REPO2} Issue)가 없음`); continue; }
+            if (((await a.textContent()) ?? "").trim() !== `#${n}`) problems.push(`[projects] 진행 단계 링크 글자가 '#${n}' 이 아님`);
+            if ((await a.getAttribute("target")) !== "_blank" || !/noreferrer/.test((await a.getAttribute("rel")) ?? "")) problems.push(`[projects] 진행 단계 '#${n}' 링크가 새 탭이 아님`);
+            const box = await a.boundingBox();
+            if (!box || box.height < 44) problems.push(`[projects] 진행 단계 '#${n}' 링크 터치 높이 ${box?.height}px < 44px`);
+          }
+          if ((await ph.locator("a").count()) !== 2) problems.push(`[projects] 진행 단계 링크가 ref 있는 2개가 아님 (${await ph.locator("a").count()})`);
+          if (await ph.getByTestId("orch-phases-done").count()) problems.push("[projects] 완료 2개인데 '완료 n개' 로 접혀 있음 (4개 이상일 때만 접음)");
+        }
+        if (await card.getByTestId("orch-phases").count()) problems.push("[projects] phases 가 없는 orch-screens 카드에 '진행 단계' 블록이 있음");
+        if ((await flat2(card.getByTestId("orch-project-summary"))).includes("단계 ")) problems.push("[projects] phases 가 없는 orch-screens 카드 머리에 '단계' 문구가 있음");
+        for (const w of WIDTHS) {
+          await page.setViewportSize({ width: w, height: 800 });
+          await page.waitForTimeout(150);
+          if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[projects-phases] ${w}x800 에서 가로 넘침`);
+          const over = await second.getByTestId("orch-project-summary").evaluate((el) => el.scrollWidth > el.clientWidth);
+          if (over) problems.push(`[projects-phases] ${w}px 에서 orch-second 카드 머리 요약 줄이 넘침`);
+        }
+        await second.scrollIntoViewIfNeeded();
+        await page.setViewportSize({ width: 360, height: 800 });
+        const file = path.join(OUT, "projects-phases-360.png");
+        await second.screenshot({ path: file });
+        shots.push(path.relative(ROOT, file));
+        await page.setViewportSize({ width: 390, height: 844 });
+      }
+
       // 카드 접기/펼치기: 머리 버튼(aria-expanded·aria-controls), 기본 펼침, 접어도 머리 줄(이름·남은 할 일·확인 필요)은 보임, 새로고침 뒤 유지
       const toggle = (c) => c.getByTestId("orch-project-toggle");
       const body = (c) => c.getByTestId("orch-project-body");

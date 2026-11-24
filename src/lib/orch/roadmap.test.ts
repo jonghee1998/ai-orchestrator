@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
-import { ROADMAP_APP_LABEL_MAX, ROADMAP_NOTE_MAX, ROADMAP_TITLE_MAX, SELF_REPO, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, roadmapCount, type RoadmapItem } from "./model";
+import { ROADMAP_APP_LABEL_MAX, ROADMAP_NOTE_MAX, ROADMAP_TITLE_MAX, SELF_REPO, phaseStatus, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, roadmapCount, type OrchRun, type OrchStatus, type RoadmapItem } from "./model";
 import { readRepo } from "./github";
 
 const REPO = "o/r";
@@ -24,8 +24,8 @@ test("parseRoadmap: valid file → items with null for missing note/ref", () => 
 
 test("parseRoadmap: not JSON / not an object → null; missing lists → []", () => {
   for (const t of ["", "{", "not json", "[1,2]", "null", "3", null, undefined]) assert.equal(parseRoadmap(t), null, String(t));
-  assert.deepEqual(parseRoadmap("{}"), { version: 1, setup: [], expansion: [], app: null });
-  assert.deepEqual(parseRoadmap(JSON.stringify({ version: "x", setup: "no", expansion: {} })), { version: 1, setup: [], expansion: [], app: null });
+  assert.deepEqual(parseRoadmap("{}"), { version: 1, setup: [], expansion: [], phases: [], app: null });
+  assert.deepEqual(parseRoadmap(JSON.stringify({ version: "x", setup: "no", expansion: {} })), { version: 1, setup: [], expansion: [], phases: [], app: null });
 });
 
 test("parseRoadmap app: https URL only, label cut to 12, missing/odd → null", () => {
@@ -138,7 +138,7 @@ test("readRepo: roadmap read from contents API (base64), deployPending counts me
   const commits = [{ parents: [{}, {}] }, { parents: [{}] }, { parents: [{}, {}] }, { parents: [{}, {}, {}] }, {}, null];
   const g = fake({ compare: { status: 200, body: { commits } }, vars: [{ name: "ORCH_DEPLOY_EVERY", value: "7" }, { name: "ORCH_PAUSED", value: "on" }] });
   const v = await readRepo(REPO, ENV, g.f);
-  assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null }], expansion: [], app: null });
+  assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null }], expansion: [], phases: [], app: null });
   assert.equal(v.roadmapError, null);
   assert.equal(v.deployPending, 3);
   assert.equal(v.deployEvery, 7);
@@ -201,4 +201,34 @@ test("readRepo: variables unreadable → deployEvery 10; compare error → deplo
   assert.equal(v.deployEvery, 10);
   assert.equal(v.deployPending, null);
   assert.ok(v.roadmap);
+});
+
+test("parseRoadmap phases: normal, missing, malformed skipped, ref number/string", () => {
+  const r = parseRoadmap(JSON.stringify({ phases: [
+    { id: "1", title: "기획", status: "done", ref: 2 },
+    { id: "2", title: "문서", ref: "docs/a.md" },
+    { id: "3" }, "x", null,
+  ] }))!;
+  assert.deepEqual(r.phases, [
+    { id: "1", title: "기획", status: "done", note: null, ref: 2 },
+    { id: "2", title: "문서", status: "todo", note: null, ref: "docs/a.md" },
+  ]);
+  assert.deepEqual(parseRoadmap("{}")!.phases, []);
+  assert.deepEqual(parseRoadmap(JSON.stringify({ phases: "no" }))!.phases, []);
+  assert.equal(roadmapCount(r.phases).text, "1/2");
+});
+
+test("phaseStatus: run status overrides, no run keeps value, cancelled keeps, input untouched", () => {
+  const it = (id: string, status: RoadmapItem["status"], ref: number | string | null): RoadmapItem => ({ id, title: id, status, note: null, ref });
+  const run = (number: number, status: OrchStatus) => ({ number, status }) as unknown as OrchRun;
+  const doing: OrchStatus[] = ["implementing", "reviewing", "fixing", "finalizing", "awaiting_merge", "waiting", "blocked"];
+  for (const s of doing) assert.equal(phaseStatus([it("a", "todo", 5)], [run(5, s)])[0].status, "doing", s);
+  assert.equal(phaseStatus([it("a", "todo", 5)], [run(5, "done")])[0].status, "done");
+  assert.equal(phaseStatus([it("a", "doing", 5)], [run(5, "cancelled")])[0].status, "doing");
+  assert.equal(phaseStatus([it("a", "done", 9), it("b", "todo", "x"), it("c", "todo", null)], [run(5, "done")]).map((i) => i.status).join(), "done,todo,todo");
+  const input = [it("a", "todo", 5)];
+  const snap = JSON.stringify(input);
+  const out = phaseStatus(input, [run(5, "done")]);
+  assert.equal(JSON.stringify(input), snap);
+  assert.notEqual(out[0], input[0]);
 });

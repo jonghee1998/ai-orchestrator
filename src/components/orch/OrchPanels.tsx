@@ -9,7 +9,7 @@ import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
-import { FLAG_KEYS, approveMessage, latestUsage, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { FLAG_KEYS, approveMessage, latestUsage, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { activeAgents, type AgentId } from "@/lib/orch/agents";
 import { readCollapsed, toggleCollapsed, writeCollapsed } from "@/lib/orch/collapse";
 import { LIFECYCLE, boardNeedsUser, boardRemaining, columnRemaining, itemProgress, stageBoard, type BoardColumn, type BoardItem } from "@/lib/orch/lifecycle";
@@ -113,24 +113,68 @@ function RunDetails({ r }: { r: OrchRun }) {
 
 const ROADMAP_ICON: Record<RoadmapStatus, [StateKind, string]> = { done: ["done", "완료"], doing: ["doing", "진행 중"], todo: ["todo", "할 일"], na: ["na", "해당 없음"] };
 
+/**
+ * One roadmap line: status icon · id · title, note below in small gray. With `repo`, a positive-integer ref becomes a
+ * '#번호' link to that repo's Issue (new tab), and a 'doing' item is bold (진행 단계 목록).
+ */
+function RoadmapRow({ i, repo }: { i: RoadmapItem; repo?: string }) {
+  const link = repo && typeof i.ref === "number" ? i.ref : null;
+  const bold = repo !== undefined && i.status === "doing";
+  return (
+    <li className="min-w-0" data-status={repo ? i.status : undefined}>
+      <p className={`flex gap-1.5${bold ? " font-semibold" : ""}`}>
+        <span aria-label={ROADMAP_ICON[i.status][1]} role="img" className="shrink-0"><StateIcon kind={ROADMAP_ICON[i.status][0]} className="h-3.5 w-3.5 translate-y-0.5" /></span>
+        <span className="min-w-0 break-words"><span className="tabular-nums font-normal text-text-muted">{i.id}</span> {i.title}
+          {link !== null && <>{" "}<a href={`https://github.com/${repo}/issues/${link}`} target="_blank" rel="noreferrer"
+            className="-my-3 inline-flex min-h-11 items-center font-normal tabular-nums text-accent">#{link}</a></>}
+        </span>
+      </p>
+      {i.note && <p className="truncate pl-6 text-[11px] text-text-muted" title={i.note}>{i.note}</p>}
+    </li>
+  );
+}
+
 /** Roadmap checklist (펼친 '인프라 · 확장' 줄 안): one line per item. */
 function RoadmapList({ title, items, testid }: { title: string; items: RoadmapItem[]; testid: string }) {
   return (
     <div className="pt-1" data-testid={testid}>
       <p className="text-xs font-semibold">{title} <span className="font-normal tabular-nums text-text-muted">{roadmapCount(items).text}</span></p>
       <ul className="space-y-1 py-1 text-xs">
-        {items.map((i) => (
-          <li key={i.id} className="min-w-0">
-            <p className="flex gap-1.5">
-              <span aria-label={ROADMAP_ICON[i.status][1]} role="img" className="shrink-0"><StateIcon kind={ROADMAP_ICON[i.status][0]} className="h-3.5 w-3.5 translate-y-0.5" /></span>
-              <span className="min-w-0 break-words"><span className="tabular-nums text-text-muted">{i.id}</span> {i.title}</span>
-            </p>
-            {i.note && <p className="truncate pl-6 text-[11px] text-text-muted" title={i.note}>{i.note}</p>}
-          </li>
-        ))}
+        {items.map((i) => <RoadmapRow key={i.id} i={i} />)}
         {!items.length && <li className="text-text-muted">항목 없음</li>}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 카드 본문 맨 위 '진행 단계 a/b' + 얇은 막대(RoadmapLine 과 같은 모양) + 단계 목록.
+ * 완료가 4개 이상이면 완료 항목은 '완료 n개' 한 줄로 접힌다(눌러서 펼침).
+ */
+function PhaseBlock({ phases, repo }: { phases: RoadmapItem[]; repo: string }) {
+  const c = roadmapCount(phases);
+  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+  const done = phases.filter((i) => i.status === "done");
+  const fold = done.length >= 4;
+  const rest = fold ? phases.filter((i) => i.status !== "done") : phases;
+  return (
+    <section aria-label="진행 단계" className="mt-3" data-testid="orch-phases">
+      <p className="flex items-center gap-2.5 text-[13px] text-text-muted">
+        <span className="shrink-0 tabular-nums" data-testid="orch-phases-title"><b className="font-semibold text-text">진행 단계</b> {c.text}</span>{" "}
+        <span className="block h-1 flex-1 overflow-hidden rounded-sm bg-border" role="progressbar" aria-label="완료한 진행 단계" aria-valuemin={0} aria-valuemax={c.total} aria-valuenow={c.done}>
+          <span className="block h-full bg-text" style={{ width: `${pct}%` }} />
+        </span>
+      </p>
+      {fold && (
+        <details className="text-xs" data-testid="orch-phases-done">
+          <summary className={`${SUMMARY} text-text-muted`}>완료 <span className="tabular-nums">{done.length}개</span><ChevronIcon className="h-3.5 w-3.5" /></summary>
+          <ul className="space-y-1 pb-1">{done.map((i) => <RoadmapRow key={i.id} i={i} repo={repo} />)}</ul>
+        </details>
+      )}
+      <ul className="space-y-1 py-1 text-xs">
+        {rest.map((i) => <RoadmapRow key={i.id} i={i} repo={repo} />)}
+      </ul>
+    </section>
   );
 }
 
@@ -286,7 +330,8 @@ function StageCell({ c }: { c: BoardColumn }) {
 }
 
 /**
- * 프로젝트 카드. 머리(저장소 이름 · 남은 할 일 · 확인 필요)는 접기 버튼이고, 본문(남은 할 일 요약 · 칸 · 인프라/확장 · 단계 줄)이 접힌다.
+ * 프로젝트 카드. 머리(저장소 이름 · [단계 a/b 완료] · 남은 할 일 · 확인 필요)는 접기 버튼이고, 본문([진행 단계] · 남은 할 일 요약 · 칸 · 인프라/확장 · 단계 줄)이 접힌다.
+ * [ ] 는 roadmap.json 'phases' 가 있을 때만.
  * 다른 프로젝트는 roadmap.json 'app' 이 있으면 머리 오른쪽에 '화면 열기' 링크 (버튼 밖, 새 탭). 자기 저장소(isSelf, 서버 판정)는 링크 없음.
  */
 function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onToggle: () => void }) {
@@ -300,6 +345,9 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
   const left = boardRemaining(flow);
   // 직접 할 일: 인프라 체크리스트 중 아직 안 끝난 것 (사람이 확인·설정할 항목, 확장은 제외)
   const todo = (v.roadmap?.setup ?? []).filter((i) => i.status === "doing" || i.status === "todo");
+  // 진행 단계: roadmap.json 'phases' + 연결된 run 상태로 자동 완료/진행 (없으면 화면은 그대로)
+  const phases = phaseStatus(v.roadmap?.phases ?? [], v.runs);
+  const phaseCount = roadmapCount(phases);
   const roadmapNote = v.roadmapError ? `로드맵 읽기 실패 · ${v.roadmapError}` : !v.roadmap ? "로드맵 없음(docs/roadmap.json)" : null;
   return (
     <Card>
@@ -310,7 +358,8 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
               className="flex min-h-11 w-full items-center gap-1.5 rounded-lg text-left">
               <span className="min-w-0">
                 <span className="block truncate text-lg font-bold tracking-[-0.02em]">{short(v.repo)}</span>
-                <span className="block text-xs tabular-nums text-text-muted" data-testid="orch-project-summary">
+                <span className={`block text-xs tabular-nums text-text-muted${phases.length > 0 ? " break-keep" : ""}`} data-testid="orch-project-summary">
+                  {phases.length > 0 && `단계 ${phaseCount.done}/${phaseCount.total} 완료 · `}
                   {left === null ? "남은 할 일 없음" : `남은 할 일 ${left}과정`}
                   {needs > 0 && <> · <span className="font-semibold text-warn">확인 필요 {needs}</span></>}
                 </span>
@@ -332,6 +381,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
           </div>
         </div>
         <div id={bodyId} hidden={!open} data-testid="orch-project-body">
+        {phases.length > 0 && <PhaseBlock phases={phases} repo={v.repo} />}
         <p className="mt-3 text-[13px] tabular-nums text-text-muted" data-testid="orch-remaining">
           {left === null ? "개발 남은 일 없음" : <>남은 할 일 <b className="font-semibold text-text">{left}과정</b> · 단계별</>}
           {todo.length > 0 && <> · 직접 할 일 <b className="font-semibold text-text">{todo.length}건</b></>}
