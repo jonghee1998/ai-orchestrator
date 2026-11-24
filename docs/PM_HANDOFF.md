@@ -1,6 +1,6 @@
 # PM 인수인계 (ai-orchestrator)
 
-_마지막 갱신: 2026-11-24 14시 (KST)_
+_마지막 갱신: 2026-11-24 16시 (KST)_
 
 새 대화를 시작하면 PM(Claude)은 이 파일과 각 프로젝트 저장소의 `docs/PM_HANDOFF.md`를 먼저 읽는다.
 
@@ -12,7 +12,10 @@ _마지막 갱신: 2026-11-24 14시 (KST)_
   - 새 프로젝트 표준 절차 `docs/NEW_PROJECT.md` (#317)
 - 등록 프로젝트(`ORCH_REPOS`): `jonghee1998/ai-orchestrator`, `jonghee1998/Personal-dashboard`.
 - 2026-11-24: `plan-review.mjs`가 정규화된 계획의 `null` 필드(`model: null`)를 감사 프롬프트에 그대로 보여 줘서 Codex가 매번 'high' 오탐을 냈다. 프롬프트에서 `null` 필드를 빼도록 고쳤다(이 커밋).
+- 2026-11-24: 엔진에 `pull_request_target: closed`를 추가했다(#324, Personal-dashboard #21). orch/* PR을 사용자가 Merge하거나 닫으면 순찰을 기다리지 않고 바로 완료·취소 처리한다. 순찰은 7·27·47분으로 옮겼다. GitHub가 정기 실행을 자주 건너뛰기 때문이다(이 저장소는 하루 약 4회). Personal-dashboard #20 Merge 2초 뒤 완료되는 것을 확인했다.
+- Personal-dashboard #15(5단계 전반)가 끝났다(#20 반영).
 - 사용량: Claude 7일 구간 소모가 빠르다(하루 약 20%). Codex는 여유가 있다.
+- Supabase 무료 플랜은 계정 전체에서 활성 프로젝트 2개까지다. 지금 활성: ai-orchestrator(Personal-os 조직), Personal-dashboard 운영. 개발용 프로젝트는 일시정지 상태다.
 
 ## 결정한 것 (사용자)
 - 작업 순서는 항상 계획 → 감사 → 사용자 승인(`orch:go`) → 구현·검수 → 반영. 화면이나 구조는 먼저 보여 주고 확인받은 뒤 작업한다.
@@ -21,6 +24,7 @@ _마지막 갱신: 2026-11-24 14시 (KST)_
 - AI ON/OFF 스위치는 상황판 한 곳에서 모든 프로젝트에 적용한다.
 - 검수는 Codex가 기본이고, Codex를 쓸 수 없으면 Opus가 대신한다. 구현은 Claude(Sonnet·Opus)가 한다.
 - 토큰 절약은 일단 PM 쪽 낭비를 줄이는 방식으로 한다(2026-11-24). 계획을 처음부터 꼼꼼히 써서 감사 라운드를 줄이고, 쉬운 스텝은 Sonnet으로 지정한다. Codex 구현 참여는 보류.
+- 보호 경로(`.github/`, `scripts/orch/`) 변경은 PM이 브랜치 → PR로 올리고 사용자가 Merge한다(main 직접 push 금지, 2026-11-24).
 - 운영 배포는 반영 10개마다 한다. 바로 보려면 deploy 워크플로를 수동으로 실행한다.
 
 ## 계획 작성 체크리스트 (감사 1라운드 통과 목표, 2026-11-24 결정)
@@ -35,7 +39,6 @@ _마지막 갱신: 2026-11-24 14시 (KST)_
 8. 스텝 하나가 너무 크면(스키마+API+UI+문서) 나눈다. 데이터 계층과 화면은 분리한다.
 
 ## 다음 할 일
-1. Personal-dashboard #15(5단계 전반) 진행 확인 → 최종 PR 반영 승인 요청. 자동 반영은 꺼져 있다.
-2. Personal-dashboard 5단계 후반: 개발용 Supabase(사용자가 생성함)에 마이그레이션 적용. 비밀값 `DEV_DATABASE_URL` 등록 안내와 적용 워크플로 계획이 필요하다.
-3. Personal-dashboard 저장소에서 orchestrator 정기 실행(cron)이 한 번도 안 돈 문제를 확인한다. 수동 반영된 run이 완료 처리되지 않았다.
-4. 사소한 것(나중에): 상황판 화면 다듬기는 사용자가 정리해서 줄 예정이다.
+1. Personal-dashboard 5단계 마무리: 개발 DB를 CI Postgres로 대체할지 사용자 확인을 받는다(무료 2개 한도). 자세한 것은 그 저장소의 `docs/PM_HANDOFF.md`.
+2. Personal-dashboard 6단계 계획(수신 API 통합 + 실패 원인 로그). 계획 작성 체크리스트를 지킨다.
+3. 사소한 것(나중에): 상황판 화면 다듬기는 사용자가 정리해서 줄 예정이다. 구조 탭의 '20분마다' 문구는 순찰 시간 변경에 맞춰 함께 고친다.
