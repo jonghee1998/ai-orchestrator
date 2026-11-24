@@ -99,3 +99,13 @@ test("retryAt: wake-up after the 1h cool-down, and the gate lets it through then
   const g = gate({ auto: true, issues: [], human: { body: humanBody("", { todos: [], state: st }) }, mainSha: "a", dailyCap: 8, nowMs: Date.parse(retryAt(fail)) });
   assert.equal(g.skip, false, g.reason);
 });
+
+test("parseNextPlan: a quoted JSON sample before the plan block does not hide the plan", () => {
+  const plan = { goal: "g", steps: [{ id: 1, title: "t", task: "k", done_when: ["d"] }] };
+  const text = `[plan] 9단계 계획\n\n설명. 예시 요청:\n\`\`\`json\n{"run_id":"r1","items":[]}\n\`\`\`\n\n\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``;
+  const r = parseNextPlan(text);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.plan.goal, "g");
+  assert.match(r.body, /```text\n\{"run_id"/);
+  assert.equal((r.body.match(/```json/g) ?? []).length, 1);
+});
