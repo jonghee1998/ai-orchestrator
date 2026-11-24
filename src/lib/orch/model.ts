@@ -571,6 +571,110 @@ export function roadmapCount(items: RoadmapItem[]): { done: number; doing: numbe
   return { ...c, total, text: `${c.done}/${total}` };
 }
 
+// ---------------------------------------------------------------- architecture (docs/architecture.json: 구조 탭)
+
+export type ArchTone = "plain" | "accent" | "deep";
+export interface ArchBox { x: number; y: number; w: number; h: number; lines: string[]; tone: ArchTone }
+export interface ArchArrow { points: [number, number][] }
+export type ArchBlock =
+  | { type: "text"; lines: string[] }
+  | { type: "table"; head: string[]; rows: string[][] }
+  | { type: "diagram"; width: number; height: number; label: string; boxes: ArchBox[]; arrows: ArchArrow[]; caption: string | null };
+export interface ArchSection { no: string; kicker: string; title: string; blocks: ArchBlock[] }
+export interface Architecture { version: number; purpose: string | null; sections: ArchSection[] }
+
+/** Raw file size limit (UTF-8 bytes) for docs/architecture.json. */
+export const ARCH_MAX_BYTES = 65_536;
+export const ARCH_LIMITS = {
+  purpose: 60, kicker: 12, title: 40, no: 4, line: 120, cell: 40, boxLine: 18, label: 120, caption: 80,
+  sections: 12, blocks: 6, textLines: 8, cols: 4, rows: 20, boxes: 24, arrows: 30, boxLines: 3,
+  minPoints: 2, maxPoints: 6, width: 300, minHeight: 40, maxHeight: 1200,
+} as const;
+const L = ARCH_LIMITS;
+
+/** Cut to n code points (no splitting of surrogate pairs). */
+const cut = (s: string, n: number) => { const a = Array.from(s); return a.length > n ? a.slice(0, n).join("") : s; };
+/** Box text: at most 18 chars per line; longer → 17 chars + '…'. */
+const cutEllipsis = (s: string, n: number) => { const a = Array.from(s); return a.length > n ? a.slice(0, n - 1).join("") + "…" : s; };
+const strList = (v: unknown, maxItems: number, maxLen: number) =>
+  (Array.isArray(v) ? v : []).map(str).filter((s): s is string => s !== null).slice(0, maxItems).map((s) => cut(s, maxLen));
+
+function archBox(v: unknown, height: number): ArchBox | null {
+  const o = obj(v);
+  if (!o) return null;
+  const [x, y, w, h] = [num(o.x), num(o.y), num(o.w), num(o.h)];
+  if (x === null || y === null || w === null || h === null || x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > L.width || y + h > height) return null;
+  const lines = (Array.isArray(o.lines) ? o.lines : []).map(str).filter((s): s is string => s !== null).slice(0, L.boxLines).map((s) => cutEllipsis(s, L.boxLine));
+  if (!lines.length) return null;
+  const tone: ArchTone = o.tone === "accent" || o.tone === "deep" ? o.tone : "plain";
+  return { x, y, w, h, lines, tone };
+}
+
+function archArrow(v: unknown, height: number): ArchArrow | null {
+  const pts = obj(v)?.points;
+  if (!Array.isArray(pts) || pts.length < L.minPoints || pts.length > L.maxPoints) return null;
+  const points: [number, number][] = [];
+  for (const p of pts) {
+    if (!Array.isArray(p) || p.length !== 2) return null;
+    const [x, y] = [num(p[0]), num(p[1])];
+    if (x === null || y === null || x < 0 || y < 0 || x > L.width || y > height) return null;
+    points.push([x, y]);
+  }
+  return { points };
+}
+
+function archBlock(v: unknown): ArchBlock | null {
+  const o = obj(v);
+  if (!o) return null;
+  if (o.type === "text") {
+    const lines = strList(o.lines, L.textLines, L.line);
+    return lines.length ? { type: "text", lines } : null;
+  }
+  if (o.type === "table") {
+    const head = (Array.isArray(o.head) ? o.head : []).slice(0, L.cols).map((c) => cut(typeof c === "string" ? c.trim() : "", L.cell));
+    if (!head.length || head.every((c) => !c)) return null;
+    const rows = (Array.isArray(o.rows) ? o.rows : []).filter(Array.isArray).slice(0, L.rows)
+      .map((r: unknown[]) => head.map((_, i) => cut(typeof r[i] === "string" ? (r[i] as string).trim() : "", L.cell)));
+    return rows.length ? { type: "table", head, rows } : null;
+  }
+  if (o.type === "diagram") {
+    const height = o.height;
+    if (o.width !== L.width || typeof height !== "number" || !Number.isInteger(height) || height < L.minHeight || height > L.maxHeight) return null;
+    const boxes = (Array.isArray(o.boxes) ? o.boxes : []).map((b) => archBox(b, height)).filter((b): b is ArchBox => b !== null).slice(0, L.boxes);
+    const arrows = (Array.isArray(o.arrows) ? o.arrows : []).map((a) => archArrow(a, height)).filter((a): a is ArchArrow => a !== null).slice(0, L.arrows);
+    if (!boxes.length) return null;
+    const caption = str(o.caption);
+    return { type: "diagram", width: L.width, height, label: cut(str(o.label) ?? "", L.label), boxes, arrows, caption: caption ? cut(caption, L.caption) : null };
+  }
+  return null;
+}
+
+function archSection(v: unknown): ArchSection | null {
+  const o = obj(v);
+  const no = str(o?.no);
+  const title = str(o?.title);
+  if (!o || !no || !title) return null;
+  const blocks = (Array.isArray(o.blocks) ? o.blocks : []).map(archBlock).filter((b): b is ArchBlock => b !== null).slice(0, L.blocks);
+  if (!blocks.length) return null;
+  return { no: cut(no, L.no), kicker: cut(str(o.kicker) ?? "", L.kicker), title: cut(title, L.title), blocks };
+}
+
+/**
+ * Parse docs/architecture.json. Over 65,536 UTF-8 bytes, not a JSON object or no valid section → null.
+ * Malformed blocks/sections, out-of-range boxes/arrows are dropped; long strings and lists are cut.
+ * Strings stay plain text (rendered as text, never as HTML).
+ */
+export function parseArchitecture(text: string | null | undefined): Architecture | null {
+  if (typeof text !== "string" || new TextEncoder().encode(text).length > ARCH_MAX_BYTES) return null;
+  const j = parseJson(text);
+  if (!j) return null;
+  const sections = (Array.isArray(j.sections) ? j.sections : []).map(archSection).filter((s): s is ArchSection => s !== null).slice(0, L.sections);
+  if (!sections.length) return null;
+  const version = num(j.version);
+  const purpose = str(j.purpose);
+  return { version: version !== null && Number.isInteger(version) && version > 0 ? version : 1, purpose: purpose ? cut(purpose, L.purpose) : null, sections };
+}
+
 /** ORCH_DEPLOY_EVERY as a positive integer (deploy.yml default 10); missing or odd values → 10. */
 export function deployEveryFromVars(vars: { name: string; value: string }[]): number {
   const v = (vars.find((x) => x.name === "ORCH_DEPLOY_EVERY")?.value ?? "").trim();

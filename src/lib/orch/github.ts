@@ -1,7 +1,7 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
 //   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
 //           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments,
-//           docs/roadmap.json · docs/patchnotes.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
+//           docs/roadmap.json · docs/patchnotes.json · docs/architecture.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch);
 //           'orch:go' label on plan approval; one '[idea]' Issue per idea
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read and write, Variables read/write, Actions read/write).
@@ -9,7 +9,7 @@
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
 import type { PatchNote } from "@/lib/patchnotes";
-import { USAGE_RETRY_MS, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
+import { ARCH_MAX_BYTES, USAGE_RETRY_MS, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -99,6 +99,36 @@ async function readRoadmap(f: Fetch, token: string, repo: string): Promise<Roadm
   const roadmap = parseRoadmap(Buffer.from(j.content, "base64").toString("utf8"));
   if (!roadmap) throw new RoadmapFormatError("roadmap.json 형식 오류");
   return roadmap;
+}
+
+export class ArchitectureFormatError extends Error {}
+
+/** base64 length of ARCH_MAX_BYTES bytes (GitHub wraps the content with newlines; those are stripped first). */
+const ARCH_MAX_BASE64 = Math.ceil(ARCH_MAX_BYTES / 3) * 4;
+const ARCH_TOO_LARGE = "architecture.json 크기 초과 (64KB)";
+
+/**
+ * docs/architecture.json on the default branch. null = no file (404). Throws GitHubError (other failures) or
+ * ArchitectureFormatError (no content, over 65,536 bytes — checked from the size metadata and base64 length before
+ * decoding and again after — or malformed).
+ */
+export async function readArchitecture(repo: string, env: Env, f: Fetch = fetch): Promise<Architecture | null> {
+  let j: { content?: unknown; encoding?: unknown; size?: unknown } | null;
+  try {
+    j = (await call(f, readToken(env), "GET", `/repos/${repo}/contents/docs/architecture.json`)) as typeof j;
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return null;
+    throw e;
+  }
+  if (typeof j?.size === "number" && j.size > ARCH_MAX_BYTES) throw new ArchitectureFormatError(ARCH_TOO_LARGE);
+  if (typeof j?.content !== "string" || (j.encoding && j.encoding !== "base64")) throw new ArchitectureFormatError("architecture.json 내용 없음");
+  const b64 = j.content.replace(/\s+/g, "");
+  if (b64.length > ARCH_MAX_BASE64) throw new ArchitectureFormatError(ARCH_TOO_LARGE);
+  const bytes = Buffer.from(b64, "base64");
+  if (bytes.length > ARCH_MAX_BYTES) throw new ArchitectureFormatError(ARCH_TOO_LARGE);
+  const arch = parseArchitecture(bytes.toString("utf8"));
+  if (!arch) throw new ArchitectureFormatError("architecture.json 형식 오류");
+  return arch;
 }
 
 type CompareCommit = { parents?: unknown[] } | null | undefined;
