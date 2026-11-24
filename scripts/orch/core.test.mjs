@@ -303,3 +303,12 @@ test("diagnosis: Codex root-cause prompt wraps the fix prompt; developer prompt 
   assert.match(w, /원인: 경계값$/);
   assert.equal(C.withDiagnosis("x", "y".repeat(7000)).length < 6200, true, "capped");
 });
+
+test("ciVerdict: a check GitHub left at in_progress but with conclusion + completed_at counts as finished", () => {
+  const runs = [
+    { name: "test", status: "completed", conclusion: "success" },
+    { name: "pii", status: "in_progress", conclusion: "success", completed_at: "2026-11-24T22:56:46Z" },
+  ];
+  assert.equal(C.ciVerdict(runs).result, "success");
+  assert.equal(C.ciVerdict([{ name: "pii", status: "in_progress", conclusion: null, completed_at: null }]).result, "pending");
+});
