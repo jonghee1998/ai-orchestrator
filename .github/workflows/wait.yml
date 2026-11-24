@@ -1,0 +1,44 @@
+# Waits until a Claude usage limit resets, then wakes the orchestrator (watchdog) so held work resumes
+# at the reset time instead of on the next schedule tick. Dispatched by the orchestrator only.
+# A job can run at most 6h, so longer waits (7-day window) sleep in chunks and re-dispatch themselves.
+name: wait
+run-name: "wait until ${{ inputs.until }} (#${{ inputs.issue }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      until: { required: true, type: string }   # ISO time the limit lifts
+      issue: { required: false, type: string }
+
+permissions: {}
+
+concurrency:
+  group: orch-wait-${{ inputs.until }}
+  cancel-in-progress: false
+
+jobs:
+  wait:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: write        # re-dispatch itself / dispatch orchestrator.yml
+    steps:
+      - name: Sleep until the limit lifts, then wake the watchdog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNTIL: ${{ inputs.until }}
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          target=$(date -u -d "$UNTIL" +%s) || { echo "bad until: $UNTIL"; exit 1; }
+          now=$(date -u +%s)
+          left=$(( target - now + 60 ))           # one minute after the reset
+          chunk=20700                             # 5h45m, under the 6h job limit
+          if [ "$left" -gt "$chunk" ]; then
+            echo "waiting ${chunk}s of ${left}s, then re-dispatching"
+            sleep "$chunk"
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/wait.yml/dispatches" \
+              -f ref=main -f "inputs[until]=$UNTIL" -f "inputs[issue]=$ISSUE"
+            exit 0
+          fi
+          if [ "$left" -gt 0 ]; then echo "waiting ${left}s"; sleep "$left"; fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/orchestrator.yml/dispatches" -f ref=main
