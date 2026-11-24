@@ -111,7 +111,7 @@ export function parseReview(text) {
   return { verdict: j.verdict, summary: String(j.summary ?? "").slice(0, 2000), findings };
 }
 
-export function reviewComment({ round, hash, reviewer, review, runUrl, note = "" }) {
+export function reviewComment({ round, hash, reviewer, review, runUrl, note = "", auto = false }) {
   const who = reviewer === "codex" ? "Codex" : "Claude Opus (Codex 대신)";
   const v = review?.verdict;
   const head = v === "OK" ? "✅ OK — 승인(`orch:go`) 가능" : v === "REVISE" ? "✏️ 수정 필요" : "⚠️ 감사 실패";
@@ -125,8 +125,23 @@ export function reviewComment({ round, hash, reviewer, review, runUrl, note = ""
     list.length ? `\n${list.join("\n")}` : "",
     "",
     v === "REVISE" ? (round < MAX_ROUNDS ? "_PM이 계획 본문을 고치면 다음 라운드 감사가 자동으로 시작됩니다._" : "_마지막 라운드입니다. PM이 반영 여부를 정리해 사용자에게 보고합니다._") : "",
+    auto && v === "OK" ? "_🤖 자동 모드: 바로 시작합니다(`orch:go`)._" : "",
+    auto && v === "REVISE" ? (round < MAX_ROUNDS ? "_🤖 자동 모드: PM(Claude)이 지적을 반영해 계획을 고칩니다._" : "_🤖 자동 모드: PM(Claude)이 남은 지적을 반영한 뒤 바로 시작합니다._") : "",
     `[실행 로그](${runUrl})`,
   ].filter((x) => x !== "").join("\n");
+}
+
+/**
+ * Auto mode (ORCH_AUTO on): what happens after a round without a person.
+ *   OK                      → "go"     (add orch:go as the owner → the engine starts)
+ *   REVISE, round < MAX     → "revise" (plan-revise: Claude applies the findings, the edit opens the next round)
+ *   REVISE, last round      → "revise" + final (Claude applies the findings, then orch:go without another round)
+ *   no usable verdict / OFF → "none"
+ */
+export function autoNext({ review, round, auto }) {
+  if (!auto || !review) return { next: "none", final: false };
+  if (review.verdict === "OK") return { next: "go", final: false };
+  return { next: "revise", final: round >= MAX_ROUNDS };
 }
 
 // ---------------------------------------------------------------- CLI (GitHub Actions)
@@ -161,8 +176,12 @@ async function publish() {
   const usedClaude = env.CLAUDE_RAN === "true";
   const review = usedClaude ? claude : codex;
   const reviewer = usedClaude ? "claude" : "codex";
-  const body = reviewComment({ round: Number(env.ROUND), hash: env.HASH, reviewer, review, runUrl: env.RUN_URL, note: env.NOTE ?? "" });
+  const auto = C.readSwitches(env).auto;
+  const body = reviewComment({ round: Number(env.ROUND), hash: env.HASH, reviewer, review, runUrl: env.RUN_URL, note: env.NOTE ?? "", auto });
   await gh.post(`/issues/${env.ISSUE}/comments`, { body });
+  const nx = autoNext({ review, round: Number(env.ROUND), auto });
+  setOutput("next", nx.next);
+  setOutput("final", nx.final ? "true" : "false");
   console.log(`[plan-review] #${env.ISSUE} round ${env.ROUND} ${reviewer} ${review?.verdict ?? "ERROR"}`);
 }
 

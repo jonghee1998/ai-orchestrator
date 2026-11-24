@@ -61,7 +61,7 @@ test("differsText: key labels with short repo names; none → null", () => {
 
 // ---------------------------------------------------------------- alignSwitches / alignResultMessage
 
-const VALUE: Switches = { sonnet: true, opus: true, codex: false, paused: false, window: "08:00-24:00" };
+const VALUE: Switches = { sonnet: true, opus: true, codex: false, paused: false, auto: false, window: "08:00-24:00" };
 
 test("alignSwitches: only differing keys, in FLAG_KEYS → window order, with the reference value", async () => {
   const calls: [SwitchKey, boolean | string][] = [];

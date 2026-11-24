@@ -7,7 +7,7 @@ export type SwitchTone = "ok" | "warn";
 export interface SwitchMessage { tone: SwitchTone; text: string }
 
 /** 짧은 키 이름: 차이 줄·실패 메시지에 쓴다. */
-export const SWITCH_LABEL: Record<SwitchKey, string> = { sonnet: "Sonnet", opus: "Opus", codex: "Codex", paused: "일시정지", window: "작업 시간대" };
+export const SWITCH_LABEL: Record<SwitchKey, string> = { sonnet: "Sonnet", opus: "Opus", codex: "Codex", paused: "일시정지", auto: "자동 모드", window: "작업 시간대" };
 
 export const WRITE_UNCONFIGURED_TEXT = "서버에 쓰기 토큰(ORCH_GITHUB_TOKEN)이 없어 읽기만 가능합니다.";
 

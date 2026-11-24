@@ -3,7 +3,7 @@ import test from "node:test";
 import { mergedSwitches, type RepoView, type Switches } from "./model";
 import { applySwitchAll, type SwitchWriter } from "./switchAll";
 
-const ON: Switches = { sonnet: true, opus: true, codex: true, paused: false, window: "" };
+const ON: Switches = { sonnet: true, opus: true, codex: true, paused: false, auto: false, window: "" };
 const view = (repo: string, switches: Switches | null, isSelf = false): RepoView => ({
   repo, plans: [], plansError: null, ideas: [], ideasError: null, switches, switchesError: switches ? null : "권한 없음 또는 저장소 없음",
   runs: [], runsError: null, roadmap: null, roadmapError: null, deployPending: null, deployEvery: 10, isSelf,

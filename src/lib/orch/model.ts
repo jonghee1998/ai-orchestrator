@@ -167,13 +167,14 @@ export const SWITCH_VARS = {
   opus: "ORCH_OPUS",
   codex: "ORCH_CODEX",
   paused: "ORCH_PAUSED",
+  auto: "ORCH_AUTO",
   window: "ORCH_WINDOW",
 } as const;
 export type SwitchKey = keyof typeof SWITCH_VARS;
 export type FlagKey = Exclude<SwitchKey, "window">;
-export const FLAG_KEYS: FlagKey[] = ["sonnet", "opus", "codex", "paused"];
+export const FLAG_KEYS: FlagKey[] = ["sonnet", "opus", "codex", "paused", "auto"];
 
-export interface Switches { sonnet: boolean; opus: boolean; codex: boolean; paused: boolean; window: string }
+export interface Switches { sonnet: boolean; opus: boolean; codex: boolean; paused: boolean; auto: boolean; window: string }
 
 const OFF_RE = /^(off|false|0|no|disabled?)$/i;
 const ON_RE = /^(on|true|1|yes|enabled?)$/i;
@@ -185,7 +186,7 @@ const flag = (v: string | undefined, dflt: boolean) => {
   return dflt;
 };
 
-/** Same defaults as scripts/orch/core.mjs readSwitches: unset → AI on, not paused, no window. */
+/** Same defaults as scripts/orch/core.mjs readSwitches: unset → AI on, not paused, auto mode off, no window. */
 export function switchesFromVars(vars: { name: string; value: string }[]): Switches {
   const get = (k: string) => vars.find((v) => v.name === k)?.value;
   return {
@@ -193,6 +194,7 @@ export function switchesFromVars(vars: { name: string; value: string }[]): Switc
     opus: flag(get(SWITCH_VARS.opus), true),
     codex: flag(get(SWITCH_VARS.codex), true),
     paused: flag(get(SWITCH_VARS.paused), false),
+    auto: flag(get(SWITCH_VARS.auto), false),
     window: (get(SWITCH_VARS.window) ?? "").trim(),
   };
 }

@@ -139,7 +139,7 @@ try {
   for (const t of TABS) if (!navLabels.some((l) => l.includes(t.nav))) problems.push(`하단 탭에 '${t.nav}' 없음 (${navLabels.join(", ")})`);
 
   // 스위치 카드: 카드 하나에 스위치 한 벌(4개 + 작업 시간대), 저장소별 카드 없음, 두 가짜 저장소 Codex 값이 달라 '일부 프로젝트 값이 다름'
-  const SWITCH_NAMES = ["Claude Sonnet (구현)", "Claude Opus (고난도 구현·대체 검수)", "Codex (독립 검수)", "전체 일시정지"];
+  const SWITCH_NAMES = ["Claude Sonnet (구현)", "Claude Opus (고난도 구현·대체 검수)", "Codex (독립 검수)", "전체 일시정지", "자동 모드 (시작·반영 자동)"];
   const checkSwitchCard = async (who) => {
     const sec = page.getByTestId("orch-switches");
     try { await sec.getByRole("switch").first().waitFor({ timeout: 15000 }); } catch { problems.push(`[${who}] 스위치가 보이지 않음`); return; }
@@ -148,7 +148,7 @@ try {
     const secText = ((await sec.textContent()) ?? "").replace(/\s+/g, " ");
     for (const want of ["AI ON/OFF", "등록된 모든 프로젝트에 한 번에 적용", "끄면 새 작업만 막고", "작업 시간대 (한국시간, 비우면 항상)", ...SWITCH_NAMES]) if (!secText.includes(want)) problems.push(`[${who}] 스위치 영역에 '${want}' 이 없음`);
     const sw = sec.getByRole("switch");
-    if ((await sw.count()) !== 4) problems.push(`[${who}] 스위치가 4개가 아님 (${await sw.count()}) — 저장소별로 반복되면 안 됨`);
+    if ((await sw.count()) !== SWITCH_NAMES.length) problems.push(`[${who}] 스위치가 ${SWITCH_NAMES.length}개가 아님 (${await sw.count()}) — 저장소별로 반복되면 안 됨`);
     for (const n of SWITCH_NAMES) if ((await sec.getByRole("switch", { name: n, exact: true }).count()) !== 1) problems.push(`[${who}] '${n}' 스위치가 1개가 아님`);
     if ((await sec.locator("h3").filter({ hasText: /orch-screens|orch-second/ }).count()) || (await sec.locator('[aria-label*="orch-"]').count())) problems.push(`[${who}] 저장소별 스위치 카드가 남아 있음`);
     if ((await sec.locator("input#win-all").count()) !== 1 || (await sec.locator("input").count()) !== 1) problems.push(`[${who}] 작업 시간대 입력이 하나가 아님`);

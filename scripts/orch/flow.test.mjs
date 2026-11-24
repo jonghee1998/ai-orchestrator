@@ -536,7 +536,7 @@ test("stale publish after cancel is a no-op; forged Codex marker is ignored", as
 // ---------------------------------------------------------------- ON/OFF switches
 
 const withSwitches = async (vars, fn) => {
-  const keys = ["ORCH_SONNET", "ORCH_OPUS", "ORCH_CODEX", "ORCH_PAUSED", "ORCH_WINDOW"];
+  const keys = ["ORCH_SONNET", "ORCH_OPUS", "ORCH_CODEX", "ORCH_PAUSED", "ORCH_WINDOW", "ORCH_AUTO"];
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   Object.assign(process.env, vars);
   try { await fn(); } finally { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
@@ -695,4 +695,51 @@ test("usage limit: failure without a reset time (or a past one) still blocks as 
   await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
   await publish(n, "implement", 1, { WORK_RESULT: "failure", LIMIT_UNTIL: new Date(Date.now() - 1000).toISOString() });
   assert.equal(state(n).status, "blocked");
+});
+
+test("auto mode: a high-risk final PR merges itself after CI (no owner merge)", async () => {
+  db.compareFiles = ["src/auth/login.mjs"];
+  try {
+    await withSwitches({ ORCH_AUTO: "on" }, async () => {
+      const issue = db.newIssue(plan(1));
+      const n = issue.number;
+      await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+      db.refs[C.stepBranch(n, 1)] = sha("a");
+      await publish(n, "implement", 1);
+      ciPass(sha("a"));
+      await codexSays(state(n).pr, sha("a"), "completed", false);
+      assert.equal(state(n).status, "finalizing", "not awaiting the owner");
+      assert.equal(state(n).risk, "high");
+      assert.ok(db.comments[n].some((c) => /자동 모드 → 확인 필요 항목/.test(c.body)));
+      const final = db.issues[state(n).finalPr];
+      assert.match(final.body, /로그인·결제·권한 관련 코드/, "report still lists the cautions");
+      ciPass(final.head.sha);
+      await ciDone(final.number);
+      assert.ok(final.merged_at, "merged automatically");
+      assert.equal(state(n).status, "done");
+      assert.ok(db.comments[n].some((c) => /자동 모드, CI 통과/.test(c.body)));
+    });
+  } finally {
+    db.compareFiles = ["src/text.mjs", "test/text.test.mjs"];
+  }
+});
+
+test("auto mode switched on later: a run awaiting the owner is merged by the watchdog", async () => {
+  const issue = db.newIssue(plan(1, { auto_merge: false }));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  db.refs[C.stepBranch(n, 1)] = sha("b");
+  await publish(n, "implement", 1);
+  ciPass(sha("b"));
+  await codexSays(state(n).pr, sha("b"), "completed", false);
+  assert.equal(state(n).status, "awaiting_merge");
+  const final = db.issues[state(n).finalPr];
+  ciPass(final.head.sha);
+  await fire("schedule", {});
+  assert.equal(state(n).status, "awaiting_merge", "off: still waits");
+  await withSwitches({ ORCH_AUTO: "on" }, async () => {
+    await fire("schedule", {});
+  });
+  assert.ok(final.merged_at);
+  assert.equal(state(n).status, "done");
 });
