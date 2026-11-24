@@ -285,6 +285,44 @@ test("auto_merge: false keeps a low-risk run for the owner", async () => {
   assert.match(db.issues[state(n).finalPr].body, /auto_merge: false/);
 });
 
+test("owner merges the final PR -> pull_request_target closed finishes the run without the schedule; duplicate is a no-op", async () => {
+  const issue = db.newIssue(plan(1, { auto_merge: false }));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  db.refs[C.stepBranch(n, 1)] = sha("3");
+  await publish(n, "implement", 1);
+  ciPass(sha("3"));
+  await codexSays(state(n).pr, sha("3"), "completed", false);
+  assert.equal(state(n).status, "awaiting_merge");
+  const final = db.issues[state(n).finalPr];
+  final.merged_at = "2026-11-24T05:00:00Z"; final.state = "closed";
+  const ev = { action: "closed", pull_request: { number: final.number, merged: true, head: { ref: C.runBranch(n) } } };
+  await fire("pull_request_target", ev);
+  assert.equal(state(n).status, "done");
+  assert.equal(db.issues[n].state, "closed");
+  assert.deepEqual(labels(n), ["orch:done"]);
+  const logs = () => db.comments[n].filter((c) => /최종 PR #\d+이 반영되어 완료/.test(c.body)).length;
+  const once = logs();
+  assert.equal(once, 1, "completion logged once");
+  await fire("pull_request_target", ev);
+  assert.equal(logs(), once, "second event adds no completion log");
+});
+
+test("owner closes the final PR without merging -> pull_request_target closed cancels the run", async () => {
+  const issue = db.newIssue(plan(1, { auto_merge: false }));
+  const n = issue.number;
+  await fire("issues", { action: "labeled", label: { name: "orch:go" }, sender: { login: "o" }, issue });
+  db.refs[C.stepBranch(n, 1)] = sha("3");
+  await publish(n, "implement", 1);
+  ciPass(sha("3"));
+  await codexSays(state(n).pr, sha("3"), "completed", false);
+  const final = db.issues[state(n).finalPr];
+  final.state = "closed";
+  await fire("pull_request_target", { action: "closed", pull_request: { number: final.number, merged: false, head: { ref: C.runBranch(n) } } });
+  assert.equal(state(n).status, "cancelled");
+  assert.ok(!labels(n).includes("orch:run"));
+});
+
 test("final PR CI failure -> blocked as final; resume switches to manual merge", async () => {
   const issue = db.newIssue(plan(1));
   const n = issue.number;

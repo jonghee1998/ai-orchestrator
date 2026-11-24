@@ -597,7 +597,9 @@ async function onEvent() {
   if (name === "workflow_dispatch" && /^\d+$/.test(env.INPUT_PR ?? "")) {
     return evaluatePR(Number(env.INPUT_PR), { reviewRunFailed: true });
   }
-  if (name === "schedule" || name === "workflow_dispatch") return watchdog();
+  // A closed orch/* PR (owner merge or close): run the watchdog now instead of waiting for the schedule,
+  // which GitHub delays or drops for hours. watchOne() re-reads live state, so a duplicate is a no-op.
+  if (name === "schedule" || name === "workflow_dispatch" || name === "pull_request_target") return watchdog();
 }
 
 // ---------------------------------------------------------------- claude-work: prepare / commit / publish
