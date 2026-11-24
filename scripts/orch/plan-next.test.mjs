@@ -109,3 +109,8 @@ test("parseNextPlan: a quoted JSON sample before the plan block does not hide th
   assert.match(r.body, /```text\n\{"run_id"/);
   assert.equal((r.body.match(/```json/g) ?? []).length, 1);
 });
+
+test("claudePrompt spells out the plan JSON keys the engine reads", () => {
+  const p = claudePrompt({ repo: "o/r", facts: "" });
+  for (const k of ['"goal"', '"steps"', '"done_when"', '"task"', '"id"']) assert.ok(p.includes(k.replace(/"/g, '\\"')) || p.includes(k), k);
+});
