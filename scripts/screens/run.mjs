@@ -139,7 +139,7 @@ try {
   for (const t of TABS) if (!navLabels.some((l) => l.includes(t.nav))) problems.push(`하단 탭에 '${t.nav}' 없음 (${navLabels.join(", ")})`);
 
   // 스위치 카드: 카드 하나에 스위치 한 벌(4개 + 작업 시간대), 저장소별 카드 없음, 두 가짜 저장소 Codex 값이 달라 '일부 프로젝트 값이 다름'
-  const SWITCH_NAMES = ["Claude Sonnet (구현)", "Claude Opus (고난도 구현·대체 검수)", "Codex (독립 검수)", "전체 일시정지", "자동 모드 (시작·반영 자동)"];
+  const SWITCH_NAMES = ["Claude Sonnet (구현)", "Claude Opus (고난도 구현·대체 검수)", "Codex (독립 검수)", "Codex 개발 대체 (Claude 한도일 때)", "전체 일시정지", "자동 모드 (시작·반영 자동)"];
   const checkSwitchCard = async (who) => {
     const sec = page.getByTestId("orch-switches");
     try { await sec.getByRole("switch").first().waitFor({ timeout: 15000 }); } catch { problems.push(`[${who}] 스위치가 보이지 않음`); return; }

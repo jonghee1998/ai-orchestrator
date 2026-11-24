@@ -115,7 +115,14 @@ async function holdWork(run, mode, reason) {
 
 /** Claude hit the subscription usage limit: wait until it resets, then resume automatically (no block). */
 async function holdUntilLimit(run, mode, until) {
-  await save(run, { held: { mode, reason: "Claude 사용량 한도", since: now(), until } },
+  // Codex can develop while Claude is limited: hand the same step over instead of waiting.
+  if (C.pickImpl({ claudeLimitedUntil: until }, SW()) === "codex") {
+    await save(run, { claudeLimitedUntil: until, held: null, requestedAt: now() },
+      `🔀 Step ${run.state?.step ?? "-"}: Claude 사용량 한도(${C.kst(until)}까지) → Codex가 이어서 ${mode === "fix" ? "수정" : "구현"}합니다.`);
+    await dispatchWork(run, mode);
+    return;
+  }
+  await save(run, { claudeLimitedUntil: until, held: { mode, reason: "Claude 사용량 한도", since: now(), until } },
     `⏸️ 대기 (Step ${run.state?.step ?? "-"}): Claude 사용량 한도. ${C.kst(until)}에 한도가 풀리면 자동으로 이어갑니다.`);
   await ro().post("/actions/workflows/wait.yml/dispatches", { ref: "main", inputs: { until, issue: String(run.n) } });
 }
@@ -128,12 +135,14 @@ async function releaseHold(run) {
 
 /** Dispatch implement/fix work unless the ON/OFF switches hold it. Returns true if dispatched. */
 async function dispatchWork(run, mode) {
-  // Waiting for a Claude usage limit to lift: keep the hold until its reset time (wait.yml wakes the watchdog then).
-  const until = run.state?.held?.until;
-  if (until && Date.parse(until) > Date.now()) return false;
   const sw = SW();
+  const impl = C.pickImpl(run.state, sw);
+  // Waiting for a Claude usage limit to lift: keep the hold until its reset time (wait.yml wakes the watchdog then),
+  // unless Codex can take the work now.
+  const until = run.state?.held?.until;
+  if (impl === "claude" && until && Date.parse(until) > Date.now()) return false;
   const pick = C.pickModel(run.plan, run.state.step, mode === "implement" ? 0 : run.state.retries ?? 0);
-  const hold = C.gateReason(sw) ?? C.resolveModel(pick, sw).hold ?? null;
+  const hold = C.gateReason(sw) ?? (impl === "codex" ? null : C.resolveModel(pick, sw).hold ?? null);
   if (hold) {
     await holdWork(run, mode, hold);
     return false;
@@ -141,7 +150,7 @@ async function dispatchWork(run, mode) {
   await releaseHold(run);
   await ro().post("/actions/workflows/claude-work.yml/dispatches", {
     ref: "main",
-    inputs: { issue: String(run.n), mode, step: String(run.state.step) },
+    inputs: { issue: String(run.n), mode, step: String(run.state.step), ...(impl === "codex" ? { impl } : {}) },
   });
   return true;
 }
@@ -265,7 +274,10 @@ async function evaluatePR(prNumber, { reviewRunFailed = false } = {}) {
 
   // Codex OFF or unavailable (e.g. usage limit) -> independent Claude (Opus) review in a separate workflow.
   const sw = SW();
-  const route = C.reviewRoute(sw, codex.result === "error");
+  let route = C.reviewRoute(sw, codex.result === "error");
+  // Codex wrote this step: Claude reviews it when Claude is available (independent reviewer); while Claude is
+  // usage-limited the Codex review app (a separate session) reviews it so the night does not stop.
+  if (st.impl === "codex" && sw.opus && !C.claudeLimited(st)) route = "claude";
   if (!route) {
     await holdWork(run, "review", "검수할 수 있는 AI가 없음 (Codex OFF 또는 사용 불가 + Opus OFF)");
     return { run, pr, codex, fallback: true, held: true };
@@ -274,7 +286,7 @@ async function evaluatePR(prNumber, { reviewRunFailed = false } = {}) {
   if (st.held?.mode === "review" && (route === "codex" || st.claudeReviewFor === pr.head.sha)) await releaseHold(run);
   let review = codex;
   if (route === "claude") {
-    const why = sw.codex ? `Codex 리뷰를 쓸 수 없어(status=${codex.status})` : "Codex가 OFF라";
+    const why = st.impl === "codex" ? "Codex가 구현한 스텝이라 독립 검수를 위해" : sw.codex ? `Codex 리뷰를 쓸 수 없어(status=${codex.status})` : "Codex가 OFF라";
     const cr = C.claudeReviewVerdict(comments, pr.head.sha);
     log(`PR #${pr.number}: codex=${sw.codex ? codex.result : "off"} -> claude review ${cr.result}`);
     if (cr.result === "none") {
@@ -333,11 +345,11 @@ async function onPass(run, pr, reviewer = "codex") {
     log(`PR #${pr.number} merged by a concurrent run; continuing`);
   }
   const passed = { ...(st.passed ?? {}), [step.id]: pr.number };
-  const stepInfo = { ...(st.stepInfo ?? {}), [step.id]: { reviewer, retries: st.retries ?? 0 } };
+  const stepInfo = { ...(st.stepInfo ?? {}), [step.id]: { reviewer, retries: st.retries ?? 0, ...(st.impl ? { impl: st.impl } : {}) } };
   const total = run.plan.steps.length;
 
   if (step.id < total) {
-    await save(run, { status: "implementing", step: step.id + 1, attempt: 1, retries: 0, pr: null, passed, stepInfo, requestedAt: now(), redispatchedAt: null },
+    await save(run, { status: "implementing", step: step.id + 1, attempt: 1, retries: 0, pr: null, passed, stepInfo, impl: null, requestedAt: now(), redispatchedAt: null },
       `✅ Step ${step.id} 통과 (#${pr.number}, ${reviewNote} + CI 통과) → Step ${step.id + 1} 구현 시작`);
     await dispatchWork(run, "implement");
     return;
@@ -706,6 +718,20 @@ async function prepare() {
   setOutput("skip", "false");
   setOutput("branch", branch);
   setOutput("start_sha", git("rev-parse", "HEAD"));
+  const impl = env.IMPL === "codex" ? "codex" : "claude";
+  setOutput("impl", impl);
+  fs.writeFileSync(path.join(env.RUNNER_TEMP ?? ".", "work-prompt.md"), prompt);
+  // Same step failed review twice: Codex (read-only) diagnoses the root cause before the next fix.
+  const diagnose = mode === "fix" && (st.retries ?? 0) >= 2;
+  setOutput("diagnose", diagnose ? "true" : "false");
+  if (diagnose) fs.writeFileSync(path.join(env.RUNNER_TEMP ?? ".", "diag-prompt.md"), C.diagnosePrompt(prompt));
+  if (impl === "codex") {
+    log("implementer: codex (Claude usage limit)");
+    setOutput("model_args", "");
+    setOutput("model", "codex (Claude 사용량 한도로 대체)");
+    setOutput("prompt", prompt);
+    return;
+  }
   // Already dispatched: switches turned off since then do not stop it (drain); only swap a model that is OFF.
   const picked = C.pickModel(run.plan, step, mode === "implement" ? 0 : st.retries ?? 0);
   const resolved = C.resolveModel(picked, SW());
@@ -836,6 +862,7 @@ async function publish() {
     return block(run, mode === "fix" ? "수정 요청을 받았지만 새 커밋이 없습니다." : "변경 사항 없이 끝났습니다.", RUN_URL, "work");
   }
 
+  if (env.IMPL) await save(run, { impl: env.IMPL });   // who wrote this step (review goes to the other AI when possible)
   if (mode === "implement") return openStepPR(run, env.BRANCH, env.SUMMARY);
 
   const resolved = await resolveCodexThreads(st.pr).catch((e) => (log("resolve threads failed", e.message), 0));

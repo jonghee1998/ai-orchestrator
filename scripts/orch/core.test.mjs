@@ -209,10 +209,17 @@ test("filesSummary: fallback when SUMMARY.md is missing", () => {
 });
 
 test("switches: parsing, time window (KST, wraps midnight, fail-closed), model resolution", () => {
-  assert.deepEqual(C.readSwitches({}), { sonnet: true, opus: true, codex: true, paused: false, auto: false, window: "" });
+  assert.deepEqual(C.readSwitches({}), { sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "" });
+  assert.equal(C.readSwitches({ ORCH_CODEX_DEV: "off" }).codexDev, false);
+  const lim = { claudeLimitedUntil: new Date(Date.now() + 60000).toISOString() };
+  assert.equal(C.pickImpl(lim, C.readSwitches({})), "codex");
+  assert.equal(C.pickImpl(lim, C.readSwitches({ ORCH_CODEX_DEV: "off" })), "claude");
+  assert.equal(C.pickImpl(lim, C.readSwitches({ ORCH_CODEX: "off" })), "claude");
+  assert.equal(C.pickImpl({ claudeLimitedUntil: new Date(Date.now() - 1000).toISOString() }, C.readSwitches({})), "claude");
+  assert.equal(C.pickImpl(null, C.readSwitches({})), "claude");
   assert.equal(C.readSwitches({ ORCH_AUTO: "on" }).auto, true);
   assert.deepEqual(C.readSwitches({ ORCH_SONNET: "OFF", ORCH_OPUS: "false", ORCH_CODEX: "0", ORCH_PAUSED: "on" }),
-    { sonnet: false, opus: false, codex: false, paused: true, auto: false, window: "" });
+    { sonnet: false, opus: false, codex: false, paused: true, auto: false, codexDev: true, window: "" });
   assert.equal(C.readSwitches({ ORCH_CODEX: "maybe" }).codex, true, "unknown value keeps default");
   const at = (hhmm) => Date.parse(`2026-11-20T${hhmm}:00+09:00`);
   assert.equal(C.windowOpen("", at("03:00")), true);
@@ -281,4 +288,18 @@ test("resolvePatchNotes: same entry on both sides, one with the PR number filled
   assert.equal(C.resolvePatchNotes(conflicted), file([e("1.15.0"), e("1.14.0", 253), e("1.13.1", 255)]));
   const reversed = file(["<<<<<<< HEAD", e("1.13.1", 255), "=======", e("1.13.1"), ">>>>>>> m"]);
   assert.equal(C.resolvePatchNotes(reversed), file([e("1.13.1", 255)]));
+});
+
+test("diagnosis: Codex root-cause prompt wraps the fix prompt; developer prompt gets it appended only when present", () => {
+  const p = C.diagnosePrompt("## 수정 지시\n- a.ts:3 실패");
+  assert.match(p, /읽기 전용/);
+  assert.match(p, /근본 원인/);
+  assert.match(p, /a\.ts:3 실패/);
+  assert.equal(C.withDiagnosis("원래 지시", ""), "원래 지시");
+  assert.equal(C.withDiagnosis("원래 지시", "  \n"), "원래 지시");
+  const w = C.withDiagnosis("원래 지시", "원인: 경계값");
+  assert.match(w, /^원래 지시/);
+  assert.match(w, /반복 실패 원인 분석 \(Codex, 참고\)/);
+  assert.match(w, /원인: 경계값$/);
+  assert.equal(C.withDiagnosis("x", "y".repeat(7000)).length < 6200, true, "capped");
 });

@@ -103,8 +103,10 @@ async function load() {
 async function prepare() {
   const { n, d } = await load();
   if (d.skip) { console.log(`[plan-revise] skip #${n}: ${d.reason}`); setOutput("skip", "true"); return; }
+  const prompt = revisePrompt(d);
+  fs.writeFileSync(path.join(env.RUNNER_TEMP ?? ".", "plan-revise-prompt.md"), prompt);   // Codex fallback
   setOutput("skip", "false");
-  setOutput("prompt", revisePrompt(d));
+  setOutput("prompt", prompt);
 }
 
 async function publish() {

@@ -168,13 +168,14 @@ export const SWITCH_VARS = {
   codex: "ORCH_CODEX",
   paused: "ORCH_PAUSED",
   auto: "ORCH_AUTO",
+  codexDev: "ORCH_CODEX_DEV",
   window: "ORCH_WINDOW",
 } as const;
 export type SwitchKey = keyof typeof SWITCH_VARS;
 export type FlagKey = Exclude<SwitchKey, "window">;
-export const FLAG_KEYS: FlagKey[] = ["sonnet", "opus", "codex", "paused", "auto"];
+export const FLAG_KEYS: FlagKey[] = ["sonnet", "opus", "codex", "codexDev", "paused", "auto"];
 
-export interface Switches { sonnet: boolean; opus: boolean; codex: boolean; paused: boolean; auto: boolean; window: string }
+export interface Switches { sonnet: boolean; opus: boolean; codex: boolean; paused: boolean; auto: boolean; codexDev: boolean; window: string }
 
 const OFF_RE = /^(off|false|0|no|disabled?)$/i;
 const ON_RE = /^(on|true|1|yes|enabled?)$/i;
@@ -195,6 +196,7 @@ export function switchesFromVars(vars: { name: string; value: string }[]): Switc
     codex: flag(get(SWITCH_VARS.codex), true),
     paused: flag(get(SWITCH_VARS.paused), false),
     auto: flag(get(SWITCH_VARS.auto), false),
+    codexDev: flag(get(SWITCH_VARS.codexDev), true),
     window: (get(SWITCH_VARS.window) ?? "").trim(),
   };
 }

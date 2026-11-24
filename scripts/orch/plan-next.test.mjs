@@ -63,9 +63,11 @@ test("prompts: Codex is read-only fact finding; Claude gets the facts, the human
   const c = codexPrompt({ repo: "o/r" });
   assert.match(c, /읽기 전용/);
   assert.match(c, /사람이 해야 하는 일/);
+  assert.match(c, /단계 통합 검수/);
   const p = claudePrompt({ repo: "o/r", facts: "## 사실\n- a.ts:10" });
   assert.match(p, /a\.ts:10/);
   assert.match(p, /끝났다고 가정/);
+  assert.match(p, /통합 검수에 빠진 것/);
   assert.match(p, /NEXT_PLAN\.md/);
   assert.match(p, /NEXT_NONE\.md/);
   assert.match(p, /HUMAN_TODO\.md/);

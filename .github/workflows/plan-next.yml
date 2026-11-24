@@ -50,44 +50,21 @@ jobs:
           key: codex-auth-latest
           restore-keys: codex-auth-
       - name: Codex pre-analysis
-        id: codex
         if: steps.prep.outputs.skip == 'false' && vars.ORCH_CODEX != 'off'
         continue-on-error: true
         env:
           CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
         run: |
           umask 077
-          [ -f ~/.orch/codex-auth.enc ] || { echo "note=Codex 로그인 없음"; exit 0; }
+          [ -f ~/.orch/codex-auth.enc ] || { echo "Codex 로그인 없음"; exit 0; }
           mkdir -p ~/.codex
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null \
-            || { rm -f ~/.codex/auth.json; echo "note=Codex 로그인 복호화 실패"; exit 0; }
-          before=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+            || { rm -f ~/.codex/auth.json; echo "Codex 로그인 복호화 실패"; exit 0; }
+          sha256sum ~/.codex/auth.json | cut -c1-64 > "$RUNNER_TEMP/codex-before"
           npm i -g @openai/codex >/dev/null 2>&1
           codex exec -s read-only --skip-git-repo-check \
             -o "$RUNNER_TEMP/codex-facts.md" \
-            "$(cat "$RUNNER_TEMP/plan-next-codex.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || echo "note=Codex 실행 실패(한도 또는 오류)"
-          after=$(sha256sum ~/.codex/auth.json 2>/dev/null | cut -c1-64)
-          if [ -n "$after" ] && [ "$before" != "$after" ]; then
-            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Remove Codex credentials from the runner
-        if: always()
-        run: rm -rf ~/.codex
-      - name: Save refreshed encrypted login
-        if: steps.codex.outputs.changed == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.orch/codex-auth.enc
-          key: codex-auth-${{ github.run_id }}
-      - name: Prune old login cache entries
-        if: steps.codex.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          KEEP: codex-auth-${{ github.run_id }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
-            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
+            "$(cat "$RUNNER_TEMP/plan-next-codex.md")" > "$RUNNER_TEMP/codex.log" 2>&1 || echo "Codex 실행 실패(한도 또는 오류)"
 
       # ---- Claude PM writes the next plan
       - name: Build PM prompt
@@ -107,6 +84,47 @@ jobs:
             --max-turns 80
             --model opus
             --allowedTools "Read,Glob,Grep,Write,Task,Agent,Bash(ls:*),Bash(git log:*),Bash(mkdir:*)"
+      # ---- Claude wrote nothing (usage limit / error): Codex does the same job with the same prompt.
+      - name: Codex PM fallback
+        if: steps.prep.outputs.skip == 'false' && vars.ORCH_CODEX != 'off' && vars.ORCH_CODEX_DEV != 'off'
+        continue-on-error: true
+        run: |
+          if [ -f .orch/NEXT_PLAN.md ] || [ -f .orch/NEXT_NONE.md ]; then echo "Claude 결과 있음"; exit 0; fi
+          [ -f ~/.codex/auth.json ] || { echo "Codex 로그인 없음"; exit 0; }
+          mkdir -p .orch
+          codex exec --full-auto --skip-git-repo-check -o "$RUNNER_TEMP/codex-pm.md" \
+            "$(cat "$RUNNER_TEMP/plan-next-pm.md")" > "$RUNNER_TEMP/codex-pm.log" 2>&1 || echo "Codex 실행 실패"
+          ls -la .orch || true
+      - name: Keep a refreshed Codex login
+        id: relogin
+        if: always() && steps.prep.outputs.skip == 'false'
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          { [ -f ~/.codex/auth.json ] && [ -f "$RUNNER_TEMP/codex-before" ]; } || exit 0
+          after=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          if [ "$(cat "$RUNNER_TEMP/codex-before")" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Remove Codex credentials from the runner
+        if: always()
+        run: rm -rf ~/.codex
+      - name: Save refreshed encrypted login
+        if: always() && steps.relogin.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-${{ github.run_id }}
+      - name: Prune old login cache entries
+        if: always() && steps.relogin.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: codex-auth-${{ github.run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
+            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
       - name: Open the plan Issue (owner PAT) or record "nothing to do"
         if: steps.prep.outputs.skip == 'false'
         run: node "$RUNNER_TEMP/orch/plan-next.mjs" publish
