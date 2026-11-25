@@ -70,6 +70,14 @@ jobs:
       - name: Install dependencies
         if: steps.prep.outputs.skip != 'true'
         run: if [ -f package-lock.json ]; then npm ci; fi
+      - name: Set up Python (repos with requirements.txt)
+        if: steps.prep.outputs.skip != 'true' && hashFiles('requirements.txt') != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        if: steps.prep.outputs.skip != 'true' && hashFiles('requirements.txt') != ''
+        run: python -m pip install -r requirements.txt
       # ---- Same step failed review twice: Codex (read-only) diagnoses the root cause first.
       - name: Restore encrypted Codex login (diagnosis)
         if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.diagnose == 'true' && steps.prep.outputs.impl != 'codex' && vars.ORCH_CODEX != 'off'
@@ -120,7 +128,7 @@ jobs:
           claude_args: >-
             --max-turns 150
             ${{ steps.prep.outputs.model_args }}
-            --allowedTools "Edit,Write,Read,Glob,Grep,LS,Skill,Task,Agent,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*)"
+            --allowedTools "Edit,Write,Read,Glob,Grep,LS,Skill,Task,Agent,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(python3:*),Bash(python:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git add:*),Bash(git rm:*),Bash(git commit:*)"
       # ---- Codex develops (Claude usage-limited). Same prompt, same commit/push checks as Claude.
       - name: Restore encrypted Codex login
         if: steps.prep.outputs.skip != 'true' && steps.prep.outputs.impl == 'codex'
