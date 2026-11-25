@@ -119,9 +119,10 @@ test("docs/roadmap.json: passes parseRoadmap unchanged, setup 20 + expansion 5",
   assert.deepEqual(r.setup, (raw.setup as Record<string, unknown>[]).map(norm));
   assert.deepEqual(r.expansion, (raw.expansion as Record<string, unknown>[]).map(norm));
   assert.deepEqual(roadmapCount(r.setup), { done: 19, doing: 0, todo: 0, total: 19, text: "19/19" });
-  assert.deepEqual(roadmapCount(r.expansion).text, "0/5");
-  assert.equal(roadmapCount(r.expansion).doing, 1);
-  assert.equal(r.expansion.find((i) => i.id === "6.1")?.status, "doing");
+  // 사용자 결정(2026-11-25): 6.1~6.5 는 요청 시에만 → 모두 na, 합계에서 빠진다
+  assert.deepEqual(roadmapCount(r.expansion), { done: 0, doing: 0, todo: 0, total: 0, text: "0/0" });
+  assert.deepEqual(r.expansion.map((i) => i.status), ["na", "na", "na", "na", "na"]);
+  assert.ok(r.expansion.every((i) => i.note?.startsWith("나중에(사용자 요청 시) · ")));
 });
 
 test("deployEveryFromVars: positive integer, else 10", () => {
