@@ -445,6 +445,86 @@ test("readRepo app: ORCH_APP_URLS beats roadmap.json app; missing there → road
   assert.equal(self.app, null);
 });
 
+// ---------------------------------------------------------------- connection check (readConnection via readRepo)
+
+test("readRepo connection: contents listings + label orch:go (200 / 404 / 500); 500 never throws and keeps other fields", async () => {
+  const sha = "a".repeat(40);
+  const ent = (name: string, type = "file") => ({ name, type, sha });
+  const ENGINE = ["claude-review.yml", "claude-work.yml", "cleanup-branches.yml", "codex-login.yml", "final-sync.yml", "idea-review.yml",
+    "orchestrator.yml", "plan-next.yml", "plan-review.yml", "plan-revise.yml", "pm-unblock.yml", "usage.yml", "wait.yml"];
+  const P = {
+    root: `/repos/${REPO}/contents`,
+    docs: `/repos/${REPO}/contents/docs`,
+    workflows: `/repos/${REPO}/contents/.github/workflows`,
+    scripts: `/repos/${REPO}/contents/scripts`,
+    label: `/repos/${REPO}/labels/orch:go`,
+  };
+  const okBodies: Record<keyof typeof P, unknown> = {
+    root: [ent("CLAUDE.md"), ent("AGENTS.md"), ent("docs", "dir")],
+    docs: [ent("roadmap.json"), ent("architecture.json"), ent("PM_HANDOFF.md")],
+    workflows: [...ENGINE.map((n) => ent(n)), ent("ci.yml")],
+    scripts: [ent("orch", "dir")],
+    label: { name: "orch:go" },
+  };
+  const roadmap = { setup: [{ id: "0.1", title: "준비", status: "done" }] };
+  const runIssue = { number: 5, title: "[orch] 실행", body: body(), state: "open", labels: [{ name: "orch:run" }], html_url: `https://github.com/${REPO}/issues/5`, updated_at: "2026-01-01T00:00:00Z", user: { login: "o" } };
+  const seen: string[] = [];
+  const fake = (status: Partial<Record<keyof typeof P, number>>) => (async (url: string, init?: RequestInit) => {
+    const u = new URL(url);
+    const json = (s: number, b: unknown) => new Response(JSON.stringify(b ?? {}), { status: s });
+    if ((init?.method ?? "GET") !== "GET") return json(500, {});
+    seen.push(u.pathname);
+    for (const k of Object.keys(P) as (keyof typeof P)[]) {
+      if (u.pathname === P[k]) {
+        const s = status[k] ?? 200;
+        return json(s, s === 200 ? okBodies[k] : { message: "x" });
+      }
+    }
+    if (u.pathname.endsWith("/contents/docs/roadmap.json")) {
+      return json(200, { encoding: "base64", content: Buffer.from(JSON.stringify(roadmap)).toString("base64") });
+    }
+    if (u.pathname.endsWith("/actions/variables")) return json(200, { variables: [] });
+    if (u.pathname.endsWith("/issues")) return json(200, u.searchParams.get("labels") === "orch:run" ? [runIssue] : []);
+    return json(404, {});
+  }) as typeof fetch;
+  const ok = (c: { items: { key: string; ok: boolean | null }[] }, key: string) => c.items.find((i) => i.key === key)!.ok;
+
+  const all = await readRepo(REPO, ENV, fake({}));
+  assert.ok(seen.includes(P.label), "label pathname is the unencoded /labels/orch:go");
+  assert.ok(all.connection);
+  assert.equal(all.connection.done, 9);
+  assert.equal(all.connection.total, 9);
+  assert.equal(all.connection.engine.orchSha, sha);
+
+  const missing = await readRepo(REPO, ENV, fake({ docs: 404, workflows: 404, label: 404 }));
+  assert.equal(ok(missing.connection!, "roadmap"), false);
+  assert.equal(ok(missing.connection!, "workflows"), false);
+  assert.equal(ok(missing.connection!, "ci"), false);
+  assert.equal(ok(missing.connection!, "label"), false);
+  assert.equal(ok(missing.connection!, "claude"), true);
+  assert.equal(missing.connection!.total, 9);
+
+  const base = await readRepo(REPO, ENV, fake({}));
+  const err = await readRepo(REPO, ENV, fake({ root: 500, docs: 500, workflows: 500, scripts: 500, label: 500 }));
+  for (const k of ["workflows", "ci", "orch", "claude", "agents", "roadmap", "architecture", "handoff", "label"]) assert.equal(ok(err.connection!, k), null, k);
+  assert.equal(err.connection!.total, 0);
+  assert.equal(err.connection!.engine.orchSha, null);
+  assert.deepEqual(err.runs, base.runs);
+  assert.equal(err.runs.length, 1);
+  assert.equal(err.runsError, null);
+  assert.deepEqual(err.roadmap, base.roadmap);
+  assert.ok(err.roadmap);
+  assert.equal(err.roadmapError, null);
+  assert.deepEqual(err.switches, base.switches);
+  assert.equal(err.deployMode, base.deployMode);
+
+  const notArray = await readRepo(REPO, ENV, (async (url: string, init?: RequestInit) => {
+    if (new URL(url).pathname === P.scripts) return new Response(JSON.stringify({ name: "scripts", type: "file", sha }), { status: 200 });
+    return fake({})(url, init);
+  }) as typeof fetch);
+  assert.equal(ok(notArray.connection!, "orch"), null, "non-array listing = could not check");
+});
+
 // ---------------------------------------------------------------- docs/architecture.json (readArchitecture + GET /api/architecture)
 
 const ARCH = { version: 1, purpose: "예시 목적", sections: [{ no: "01", kicker: "개요", title: "한눈에", blocks: [{ type: "text", lines: ["문장"] }] }] };

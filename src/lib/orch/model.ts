@@ -407,6 +407,120 @@ export interface RepoView {
   patchNotesError?: string | null;
   /** This dashboard's own repo (decided on the server: ORCH_SELF_REPO or SELF_REPO). Its card gets no 'app' link. */
   isSelf: boolean;
+  /** New-project connection check (engine files, docs, label); null/absent = not read. */
+  connection?: ConnectionCheck | null;
+}
+
+// ---------------------------------------------------------------- connection check (new project wiring)
+
+/** Engine workflows a connected project needs: .github/workflows without ci.yml and deploy.yml (sorted). */
+export const ENGINE_WORKFLOWS: readonly string[] = [
+  "claude-review.yml", "claude-work.yml", "cleanup-branches.yml", "codex-login.yml", "final-sync.yml", "idea-review.yml",
+  "orchestrator.yml", "plan-next.yml", "plan-review.yml", "plan-revise.yml", "pm-unblock.yml", "usage.yml", "wait.yml",
+];
+
+export interface ConnectionItem {
+  key: string;
+  label: string;
+  /** true = present, false = missing, null = could not check. */
+  ok: boolean | null;
+  missing?: string[];
+}
+
+export interface ConnectionCheck {
+  items: ConnectionItem[];
+  /** Items with ok true. */
+  done: number;
+  /** Items with ok not null (checked). */
+  total: number;
+  engine: { orchSha: string | null; workflowShas: Record<string, string> };
+  /** Same engine as this dashboard's repo; null = not compared (set by markEngineDrift). */
+  engineSame: boolean | null;
+  /** 'scripts/orch' and/or workflow file names that differ from this dashboard's repo (sorted). */
+  engineDiff: string[];
+}
+
+export interface DirEntry { name: string; type: string; sha: string }
+/** A directory listing: entries, 'missing' (404, no such directory) or 'error' (could not read). */
+export type DirListing = DirEntry[] | "missing" | "error";
+export interface ConnectionInput {
+  root: DirListing;
+  docs: DirListing;
+  workflows: DirListing;
+  scripts: DirListing;
+  /** Label orch:go: true = exists, false = 404, null = could not read. */
+  label: boolean | null;
+}
+
+/** ok for "this listing has an entry named `name` (of `type`)": false when the directory itself is missing, null on error. */
+function hasEntry(list: DirListing, name: string, type?: string): boolean | null {
+  if (list === "error") return null;
+  if (list === "missing") return false;
+  return list.some((e) => e.name === name && (type === undefined || e.type === type));
+}
+
+export function connectionCheck(input: ConnectionInput): ConnectionCheck {
+  const { root, docs, workflows, scripts, label } = input;
+  const wfFiles = Array.isArray(workflows) ? workflows.filter((e) => e.type === "file") : [];
+  const missingWf = workflows === "error" ? undefined
+    : ENGINE_WORKFLOWS.filter((n) => !wfFiles.some((e) => e.name === n)).sort();
+  const wfItem: ConnectionItem = { key: "workflows", label: "엔진 워크플로", ok: missingWf === undefined ? null : missingWf.length === 0 };
+  if (missingWf !== undefined) wfItem.missing = missingWf;
+  const items: ConnectionItem[] = [
+    wfItem,
+    { key: "ci", label: "ci.yml", ok: hasEntry(workflows, "ci.yml", "file") },
+    { key: "orch", label: "scripts/orch", ok: hasEntry(scripts, "orch", "dir") },
+    { key: "claude", label: "CLAUDE.md", ok: hasEntry(root, "CLAUDE.md", "file") },
+    { key: "agents", label: "AGENTS.md", ok: hasEntry(root, "AGENTS.md", "file") },
+    { key: "roadmap", label: "docs/roadmap.json", ok: hasEntry(docs, "roadmap.json", "file") },
+    { key: "architecture", label: "docs/architecture.json", ok: hasEntry(docs, "architecture.json", "file") },
+    { key: "handoff", label: "docs/PM_HANDOFF.md", ok: hasEntry(docs, "PM_HANDOFF.md", "file") },
+    { key: "label", label: "라벨 orch:go", ok: label },
+  ];
+  const orch = Array.isArray(scripts) ? scripts.find((e) => e.name === "orch" && e.type === "dir") : undefined;
+  const workflowShas: Record<string, string> = {};
+  for (const n of ENGINE_WORKFLOWS) {
+    const e = wfFiles.find((x) => x.name === n);
+    if (e) workflowShas[n] = e.sha;
+  }
+  return {
+    items,
+    done: items.filter((i) => i.ok === true).length,
+    total: items.filter((i) => i.ok !== null).length,
+    engine: { orchSha: orch?.sha ?? null, workflowShas },
+    engineSame: null,
+    engineDiff: [],
+  };
+}
+
+/** Compare every project's engine (scripts/orch tree sha + engine workflow blob shas) to this dashboard's own repo. Pure. */
+export function markEngineDrift(views: RepoView[]): RepoView[] {
+  const ref = views.find((v) => v.isSelf)?.connection ?? null;
+  return views.map((v) => {
+    if (!v.connection) return { ...v };
+    const c = v.connection;
+    let engineSame: boolean | null = null;
+    let engineDiff: string[] = [];
+    if (!v.isSelf && ref?.engine.orchSha && c.engine.orchSha) {
+      const diff = new Set<string>();
+      if (ref.engine.orchSha !== c.engine.orchSha) diff.add("scripts/orch");
+      for (const n of new Set([...Object.keys(ref.engine.workflowShas), ...Object.keys(c.engine.workflowShas)])) {
+        if (ref.engine.workflowShas[n] !== c.engine.workflowShas[n]) diff.add(n);
+      }
+      engineDiff = [...diff].sort();
+      engineSame = engineDiff.length === 0;
+    }
+    return {
+      ...v,
+      connection: {
+        ...c,
+        items: c.items.map((i) => ({ ...i, ...(i.missing ? { missing: [...i.missing] } : {}) })),
+        engine: { orchSha: c.engine.orchSha, workflowShas: { ...c.engine.workflowShas } },
+        engineSame,
+        engineDiff,
+      },
+    };
+  });
 }
 
 /** The dashboard's own repository (patch notes tab, project card without an 'app' link). The server may override it with ORCH_SELF_REPO. */

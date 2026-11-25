@@ -1,7 +1,8 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
 //   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
 //           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments,
-//           docs/roadmap.json · docs/patchnotes.json · docs/architecture.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
+//           docs/roadmap.json · docs/patchnotes.json · docs/architecture.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read),
+//           connection check: contents directory listings (root, docs/, .github/workflows, scripts/) and label orch:go (labels API)
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch);
 //           'orch:go' label on plan approval; one '[idea]' Issue per idea
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read and write, Variables read/write, Actions read/write).
@@ -9,7 +10,7 @@
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
 import type { PatchNote } from "@/lib/patchnotes";
-import { ARCH_MAX_BYTES, USAGE_RETRY_MS, appFromEnv, type DeployMode, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
+import { ARCH_MAX_BYTES, USAGE_RETRY_MS, appFromEnv, connectionCheck, type ConnectionCheck, type DirListing, type DeployMode, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -186,11 +187,41 @@ export async function readIdeas(f: Fetch, token: string, repo: string): Promise<
   return list.filter((x): x is Idea => x !== null);
 }
 
+/** Directory listing for the connection check: array → entries, 404 → 'missing', anything else → 'error'. */
+async function readDir(f: Fetch, token: string, path: string): Promise<DirListing> {
+  try {
+    const j = await call(f, token, "GET", path);
+    if (!Array.isArray(j)) return "error";
+    return j
+      .filter((e): e is { name: string; type: string; sha: string } => !!e && typeof e.name === "string" && typeof e.type === "string" && typeof e.sha === "string")
+      .map((e) => ({ name: e.name, type: e.type, sha: e.sha }));
+  } catch (e) {
+    return e instanceof GitHubError && e.status === 404 ? "missing" : "error";
+  }
+}
+
+/** New-project connection check (engine workflows, scripts/orch, CLAUDE.md, docs, label orch:go). Never throws. */
+export async function readConnection(f: Fetch, token: string, repo: string): Promise<ConnectionCheck> {
+  const [root, docs, workflows, scripts, label] = await Promise.allSettled([
+    readDir(f, token, `/repos/${repo}/contents`),
+    readDir(f, token, `/repos/${repo}/contents/docs`),
+    readDir(f, token, `/repos/${repo}/contents/.github/workflows`),
+    readDir(f, token, `/repos/${repo}/contents/scripts`),
+    // Not encoded, like issues?labels=orch:run: the pathname stays /repos/{repo}/labels/orch:go.
+    call(f, token, "GET", `/repos/${repo}/labels/orch:go`),
+  ]);
+  const dir = (r: PromiseSettledResult<DirListing>): DirListing => (r.status === "fulfilled" ? r.value : "error");
+  return connectionCheck({
+    root: dir(root), docs: dir(docs), workflows: dir(workflows), scripts: dir(scripts),
+    label: label.status === "fulfilled" ? true : label.reason instanceof GitHubError && label.reason.status === 404 ? false : null,
+  });
+}
+
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw, usage, plans, ideas, roadmap, pending, notes] = await Promise.allSettled([
+  const [runs, sw, usage, plans, ideas, roadmap, pending, notes, connection] = await Promise.allSettled([
     readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo), readIdeas(f, token, repo),
-    readRoadmap(f, token, repo), readDeployPending(f, token, repo), readPatchNotes(f, token, repo),
+    readRoadmap(f, token, repo), readDeployPending(f, token, repo), readPatchNotes(f, token, repo), readConnection(f, token, repo),
   ]);
   const notesMissing = notes.status === "rejected" && notes.reason instanceof GitHubError && notes.reason.status === 404;
   // 404 = this project has no roadmap file (not an error). describe() lumps 403 and 404 together, so compare directly.
@@ -219,6 +250,7 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     patchNotesError: notes.status === "fulfilled" || notesMissing ? null
       : notes.reason instanceof PatchNotesFormatError ? notes.reason.message : describe(notes.reason),
     isSelf,
+    connection: connection.status === "fulfilled" ? connection.value : null,
   };
 }
 
