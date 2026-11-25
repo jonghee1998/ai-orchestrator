@@ -20,11 +20,12 @@ _마지막 갱신: 2026-11-25 (KST)_
   - AI 팀 탭: '지금 일하는 AI', 스위치를 모든 프로젝트에 한 번에 적용 (#317)
   - 구조 탭: 프로젝트별 접기 카드(머리 = 목적), 각 저장소 `docs/architecture.json`을 읽어 표시 (#317)
   - 새 프로젝트 표준 절차 `docs/NEW_PROJECT.md` (#317)
-- ai-orchestrator 로드맵: setup 0.1~0.20 모두 done/na. 확장 6.1~6.5 는 사용자가 요청할 때만 계획한다(na). 그래서 이 저장소는 사용자 요청이나 검수 지적이 없으면 자동 다음 계획에서 고를 로드맵 일이 없다. 남은 일은 아래 다음 할 일(Personal-dashboard 5·6단계, 화면 다듬기)을 따른다.
+- ai-orchestrator 로드맵: setup 0.1~0.20 모두 done/na. 확장 6.1~6.5 는 사용자가 요청할 때만 계획한다(na). 그래서 이 저장소는 사용자 요청이나 검수 지적이 없으면 자동 다음 계획에서 고를 로드맵 일이 없다. 남은 일은 아래 다음 할 일을 따른다.
 - 등록 프로젝트(`ORCH_REPOS`): `jonghee1998/ai-orchestrator`, `jonghee1998/Personal-dashboard`.
 - 2026-11-24: `plan-review.mjs`가 정규화된 계획의 `null` 필드(`model: null`)를 감사 프롬프트에 그대로 보여 줘서 Codex가 매번 'high' 오탐을 냈다. 프롬프트에서 `null` 필드를 빼도록 고쳤다(이 커밋).
 - 2026-11-24: 엔진에 `pull_request_target: closed`를 추가했다(#324, Personal-dashboard #21). orch/* PR을 사용자가 Merge하거나 닫으면 순찰을 기다리지 않고 바로 완료·취소 처리한다. 순찰은 7·27·47분으로 옮겼다. GitHub가 정기 실행을 자주 건너뛰기 때문이다(이 저장소는 하루 약 4회). Personal-dashboard #20 Merge 2초 뒤 완료되는 것을 확인했다.
 - Personal-dashboard #15(5단계 전반)가 끝났다(#20 반영).
+- Personal-dashboard 5단계(CI Postgres로 개발 DB 검증 대체)·6단계(수신 API 재설계)는 그 저장소에서 끝났다(로드맵 1~12단계 done): https://github.com/jonghee1998/Personal-dashboard/blob/main/docs/roadmap.json
 - 사용량: Claude 7일 구간 소모가 빠르다(하루 약 20%). Codex는 여유가 있다.
 - Supabase 무료 플랜은 계정 전체에서 활성 프로젝트 2개까지다. 지금 활성: ai-orchestrator(Personal-os 조직), Personal-dashboard 운영. 개발용 프로젝트는 일시정지 상태다.
 
@@ -51,6 +52,4 @@ _마지막 갱신: 2026-11-25 (KST)_
 8. 스텝 하나가 너무 크면(스키마+API+UI+문서) 나눈다. 데이터 계층과 화면은 분리한다.
 
 ## 다음 할 일
-1. Personal-dashboard 5단계 마무리: 개발 DB를 CI Postgres로 대체할지 사용자 확인을 받는다(무료 2개 한도). 자세한 것은 그 저장소의 `docs/PM_HANDOFF.md`.
-2. Personal-dashboard 6단계 계획(수신 API 통합 + 실패 원인 로그). 계획 작성 체크리스트를 지킨다.
-3. 사소한 것(나중에): 상황판 화면 다듬기는 사용자가 정리해서 줄 예정이다.
+1. 사소한 것(나중에): 상황판 화면 다듬기는 사용자가 정리해서 줄 예정이다.
