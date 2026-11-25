@@ -28,5 +28,8 @@ test("applyDecision: appends [PM 지시] to existing steps only; human passes th
   assert.equal(applyDecision(plan, JSON.stringify({ action: "human", cause: "파일 필요" })).action, "human");
   assert.equal(applyDecision(plan, JSON.stringify({ action: "resume", notes: [] })).ok, false);
   assert.equal(applyDecision(plan, "nope").ok, false);
+  // parsePlan이 채운 model: null(지정 없음)은 형식 오류가 아니다 (#379에서 자동 해제가 막힌 원인)
+  const withNull = { ...plan, model: null, steps: plan.steps.map((s) => ({ ...s, model: null })) };
+  assert.equal(applyDecision(withNull, JSON.stringify({ action: "resume", cause: "c", notes: [{ step: 1, text: "x" }] })).ok, true);
   assert.match(unblockPrompt({ repo: "o/r", plan, state: { step: 1, reason: "r" }, logs: "", review: "" }), /PM_DECISION\.json/);
 });
