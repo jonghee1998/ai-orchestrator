@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { STATUS_LABEL, approveMessage, deployLabel, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
+import { FLAG_KEYS, STATUS_LABEL, approveMessage, deployLabel, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
 import { readRepo, writeSwitch } from "./github";
 
 const planBlock = (steps = 2) => "```json\n" + JSON.stringify({
@@ -55,11 +55,11 @@ test("sortRuns: needs-user first, finished last", () => {
 });
 
 test("switches: same defaults as the engine; dashboard changes validated", () => {
-  assert.deepEqual(switchesFromVars([]), { sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "" });
+  assert.deepEqual(switchesFromVars([]), { sonnet: true, opus: true, fable: true, codex: true, paused: false, auto: false, codexDev: true, window: "" });
   assert.equal(switchesFromVars([{ name: "ORCH_AUTO", value: "on" }]).auto, true);
   assert.deepEqual(switchChange("auto", true), { ok: true, name: "ORCH_AUTO", value: "on" });
   assert.deepEqual(switchesFromVars([{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "on" }, { name: "ORCH_WINDOW", value: " 08:00-24:00 " }]),
-    { sonnet: true, opus: true, codex: false, paused: true, auto: false, codexDev: true, window: "08:00-24:00" });
+    { sonnet: true, opus: true, fable: true, codex: false, paused: true, auto: false, codexDev: true, window: "08:00-24:00" });
   assert.deepEqual(switchChange("codex", false), { ok: true, name: "ORCH_CODEX", value: "off" });
   assert.deepEqual(switchChange("paused", true), { ok: true, name: "ORCH_PAUSED", value: "on" });
   assert.deepEqual(switchChange("window", "22:00-06:00"), { ok: true, name: "ORCH_WINDOW", value: "22:00-06:00" });
@@ -278,4 +278,14 @@ test("deployLabel: direct / batch 0 → 배포 완료, batch N → 배포 대기
   assert.equal(deployLabel("batch", 0), "배포 완료");
   assert.equal(deployLabel("batch", 3), "배포 대기 3");
   assert.equal(deployLabel("unknown", null), "배포 대기 ?");
+});
+
+test("switches: fable (ORCH_FABLE) defaults on, parses on/off, odd values → default, sits after opus in FLAG_KEYS", () => {
+  assert.equal(switchesFromVars([]).fable, true);
+  assert.equal(switchesFromVars([{ name: "ORCH_FABLE", value: "off" }]).fable, false);
+  assert.equal(switchesFromVars([{ name: "ORCH_FABLE", value: "on" }]).fable, true);
+  assert.equal(switchesFromVars([{ name: "ORCH_FABLE", value: "maybe" }]).fable, true);
+  assert.deepEqual(FLAG_KEYS, ["sonnet", "opus", "fable", "codex", "codexDev", "paused", "auto"]);
+  assert.deepEqual(switchChange("fable", false), { ok: true, name: "ORCH_FABLE", value: "off" });
+  assert.deepEqual(switchChange("fable", true), { ok: true, name: "ORCH_FABLE", value: "on" });
 });

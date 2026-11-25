@@ -372,7 +372,7 @@ test("readRepo: switches read across variable pages; a failing page → switches
     return json(404, {});
   }) as typeof fetch;
   const ok = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: REPO }, fakeVars(200));
-  assert.deepEqual(ok.switches, { sonnet: true, opus: true, codex: false, paused: false, auto: false, codexDev: true, window: "08:00-24:00" });
+  assert.deepEqual(ok.switches, { sonnet: true, opus: true, fable: true, codex: false, paused: false, auto: false, codexDev: true, window: "08:00-24:00" });
   assert.deepEqual(calls, ["?per_page=100&page=1", "?per_page=100&page=2"], "stops at total_count");
   assert.deepEqual(mergedSwitches([ok]).value, ok.switches);
   const noTotal = await readRepo(REPO, ENV, fakeVars(200, undefined));

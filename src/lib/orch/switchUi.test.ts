@@ -61,7 +61,7 @@ test("differsText: key labels with short repo names; none → null", () => {
 
 // ---------------------------------------------------------------- alignSwitches / alignResultMessage
 
-const VALUE: Switches = { sonnet: true, opus: true, codex: false, paused: false, auto: false, codexDev: true, window: "08:00-24:00" };
+const VALUE: Switches = { sonnet: true, opus: true, fable: true, codex: false, paused: false, auto: false, codexDev: true, window: "08:00-24:00" };
 
 test("alignSwitches: only differing keys, in FLAG_KEYS → window order, with the reference value", async () => {
   const calls: [SwitchKey, boolean | string][] = [];
@@ -110,4 +110,13 @@ test("alignSwitches: HTTP error, 503 and empty targets are per-key rejections", 
   const out = await alignSwitches(VALUE, [{ key: "sonnet", repos: ["o/b"] }, { key: "opus", repos: ["o/b"] }, { key: "codex", repos: ["o/b"] }], async (k) => replies[k]);
   assert.deepEqual(out.map((k) => k.rejected), ["github_error", "쓰기 토큰 없음", "적용할 프로젝트 없음"]);
   assert.equal(alignResultMessage(out).tone, "warn");
+});
+
+test("fable: differsText names Fable(repo); alignSwitches posts fable then codex in FLAG_KEYS order", async () => {
+  const differs = [{ key: "fable" as const, repos: ["o/b"] }, { key: "codex" as const, repos: ["o/b"] }];
+  assert.match(differsText(differs)!, /Fable\(b\)/);
+  const calls: [SwitchKey, boolean | string][] = [];
+  const out = await alignSwitches(VALUE, [...differs].reverse(), async (k, v) => { calls.push([k, v]); return r200([OK("o/a"), OK("o/b")]); });
+  assert.deepEqual(calls, [["fable", true], ["codex", false]]);
+  assert.match(alignResultMessage(out).text, /Fable/);
 });

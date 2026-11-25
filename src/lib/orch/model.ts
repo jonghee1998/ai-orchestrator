@@ -167,6 +167,7 @@ export function parseRun(repo: string, issue: IssueLike): OrchRun | null {
 export const SWITCH_VARS = {
   sonnet: "ORCH_SONNET",
   opus: "ORCH_OPUS",
+  fable: "ORCH_FABLE",
   codex: "ORCH_CODEX",
   paused: "ORCH_PAUSED",
   auto: "ORCH_AUTO",
@@ -175,9 +176,9 @@ export const SWITCH_VARS = {
 } as const;
 export type SwitchKey = keyof typeof SWITCH_VARS;
 export type FlagKey = Exclude<SwitchKey, "window">;
-export const FLAG_KEYS: FlagKey[] = ["sonnet", "opus", "codex", "codexDev", "paused", "auto"];
+export const FLAG_KEYS: FlagKey[] = ["sonnet", "opus", "fable", "codex", "codexDev", "paused", "auto"];
 
-export interface Switches { sonnet: boolean; opus: boolean; codex: boolean; paused: boolean; auto: boolean; codexDev: boolean; window: string }
+export interface Switches { sonnet: boolean; opus: boolean; fable: boolean; codex: boolean; paused: boolean; auto: boolean; codexDev: boolean; window: string }
 
 const OFF_RE = /^(off|false|0|no|disabled?)$/i;
 const ON_RE = /^(on|true|1|yes|enabled?)$/i;
@@ -195,6 +196,7 @@ export function switchesFromVars(vars: { name: string; value: string }[]): Switc
   return {
     sonnet: flag(get(SWITCH_VARS.sonnet), true),
     opus: flag(get(SWITCH_VARS.opus), true),
+    fable: flag(get(SWITCH_VARS.fable), true),
     codex: flag(get(SWITCH_VARS.codex), true),
     paused: flag(get(SWITCH_VARS.paused), false),
     auto: flag(get(SWITCH_VARS.auto), false),
