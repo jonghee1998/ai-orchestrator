@@ -63,6 +63,7 @@ jobs:
           IMPL: ${{ inputs.impl }}
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_FABLE: ${{ vars.ORCH_FABLE }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
           ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
           ORCH_AUTO: ${{ vars.ORCH_AUTO }}
@@ -238,6 +239,7 @@ jobs:
           READ_TOKEN: ${{ github.token }}   # dispatch wait.yml when waiting for a usage limit
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_FABLE: ${{ vars.ORCH_FABLE }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
           ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
           ORCH_AUTO: ${{ vars.ORCH_AUTO }}

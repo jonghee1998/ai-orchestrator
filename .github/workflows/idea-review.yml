@@ -52,6 +52,7 @@ jobs:
           CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_FABLE: ${{ vars.ORCH_FABLE }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
           ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
 

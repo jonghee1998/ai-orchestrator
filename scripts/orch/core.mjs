@@ -94,6 +94,8 @@ export function validatePlan(p) {
 
 export const MODEL_LIGHT = "sonnet";
 export const MODEL_HEAVY = "opus";
+/** "fable" in a plan → this model id (analysis·hypothesis·model-design steps). ORCH_FABLE off → Opus. */
+export const MODEL_FABLE = "claude-fable-5-2";
 /** After this many failed reviews on one step, a light model is escalated to the heavy one. */
 export const ESCALATE_AFTER = 2;
 /** Step text that suggests risky work (DB, auth, payment, permissions, deploy) → heavy model by default. */
@@ -138,6 +140,7 @@ export function readSwitches(e = {}) {
   return {
     sonnet: flag(e.ORCH_SONNET, true),
     opus: flag(e.ORCH_OPUS, true),
+    fable: flag(e.ORCH_FABLE, true),
     codex: flag(e.ORCH_CODEX, true),
     paused: flag(e.ORCH_PAUSED, false),
     auto: flag(e.ORCH_AUTO, false),
@@ -166,13 +169,18 @@ export function gateReason(sw, nowMs = Date.now()) {
   return null;
 }
 
-const isHeavy = (model) => /opus/i.test(model);
+const isFable = (model) => /fable/i.test(model);
+const isHeavy = (model) => /opus|fable/i.test(model);
 
 /**
  * Apply ON/OFF switches to a picked model.
  * @returns {{model: string, why: string} | {hold: string}}
  */
 export function resolveModel(pick, sw) {
+  if (isFable(pick.model)) {
+    if (sw.fable !== false) return { model: MODEL_FABLE, why: pick.why };
+    pick = { model: MODEL_HEAVY, why: `${pick.why} → Fable OFF라 Opus` };
+  }
   const heavy = isHeavy(pick.model);
   if (heavy ? sw.opus : sw.sonnet) return pick;
   if (heavy && sw.sonnet) return { model: MODEL_LIGHT, why: `${pick.why} → Opus OFF라 Sonnet` };

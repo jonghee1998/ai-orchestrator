@@ -96,7 +96,7 @@ const ROUTINES: [string, string][] = [
 
 const REPO_SETTINGS: [string, string][] = [
   ["Secrets", "CLAUDE_CODE_OAUTH_TOKEN · BOT_PAT(소유자 토큰) · CODEX_AUTH_KEY(Codex 로그인 암호화) · NTFY_TOPIC(폰 알림). 두 저장소 같음"],
-  ["Variables", "ORCH_AUTO · ORCH_CODEX_DEV · ORCH_SONNET · ORCH_OPUS · ORCH_CODEX · ORCH_PAUSED · ORCH_WINDOW. 상황판 스위치가 모든 저장소에 한 번에 씀"],
+  ["Variables", "ORCH_AUTO · ORCH_CODEX_DEV · ORCH_SONNET · ORCH_OPUS · ORCH_FABLE · ORCH_CODEX · ORCH_PAUSED · ORCH_WINDOW. 상황판 스위치가 모든 저장소에 한 번에 씀"],
   ["필수 검사", "ai-orchestrator: test · screens / Personal-dashboard: test · screens · db · pii"],
   ["main 규칙", "자동 머지 허용 · 필수 검사 통과해야 반영 · 브랜치 삭제 금지 · 강제 push 금지"],
   ["Codex 앱", "저장소 Code review 켜짐. Actions의 Codex는 로그인을 캐시에 암호화해 씀"],

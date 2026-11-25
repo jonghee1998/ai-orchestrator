@@ -804,7 +804,8 @@ async function prepare() {
   const resolved = C.resolveModel(picked, SW());
   const pick = resolved.hold ? picked : resolved;
   log(`model: ${pick.model} (${pick.why})`);
-  setOutput("model_args", `--model ${pick.model}`);
+  // Fable may be unavailable/overloaded: the CLI falls back to Opus instead of failing the step.
+  setOutput("model_args", pick.model === C.MODEL_FABLE ? `--model ${pick.model} --fallback-model ${C.MODEL_HEAVY}` : `--model ${pick.model}`);
   setOutput("model", `${pick.model} (${pick.why})`);
   setOutput("prompt", prompt);
 }
