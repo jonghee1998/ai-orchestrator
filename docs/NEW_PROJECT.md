@@ -23,6 +23,7 @@
    - `scripts/orch/` 전체와 `.github/workflows/`의 엔진 워크플로 13개: `claude-review.yml`, `claude-work.yml`, `cleanup-branches.yml`, `codex-login.yml`, `final-sync.yml`, `idea-review.yml`, `orchestrator.yml`, `plan-next.yml`, `plan-review.yml`, `plan-revise.yml`, `pm-unblock.yml`, `usage.yml`, `wait.yml`.
      - 선택: `deploy.yml` — Vercel Deploy Hook으로 운영 배포하는 프로젝트만 설치하고, 이때 저장소 Secret `VERCEL_DEPLOY_HOOK`을 함께 설정합니다. 시크릿 없이 설치하면 main 반영 때 배포 잡이 실패합니다.
    - `ci.yml`: 워크플로 `name`을 **`ci`**로 둡니다. `orchestrator.yml`의 `workflow_run`이 이 이름의 워크플로가 끝날 때 엔진을 깨우기 때문입니다. 최종 판정은 이름이 아니라 PR head 커밋(head SHA)에 생긴 check run 결과(엔진 자체 검사 advance·work·publish 제외)로 하므로, `ci.yml`은 `pull_request`에서 돌아 PR head SHA에 check run을 남겨야 합니다(check run이 하나도 없으면 엔진이 계속 기다립니다). 테스트와 함께 개인정보 검사 단계(실데이터·키 값이 커밋되지 않았는지)를 넣습니다.
+   - Python 패키지가 필요한 프로젝트: 저장소 루트에 `requirements.txt`를 두면 구현·검수 환경(claude-work·claude-review)이 Python 3.12를 준비하고 `pip install -r requirements.txt`를 실행합니다. 구현 AI는 `python3`를 실행할 수 있고, `npm test`가 pytest를 함께 돌리게 하면 CI·검수가 같은 기준을 씁니다. `requirements.txt`가 없으면 이 단계는 건너뜁니다.
 3. **CLAUDE.md·AGENTS.md** — 구현 Claude와 Codex 검수가 읽는 규칙. 이 저장소 파일을 기준으로 스택·수정 금지 경로만 바꿉니다.
 4. **Secrets** — 설정 위치와 권한은 [ORCH_MANUAL 8장 '처음 한 번 설정'](ORCH_MANUAL.md#8-처음-한-번-설정-저장소마다) 표를 따릅니다: `CLAUDE_CODE_OAUTH_TOKEN`, `BOT_PAT`, `CODEX_AUTH_KEY`(Codex 사용량, [사용량](ORCH_MANUAL.md#사용량은-어떻게-재나요) 절), `NTFY_TOPIC`(선택).
 5. **외부 PR 승인 설정** — Settings → Actions → General에서 외부 기여자 PR의 워크플로는 승인 후에만 실행되게 둡니다(공개 저장소 필수).
