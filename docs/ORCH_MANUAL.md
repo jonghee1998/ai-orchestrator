@@ -204,7 +204,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 Vercel 자동 배포는 꺼져 있습니다(`vercel.json`). 무료 플랜의 하루 배포 한도를 보호하기 위해서입니다. 대신 `deploy` 워크플로가 main에 업데이트(머지)가 **10개** 쌓일 때마다 Vercel Deploy Hook으로 한 번 배포합니다.
 
 - 마지막으로 배포한 커밋은 태그 `prod-deployed`로 기억합니다. 개수는 그 이후 main에 머지된 수입니다.
-- 태그 `prod-deployed`가 없으면(compare 404) 프로젝트 카드에 '배포 대기' 대신 '바로 배포'로 표시합니다. 첫 배포 전 저장소도 같게 보입니다.
+- 프로젝트 카드 머리의 배포 문구: 태그 `prod-deployed`가 없을 때(compare 404)와 마지막 배포 뒤 머지 대기가 0일 때는 '배포 완료', 대기가 있으면 '배포 대기 N', 읽기 실패는 '배포 대기 ?'로 표시합니다. 판정 방식은 그대로라서 첫 배포 전 저장소도 기존 판정에 따라 '배포 완료'로 보일 수 있습니다.
 - 지금 바로 배포하려면 GitHub 앱 → Actions → `deploy` → **Run workflow**를 누릅니다(기본값이 강제 배포).
 - 기준 개수는 저장소 변수 `ORCH_DEPLOY_EVERY`로 바꿀 수 있습니다(기본 10).
 - 한 번만 설정하면 됩니다: Vercel → `ai-orchestrator` → Settings → Git → **Deploy Hooks**에서 이름 `orch`, 브랜치 `main`으로 만들고, 나온 URL을 GitHub 저장소 Settings → Secrets and variables → Actions → **New repository secret** `VERCEL_DEPLOY_HOOK`에 넣습니다.

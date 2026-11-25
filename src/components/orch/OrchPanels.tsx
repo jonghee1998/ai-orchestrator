@@ -9,7 +9,7 @@ import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
-import { FLAG_KEYS, approveMessage, latestUsage, mergedSwitches, type SwitchKey, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { FLAG_KEYS, approveMessage, deployLabel, latestUsage, mergedSwitches, type SwitchKey, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { activeAgents, type AgentId } from "@/lib/orch/agents";
 import { WRITE_UNCONFIGURED_TEXT, alignResultMessage, alignSwitches, differsText, switchResultMessage, type SwitchAllResponse, type SwitchMessage } from "@/lib/orch/switchUi";
 import { readCollapsed, toggleCollapsed, writeCollapsed } from "@/lib/orch/collapse";
@@ -372,7 +372,7 @@ function StageCell({ c, phaseCount }: { c: BoardColumn; phaseCount?: number }) {
  * 프로젝트 카드. 머리(저장소 이름 · [단계 a/b 완료] · 남은 할 일 · 확인 필요)는 접기 버튼이고, 본문([진행 단계] · 남은 할 일 요약 · 칸 · 인프라/확장 · 단계 줄)이 접힌다.
  * [ ] 는 roadmap.json 'phases' 가 있을 때만.
  * 다른 프로젝트는 앱 주소(서버 변수 ORCH_APP_URLS > roadmap.json 'app', 서버가 v.app 으로 줌)가 있으면 머리 오른쪽에 '화면 열기' 링크 (버튼 밖, 새 탭).
- * 자기 저장소(isSelf, 서버 판정)는 링크 없음. 태그 prod-deployed 가 없는 저장소(deployMode 'direct')는 '배포 대기' 대신 '바로 배포'.
+ * 자기 저장소(isSelf, 서버 판정)는 링크 없음. 머리 문구는 deployLabel: 반영분이 모두 배포됨(direct, 또는 batch 대기 0)은 '배포 완료', 대기는 '배포 대기 N', 읽기 실패는 '배포 대기 ?'.
  */
 function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onToggle: () => void }) {
   const bodyId = useId();
@@ -416,7 +416,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
               </a>
             )}
             <span className={app ? "" : "pt-1.5"} data-testid="orch-deploy-pending">
-              {v.deployMode === "direct" ? "바로 배포" : `배포 대기 ${v.deployPending ?? "?"}`} ·{" "}
+              {deployLabel(v.deployMode, v.deployPending)} ·{" "}
               <Link href="/patch-notes" className="-my-3 inline-flex min-h-11 items-center gap-0.5 text-accent">완료 기록<ArrowRightIcon className="h-3 w-3" /></Link>
             </span>
           </div>

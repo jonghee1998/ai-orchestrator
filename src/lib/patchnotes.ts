@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.8.4", date: "2026-11-25", title: "배포 문구 통일", items: ["프로젝트 카드 머리: 반영된 것이 모두 배포된 상태는 '배포 완료', 대기가 있으면 '배포 대기 N', 읽기 실패는 '배포 대기 ?'"] },
   { version: "2.8.3", date: "2026-11-25", title: "바로 배포 표시·앱 링크 환경변수", items: ["태그 prod-deployed 가 없는 저장소는 프로젝트 카드에 '배포 대기 ?' 대신 '바로 배포'", "서버 변수 ORCH_APP_URLS 로도 다른 프로젝트 카드의 '화면 열기' 주소를 받음 (roadmap.json app 보다 우선, 자기 저장소는 무시)"] },
   { version: "2.8.2", date: "2026-11-25", title: "멈춤 즉시 진단·보안 점검표", items: ["자동 모드·Codex 켜짐일 때 멈추면 Codex PM 이 바로 원인 진단, 자동으로 풀 수 있으면 재개하고 아니면 사람 판단 요청 (#342)", "보안 정식 점검표 docs/SECURITY_CHECKLIST.md", "구조 탭 문구 정리 (시작 조건·배포 주체)"] },
   { version: "2.8.1", date: "2026-11-25", title: "Codex 임시 통과 → Claude 재검수", items: ["Claude 한도 중 Codex가 만들고 Codex가 검수한 스텝은 임시 통과", "최종 반영 전에 Claude(Opus)가 다시 검수, FAIL이면 수정 후 재검수", "상황판 상태 'Claude 재검수 중'"] },

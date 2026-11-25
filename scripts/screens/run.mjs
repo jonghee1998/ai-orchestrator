@@ -131,7 +131,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 3", "완료 기록", "인프라", "확장", "추가 검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 3", "완료 기록", "인프라", "확장", "추가 검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포", "바로 배포"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["요청만 하면 AI 팀이 계획부터 반영까지 알아서 개발", "둘째 프로젝트의 시험용 구조 문서", "구조 문서 없음", "구조 읽기 실패"], forbid: [] }, // 기존 문구 5개(아키텍처…Playwright)는 자기 카드를 펼친 뒤 검사
@@ -459,11 +459,14 @@ try {
       }
       if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
 
-      // orch-third: compare 404(태그 prod-deployed 없음) → '바로 배포 · 완료 기록', ORCH_APP_URLS 항목 → '셋째화면 열기' 새 탭 링크
+      // orch-third: compare 404(태그 prod-deployed 없음) → '배포 완료 · 완료 기록', ORCH_APP_URLS 항목 → '셋째화면 열기' 새 탭 링크
       {
         const third = page.getByTestId("orch-project-orch-third");
         const head3 = ((await third.getByTestId("orch-deploy-pending").textContent()) ?? "").replace(/\s+/g, " ").trim();
-        if (!head3.startsWith("바로 배포 · 완료 기록")) problems.push(`[projects] orch-third 카드 머리가 '바로 배포 · 완료 기록' 이 아님 (${head3})`);
+        if (!head3.startsWith("배포 완료 · 완료 기록")) problems.push(`[projects] orch-third 카드 머리가 '배포 완료 · 완료 기록' 이 아님 (${head3})`);
+        // orch-fourth: compare 200 · 대기 0 → '배포 완료 · 완료 기록'
+        const head4 = ((await page.getByTestId("orch-project-orch-fourth").getByTestId("orch-deploy-pending").textContent()) ?? "").replace(/\s+/g, " ").trim();
+        if (!head4.startsWith("배포 완료 · 완료 기록")) problems.push(`[projects] orch-fourth 카드 머리가 '배포 완료 · 완료 기록' 이 아님 (${head4})`);
         const link3 = third.getByTestId("orch-app-link");
         if ((await link3.count()) !== 1) problems.push(`[projects] orch-third 카드에 ORCH_APP_URLS 링크가 1개가 아님 (${await link3.count()})`);
         else {
