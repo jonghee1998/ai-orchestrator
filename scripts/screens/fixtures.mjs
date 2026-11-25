@@ -21,6 +21,26 @@ const state = (s) => `<!-- orch-state:v1 ${JSON.stringify({ v: 1, ...s })} -->`;
 const issue = (number, title, body, extra = {}) => ({ number, title, body, html_url: `https://github.com/${REPO}/issues/${number}`, state: "open", user: OWNER, ...extra });
 
 /** @param {Date} now — usage snapshot is "fresh" relative to this, so the dashboard never asks for a refresh. */
+// 연결 점검(readConnection) 가짜 응답: 루트·docs·workflows·scripts 목록과 라벨 orch:go. 가짜 sha 만 쓴다.
+const ENGINE_WF = ["claude-review", "claude-work", "cleanup-branches", "codex-login", "final-sync", "idea-review", "orchestrator", "plan-next", "plan-review", "plan-revise", "pm-unblock", "usage", "wait"].map((n) => `${n}.yml`);
+function connectionFixture(repo, { missingRoot = [], missingWf = [], orchSha = "b".repeat(40) } = {}) {
+  const file = (name) => ({ name, type: "file", sha: "c".repeat(40) });
+  const wf = [...ENGINE_WF, "ci.yml"].filter((n) => !missingWf.includes(n)).map(file);
+  const root = ["CLAUDE.md", "AGENTS.md"].filter((n) => !missingRoot.includes(n)).map(file);
+  const docs = ["roadmap.json", "architecture.json", "PM_HANDOFF.md"].map(file);
+  const scripts = [{ name: "orch", type: "dir", sha: orchSha }];
+  return (p) => {
+    if (p === `/repos/${repo}/contents`) return { status: 200, body: root };
+    if (p === `/repos/${repo}/contents/docs`) return { status: 200, body: docs };
+    if (p === `/repos/${repo}/contents/.github/workflows`) return { status: 200, body: wf };
+    if (p === `/repos/${repo}/contents/scripts`) return { status: 200, body: scripts };
+    if (p === `/repos/${repo}/labels/orch:go`) return { status: 200, body: { name: "orch:go" } };
+    return null;
+  };
+}
+const connectionMain = connectionFixture(REPO);
+const connectionSecond = connectionFixture(REPO2, { missingRoot: ["AGENTS.md"], missingWf: ["wait.yml"], orchSha: "a".repeat(40) });
+
 export function githubFixtures(now) {
   const iso = (minAgo) => new Date(now.getTime() - minAgo * 60_000).toISOString();
   const runsOpen = [
@@ -110,7 +130,7 @@ export function githubFixtures(now) {
     if (p === `/repos/${REPO}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
     if (p === `/repos/${REPO}/compare/prod-deployed...main`) return { status: 200, body: compare };
     if (p === `/repos/${REPO}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
-    return null;
+    return connectionMain(p);
   };
 }
 
@@ -185,7 +205,7 @@ function secondRepoFixtures(iso, usage) {
     if (p === `/repos/${REPO2}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
     if (p === `/repos/${REPO2}/compare/prod-deployed...main`) return { status: 200, body: { status: "identical", commits: [] } };
     if (p === `/repos/${REPO2}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
-    return null;
+    return connectionSecond(p);
   };
 }
 

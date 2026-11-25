@@ -9,7 +9,7 @@ import { formatKst, formatKstShort, formatKstTime } from "@/lib/time/kst";
 import { refreshSucceeded } from "@/lib/orch/refresh";
 import Link from "next/link";
 import { AlertIcon, ArrowRightIcon, CheckIcon, ChevronIcon, EditIcon, KeyIcon, PauseIcon, RefreshIcon, StateIcon, StopIcon, type StateKind } from "@/components/icons";
-import { FLAG_KEYS, approveMessage, latestUsage, mergedSwitches, type SwitchKey, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
+import { FLAG_KEYS, type ConnectionCheck, approveMessage, latestUsage, mergedSwitches, type SwitchKey, phaseStatus, planReviewBadge, roadmapCount, type FlagKey, type OrchRun, type PendingPlan, type PlanBadgeTone, type RepoView, type RoadmapItem, type RoadmapStatus, type RunStep, type UsageWindow } from "@/lib/orch/model";
 import { activeAgents, type AgentId } from "@/lib/orch/agents";
 import { WRITE_UNCONFIGURED_TEXT, alignResultMessage, alignSwitches, differsText, switchResultMessage, type SwitchAllResponse, type SwitchMessage } from "@/lib/orch/switchUi";
 import { readCollapsed, toggleCollapsed, writeCollapsed } from "@/lib/orch/collapse";
@@ -167,6 +167,40 @@ function RoadmapLine({ setup, expansion }: { setup: RoadmapItem[]; expansion: Ro
         <RoadmapList title="인프라" items={setup} testid="orch-roadmap-setup" />
         <RoadmapList title="확장" items={expansion} testid="orch-roadmap-expansion" />
       </div>
+    </details>
+  );
+}
+
+/** '연결 점검 a/b · 빠짐 N · 확인 못 함 N · 엔진 …' 한 줄. 펼치면 항목마다 한 줄. */
+function ConnectionLine({ c }: { c: ConnectionCheck }) {
+  const missing = c.items.filter((i) => i.ok === false).length;
+  const unknown = c.items.filter((i) => i.ok === null).length;
+  return (
+    <details className="mt-2" data-testid="orch-connection">
+      <summary className="flex min-h-11 cursor-pointer items-center gap-2.5 text-[13px] text-text-muted">
+        <span className="min-w-0 flex-1 truncate break-keep tabular-nums">
+          <b className="font-semibold text-text">연결 점검</b> {c.done}/{c.total}
+          {missing > 0 && <span className="text-warn"> · 빠짐 {missing}</span>}
+          {unknown > 0 && <span className="text-text-muted"> · 확인 못 함 {unknown}</span>}
+          {c.engineSame === false && <span className="text-warn"> · 엔진 버전 다름</span>}
+          {c.engineSame === true && <span className="text-text-muted"> · 엔진 같음</span>}
+        </span>
+        <ChevronIcon className="h-4 w-4" />
+      </summary>
+      <ul className="space-y-1 pb-2 pt-1 text-xs">
+        {c.items.map((i) => (
+          <li key={i.key} className="min-w-0 break-words" data-status={i.ok === null ? "unknown" : i.ok ? "ok" : "missing"}>
+            {i.label}{" "}
+            <span className={i.ok === false ? "text-warn" : "text-text-muted"}>
+              {i.ok === null ? "확인 못 함" : i.ok ? "있음" : "없음"}
+              {i.ok === false && i.missing && i.missing.length > 0 && ` · ${i.missing.join(", ")}`}
+            </span>
+          </li>
+        ))}
+        {c.engineSame === false && c.engineDiff.length > 0 && (
+          <li className="min-w-0 break-words">엔진 버전 다름 <span className="text-warn">{c.engineDiff.join(", ")}</span></li>
+        )}
+      </ul>
     </details>
   );
 }
@@ -444,6 +478,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
         )}
         {roadmapNote ? <p className={`mt-3 text-xs ${v.roadmapError ? "text-danger" : "text-text-muted"}`} data-testid="orch-roadmap-note">{roadmapNote}</p>
           : <RoadmapLine setup={v.roadmap!.setup} expansion={v.roadmap!.expansion} />}
+        {v.connection && <ConnectionLine c={v.connection} />}
         <section aria-label="작업 흐름" className="mt-2" data-testid="orch-flow">
           {v.runsError && <p className="pb-1 text-xs text-danger">작업 불러오기 실패 · {v.runsError}</p>}
           {v.plansError && <p className="pb-1 text-xs text-danger">계획 불러오기 실패 · {v.plansError}</p>}

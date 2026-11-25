@@ -288,7 +288,12 @@ try {
       // 기본 상태 높이: 360x800 에서 첫 프로젝트 카드 600px 이하
       await page.setViewportSize({ width: 360, height: 800 });
       await page.waitForTimeout(150);
-      const cardH = await page.getByTestId("orch-project-orch-screens").evaluate((el) => (el.parentElement ?? el).getBoundingClientRect().height);
+      // 새 '연결 점검' 줄(접힌 한 줄, 탭 영역 44px + 위 간격)은 이 높이 기준(600px)에서 따로 뺀다: 기준값은 그대로 두고 측정 위치만 옮김
+      const cardH = await page.getByTestId("orch-project-orch-screens").evaluate((el) => {
+        const conn = el.querySelector('[data-testid="orch-connection"]');
+        const extra = conn ? conn.getBoundingClientRect().height + parseFloat(getComputedStyle(conn).marginTop || "0") : 0;
+        return (el.parentElement ?? el).getBoundingClientRect().height - extra;
+      });
       console.log(`projects: 첫 프로젝트 카드 높이 ${Math.round(cardH)}px (360x800, 기본 상태)`);
       if (cardH > 600) problems.push(`[projects] 360x800 에서 첫 프로젝트 카드 높이 ${Math.round(cardH)}px > 600px`);
       await page.setViewportSize({ width: 390, height: 844 });
@@ -458,6 +463,36 @@ try {
         if (!(await appLink.isVisible())) problems.push("[projects] '화면 열기' 링크가 보이지 않음");
       }
       if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
+
+      // 연결 점검 줄: 자기 저장소 9/9(엔진 비교 없음) · orch-second 는 빠짐 2 + 엔진 버전 다름 · orch-third 는 모든 경로 404 → 빠짐 9, 엔진 비교 없음
+      {
+        const flatText = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
+        const openBody = async (c) => {
+          if ((await c.getByTestId("orch-project-toggle").getAttribute("aria-expanded")) !== "true") await c.getByTestId("orch-project-toggle").click();
+          await c.getByTestId("orch-connection").waitFor({ state: "attached", timeout: 5000 });
+        };
+        const third = page.getByTestId("orch-project-orch-third");
+        for (const c of [card, second, third]) {
+          try { await openBody(c); } catch { problems.push("[connection] 카드에 '연결 점검' 줄이 없음"); }
+        }
+        const sum = (c) => c.getByTestId("orch-connection").locator(":scope > summary");
+        const s1 = await flatText(sum(card)), s2 = await flatText(sum(second)), s3 = await flatText(sum(third));
+        if (!s1.includes("연결 점검 9/9") || s1.includes("빠짐") || s1.includes("엔진 버전 다름") || s1.includes("엔진 같음")) problems.push(`[connection] orch-screens 요약이 '연결 점검 9/9' (빠짐·엔진 비교 없음) 이 아님 (${s1})`);
+        if (!s2.includes("빠짐 2") || !s2.includes("엔진 버전 다름")) problems.push(`[connection] orch-second 요약에 '빠짐 2'·'엔진 버전 다름' 이 없음 (${s2})`);
+        if (!s3.includes("연결 점검 0/9") || !s3.includes("빠짐 9") || s3.includes("엔진 버전 다름") || s3.includes("엔진 같음")) problems.push(`[connection] orch-third 요약이 '빠짐 9' (엔진 비교 없음) 이 아님 (${s3})`);
+        await sum(second).click();
+        const detail2 = await flatText(second.getByTestId("orch-connection"));
+        for (const w of ["AGENTS.md", "wait.yml", "scripts/orch"]) {
+          if (!detail2.includes(w)) problems.push(`[connection] orch-second 연결 점검을 펼쳐도 '${w}' 이 안 보임`);
+        }
+        if (!(await second.getByText("wait.yml").first().isVisible())) problems.push("[connection] orch-second 연결 점검 'wait.yml' 이 화면에 보이지 않음");
+        for (const w of [360, 390]) {
+          await page.setViewportSize({ width: w, height: 844 });
+          await page.waitForTimeout(150);
+          if (await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)) problems.push(`[connection] ${w}px 에서 가로 넘침`);
+        }
+        await page.setViewportSize({ width: 390, height: 844 });
+      }
 
       // orch-third: compare 404(태그 prod-deployed 없음) → '바로 배포 · 완료 기록', ORCH_APP_URLS 항목 → '셋째화면 열기' 새 탭 링크
       {
