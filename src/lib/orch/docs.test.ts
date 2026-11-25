@@ -99,7 +99,18 @@ test("docs G: ORCH_MANUAL 운영 배포 절은 first-parent 기준·단계별 �
   const base = one("- 기준점:");
   for (const k of ["prod-deployed", "--first-parent"]) assert.ok(base.includes(k), `기준점 줄에 ${k} 없음`);
   const card = one("- 프로젝트 카드 머리의 배포 문구");
-  for (const k of ["404", "대기가 0", "배포 완료", "배포 대기 ?"]) assert.ok(card.includes(k), `카드 문구 줄에 ${k} 없음`);
+  for (const k of [
+    "404", "대기가 0", "배포 완료", "배포 대기 ?",
+    "`prod-deployed...main`", "404 또는 기준점 뒤 대기가 0이면 '배포 완료'", "404 이외", "기본 브랜치", "main 브랜치가 없",
+    "404로 답할 때", "`total_commits`", "250개 이상", "배포 대기 250", "Deployments", "Actions",
+  ]) assert.ok(card.includes(k), `카드 문구 줄에 ${k} 없음`);
+  for (const phrase of [
+    "404 이외의 오류(403·500 등)나 읽기 실패는 '배포 대기 ?'",
+    "`total_commits`가 받은 커밋 수와 다르면(250개에서 잘린 경우 포함) '배포 대기 ?'",
+    "`total_commits` 없이 커밋이 250개 이상 오면 '배포 대기 ?'",
+    "한 줄로 이어진(단일 체인) 커밋 250개가 `total_commits` 250과 함께 모두 오면 '배포 대기 250'",
+  ]) assert.ok(card.includes(phrase), `카드 문구 줄에 '${phrase}' 없음`);
+  assert.ok(!card.includes("250개 초과"), "카드 문구 줄에 옛 문구 '250개 초과' 가 남아 있음");
   const req = one("- 배포 요청 확인:");
   for (const k of ["Actions", "`deploy`", "Trigger Vercel deploy hook"]) assert.ok(req.includes(k), `배포 요청 확인 줄에 ${k} 없음`);
   assert.ok(!req.includes("prod-deployed"), "배포 요청 확인 줄에 태그 이야기가 있음");
