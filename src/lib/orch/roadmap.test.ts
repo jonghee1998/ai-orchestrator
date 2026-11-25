@@ -82,14 +82,14 @@ test("docs/roadmap.json: passes parseRoadmap unchanged, setup 20 + expansion 5",
   assert.equal(raw.setup.length, 20, "no item skipped");
   assert.equal(raw.expansion.length, 5, "no item skipped");
   const status = (id: string) => r.setup.find((i) => i.id === id)?.status;
-  assert.deepEqual([status("0.4"), status("0.14"), status("0.18")], ["doing", "na", "done"]);
+  assert.deepEqual([status("0.4"), status("0.9"), status("0.14"), status("0.18")], ["done", "done", "na", "done"]);
   assert.deepEqual(r.setup.map((i) => i.id), Array.from({ length: 20 }, (_, i) => `0.${i + 1}`));
   assert.deepEqual(r.expansion.map((i) => i.id), ["6.1", "6.2", "6.3", "6.4", "6.5"]);
   // nothing cut or defaulted: parsed items equal the file (missing note/ref → null)
   const norm = (i: Record<string, unknown>) => ({ id: i.id, title: i.title, status: i.status, note: i.note ?? null, ref: i.ref ?? null, tasks: [] });
   assert.deepEqual(r.setup, (raw.setup as Record<string, unknown>[]).map(norm));
   assert.deepEqual(r.expansion, (raw.expansion as Record<string, unknown>[]).map(norm));
-  assert.deepEqual(roadmapCount(r.setup), { done: 17, doing: 2, todo: 0, total: 19, text: "17/19" });
+  assert.deepEqual(roadmapCount(r.setup), { done: 19, doing: 0, todo: 0, total: 19, text: "19/19" });
   assert.deepEqual(roadmapCount(r.expansion).text, "0/5");
 });
 
