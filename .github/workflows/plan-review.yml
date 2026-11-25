@@ -50,6 +50,7 @@ jobs:
           CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
           ORCH_SONNET: ${{ vars.ORCH_SONNET }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_FABLE: ${{ vars.ORCH_FABLE }}
           ORCH_CODEX: ${{ vars.ORCH_CODEX }}
           ORCH_PAUSED: ${{ vars.ORCH_PAUSED }}
           ORCH_AUTO: ${{ vars.ORCH_AUTO }}
@@ -113,6 +114,7 @@ jobs:
           REVIEWER: ${{ steps.prep.outputs.reviewer }}
           CODEX_OK: ${{ steps.codex.outputs.ok }}
           ORCH_OPUS: ${{ vars.ORCH_OPUS }}
+          ORCH_FABLE: ${{ vars.ORCH_FABLE }}
         run: |
           opus_off=$(echo "$ORCH_OPUS" | tr '[:upper:]' '[:lower:]' | xargs)
           if [ "$REVIEWER" = claude ] || { [ "$CODEX_OK" != true ] && ! echo "$opus_off" | grep -Eq '^(off|false|0|no|disabled?)$'; }; then

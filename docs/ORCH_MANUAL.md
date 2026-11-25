@@ -31,7 +31,7 @@ PC를 꺼도 GitHub에서 돌아갑니다. 별도 유료 API는 쓰지 않습니
 | `goal` | ✅ | 한 줄 목표 (최종 PR 제목이 됨) |
 | `steps[]` | ✅ | 최대 10개. 각 스텝: `id`(1부터), `title`, `task`, `done_when`(기계가 확인할 수 있는 완료 기준) |
 | `steps[].stop_if` | | 이런 상황이면 멈추고 사람에게 물어봄 |
-| `steps[].model` | | 이 스텝만 모델 지정 (`sonnet` / `opus`) |
+| `steps[].model` | | 이 스텝만 모델 지정 (`sonnet` / `opus` / `fable`) |
 | `model` | | 계획 전체 기본 모델 |
 | `max_retries` | | 검수 실패 시 수정 횟수 (0~3, 기본 3) |
 | `auto_merge` | | `false`면 위험이 낮아도 사람이 머지. 단 자동 모드(`ORCH_AUTO`)가 꺼져 있을 때만이고, 켜져 있으면 `false`여도 CI 통과 후 자동 반영 (아래 [자동 모드](#자동-모드-orch_auto-상황판-ai-팀-탭-스위치) 4번) |
@@ -71,6 +71,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 | --- | --- | --- | --- |
 | `ORCH_SONNET` | `on` / `off` | on | Sonnet이 할 일을 Opus가 함 (Opus도 꺼지면 대기) |
 | `ORCH_OPUS` | `on` / `off` | on | Opus가 할 일을 Sonnet이 함. Codex를 못 쓸 때 대체 검수자가 없어 검수 대기 |
+| `ORCH_FABLE` | `on` / `off` | on | `model: "fable"` 스텝을 Opus가 함 |
 | `ORCH_CODEX` | `on` / `off` | on | Codex를 기다리지 않고 Opus가 바로 검수. Codex가 남긴 결과는 무시 |
 | `ORCH_PAUSED` | `on` / `off` | off | `on`이면 새 작업(구현·수정·대체 검수)을 전부 멈춤 |
 | `ORCH_CODEX_DEV` | `on` / `off` | on | Claude 사용량 한도일 때 Codex가 구현·수정·PM을 대신하지 않고 한도가 풀릴 때까지 대기 (6장) |
@@ -130,8 +131,9 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 
 1. 스텝의 `model` → 2. 계획의 `model` → 3. 자동
    - 자동: 스텝 제목·내용에 DB·인증·로그인·비밀번호·결제·권한·보안·배포 관련 말이 있으면 **Opus**, 아니면 **Sonnet**
-2. Sonnet으로 검수에 **2번** 떨어진 스텝은 다음 수정부터 Opus로 올립니다.
-3. ON/OFF 스위치가 마지막에 적용됩니다 (4장).
+2. `"fable"`은 Claude Fable(`claude-fable-5-2`)로 실행합니다. 가설·분석·모델 설계처럼 깊게 생각할 스텝에 계획이 직접 지정할 때만 쓰고 자동 선택은 하지 않습니다. Fable이 과부하면 그 실행은 Opus로 넘어가고, `ORCH_FABLE`이 off면 처음부터 Opus입니다.
+3. Sonnet으로 검수에 **2번** 떨어진 스텝은 다음 수정부터 Opus로 올립니다.
+4. ON/OFF 스위치가 마지막에 적용됩니다 (4장).
 
 완공 보고서 "검사 결과" 표에 스텝별 구현 모델·**쓴 스킬과 보조 에이전트**·검수자·수정 횟수가 나옵니다. 스텝 PR 본문의 "도구 사용 (자동 기록)"에는 구현 Claude가 실제로 쓴 도구 횟수, 스킬(예: ECC `verification-loop`), 보조 에이전트(예: `build-error-resolver`), 돌린 검증 명령(typecheck/test/build)이 실행 기록에서 자동으로 뽑혀 남습니다. ECC 효과는 이 기록과 수정 횟수를 run별로 비교해서 봅니다.
 

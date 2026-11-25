@@ -209,7 +209,7 @@ test("filesSummary: fallback when SUMMARY.md is missing", () => {
 });
 
 test("switches: parsing, time window (KST, wraps midnight, fail-closed), model resolution", () => {
-  assert.deepEqual(C.readSwitches({}), { sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "" });
+  assert.deepEqual(C.readSwitches({}), { sonnet: true, opus: true, fable: true, codex: true, paused: false, auto: false, codexDev: true, window: "" });
   assert.equal(C.readSwitches({ ORCH_CODEX_DEV: "off" }).codexDev, false);
   const lim = { claudeLimitedUntil: new Date(Date.now() + 60000).toISOString() };
   assert.equal(C.pickImpl(lim, C.readSwitches({})), "codex");
@@ -219,7 +219,7 @@ test("switches: parsing, time window (KST, wraps midnight, fail-closed), model r
   assert.equal(C.pickImpl(null, C.readSwitches({})), "claude");
   assert.equal(C.readSwitches({ ORCH_AUTO: "on" }).auto, true);
   assert.deepEqual(C.readSwitches({ ORCH_SONNET: "OFF", ORCH_OPUS: "false", ORCH_CODEX: "0", ORCH_PAUSED: "on" }),
-    { sonnet: false, opus: false, codex: false, paused: true, auto: false, codexDev: true, window: "" });
+    { sonnet: false, opus: false, fable: true, codex: false, paused: true, auto: false, codexDev: true, window: "" });
   assert.equal(C.readSwitches({ ORCH_CODEX: "maybe" }).codex, true, "unknown value keeps default");
   const at = (hhmm) => Date.parse(`2026-11-20T${hhmm}:00+09:00`);
   assert.equal(C.windowOpen("", at("03:00")), true);
@@ -238,6 +238,12 @@ test("switches: parsing, time window (KST, wraps midnight, fail-closed), model r
   assert.equal(C.resolveModel({ model: "opus", why: "a" }, { sonnet: true, opus: false }).model, "sonnet");
   assert.equal(C.resolveModel({ model: "sonnet", why: "a" }, { sonnet: false, opus: true }).model, "opus");
   assert.ok(C.resolveModel({ model: "claude-opus-5-5", why: "a" }, { sonnet: false, opus: false }).hold);
+  assert.equal(C.resolveModel({ model: "fable", why: "a" }, { sonnet: true, opus: true, fable: true }).model, "claude-fable-5-2");
+  assert.equal(C.resolveModel({ model: "fable", why: "a" }, { sonnet: true, opus: true }).model, "claude-fable-5-2", "fable defaults on");
+  assert.deepEqual(C.resolveModel({ model: "fable", why: "a" }, { sonnet: true, opus: true, fable: false }), { model: "opus", why: "a → Fable OFF라 Opus" });
+  assert.equal(C.resolveModel({ model: "fable", why: "a" }, { sonnet: true, opus: false, fable: false }).model, "sonnet");
+  assert.equal(C.readSwitches({ ORCH_FABLE: "off" }).fable, false);
+  assert.equal(C.readSwitches({}).fable, true);
   assert.equal(C.reviewRoute({ codex: true, opus: true }, false), "codex");
   assert.equal(C.reviewRoute({ codex: true, opus: true }, true), "claude");
   assert.equal(C.reviewRoute({ codex: false, opus: true }, false), "claude");
