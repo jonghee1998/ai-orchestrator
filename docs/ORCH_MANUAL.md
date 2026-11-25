@@ -131,7 +131,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 
 1. 스텝의 `model` → 2. 계획의 `model` → 3. 자동
    - 자동: 스텝 제목·내용에 DB·인증·로그인·비밀번호·결제·권한·보안·배포 관련 말이 있으면 **Opus**, 아니면 **Sonnet**
-2. `"fable"`은 Claude Fable(`claude-fable-5-2`)로 실행합니다. 가설·분석·모델 설계처럼 깊게 생각할 스텝에 계획이 직접 지정할 때만 쓰고 자동 선택은 하지 않습니다. Fable이 과부하면 그 실행은 Opus로 넘어가고, `ORCH_FABLE`이 off면 처음부터 Opus입니다.
+2. `"fable"`은 Claude Fable(`claude-fable-5-2`)로 실행합니다. 가설·분석·모델 설계처럼 깊게 생각할 스텝에 계획이 직접 지정할 때만 쓰고 자동 선택은 하지 않습니다. Fable이 과부하면 그 실행은 Opus로 넘어가고, `ORCH_FABLE`이 off면 처음부터 Opus이고, Opus도 꺼져 있으면 Sonnet, 셋 다 꺼져 있으면 대기입니다(4장).
 3. Sonnet으로 검수에 **2번** 떨어진 스텝은 다음 수정부터 Opus로 올립니다.
 4. ON/OFF 스위치가 마지막에 적용됩니다 (4장).
 
