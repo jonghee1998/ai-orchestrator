@@ -65,11 +65,13 @@ test("docs D: NEW_PROJECT 엔진 설치 구간(head SHA·VERCEL_DEPLOY_HOOK)과 
   assert.ok(ch4.includes("BOT_PAT"));
 });
 
-test("docs E: NEW_PROJECT 8번 스위치 초기화에 ORCH_AUTO·ORCH_CODEX_DEV", () => {
+test("docs E: NEW_PROJECT 8번 스위치 초기화에 ORCH_AUTO·ORCH_CODEX_DEV·ORCH_FABLE", () => {
   const l = lines(NEW_PROJECT()).filter((x) => x.startsWith("8. **스위치 초기화**"));
   assert.equal(l.length, 1);
   assert.ok(l[0].includes("ORCH_AUTO"));
   assert.ok(l[0].includes("ORCH_CODEX_DEV"));
+  assert.ok(l[0].includes("ORCH_FABLE"));
+  assert.ok(l[0].includes("ORCH_FABLE`는 기본이 on"));
 });
 
 test("docs F: NEW_PROJECT 1장 9번 main 보호·끝난 기준", () => {
