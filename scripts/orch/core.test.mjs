@@ -318,3 +318,13 @@ test("ciVerdict: a check GitHub left at in_progress but with conclusion + comple
   assert.equal(C.ciVerdict(runs).result, "success");
   assert.equal(C.ciVerdict([{ name: "pii", status: "in_progress", conclusion: null, completed_at: null }]).result, "pending");
 });
+
+test("lintPlan: 구현 AI가 실행할 수 없는 명령(환경변수 앞붙임·env·bash -c)을 잡는다 (#379)", () => {
+  const plan = (task, done) => ({ steps: [{ id: 1, task, done_when: [done] }] });
+  assert.equal(C.lintPlan(plan("`SCREENS_SWITCH=ok npm run screens`로 확인", "ok")).length, 1);
+  assert.equal(C.lintPlan(plan("x", "A=1 B=2 node run.mjs 통과")).length, 1);
+  assert.equal(C.lintPlan(plan("bash -c 'npm test'", "ok")).length, 1);
+  assert.equal(C.lintPlan(plan("`npm run screens:ok`로 확인", "`npm test` 통과")).length, 0);
+  assert.equal(C.lintPlan(plan("ORCH_FABLE=off 이면 Opus", "PATCH 값이 'on'")).length, 0, "설명 속 변수=값은 명령이 아니다");
+  assert.match(C.lintPlan(plan("x", "SCREENS_SWITCH=partial npm run screens"))[0].body, /npm run/);
+});

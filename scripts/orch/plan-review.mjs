@@ -85,7 +85,7 @@ export function reviewPrompt({ plan, round, previous, reviewer }) {
     "- 스텝 분할: 한 스텝이 너무 크거나(파일 다수·성격이 다른 일 혼합) 순서가 틀리면(뒤 스텝이 앞 스텝 결과에 의존하지 않는데 묶임, 또는 그 반대) 지적한다.",
     "- `done_when`이 기계로 확인 가능한지(테스트·명령·grep·화면 문구). '잘 동작함' 같은 모호한 기준은 지적한다.",
     "- 빠진 스텝·테스트·문서, 회귀 위험, 보안(인증·비밀값·권한), 데이터 손실 위험.",
-    "- 구현 Claude가 할 수 없는 일(`.github/`·`scripts/orch/` 수정, push·PR 생성)을 스텝에 넣었는지.",
+    "- 구현 Claude가 할 수 없는 일(`.github/`·`scripts/orch/` 수정, push·PR 생성, 허용 안 된 명령)을 스텝에 넣었는지. 허용 명령은 `npm`·`npx`·`node`·`python3`·`ls`·`cat`·`mkdir`·`git` 일부로 시작하는 것뿐이고, 환경변수 앞붙임(`FOO=1 npm …`)·`env`·`bash -c`는 거부된다(→ package.json scripts로).",
     "- 모델(`model`)·`auto_merge`·`max_retries` 선택이 위험도에 맞는지.",
     "- 취향·문체만으로 REVISE 하지 않는다. high/medium 지적이 하나라도 있으면 REVISE, 아니면 OK.",
     reviewer === "claude"
@@ -177,6 +177,13 @@ async function publish() {
   const review = usedClaude ? claude : codex;
   const reviewer = usedClaude ? "claude" : "codex";
   const auto = C.readSwitches(env).auto;
+  // 결정적 검사(실행 불가 명령)는 감사자 판단과 상관없이 지적으로 붙이고 REVISE로 만든다.
+  if (review) {
+    const issue = await gh.get(`/issues/${env.ISSUE}`);
+    const parsed = C.parsePlan(issue.body);
+    const lint = parsed.ok ? C.lintPlan(parsed.plan) : [];
+    if (lint.length) { review.findings = [...review.findings, ...lint]; review.verdict = "REVISE"; }
+  }
   const body = reviewComment({ round: Number(env.ROUND), hash: env.HASH, reviewer, review, runUrl: env.RUN_URL, note: env.NOTE ?? "", auto });
   await gh.post(`/issues/${env.ISSUE}/comments`, { body });
   const nx = autoNext({ review, round: Number(env.ROUND), auto });
