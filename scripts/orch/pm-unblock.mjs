@@ -61,6 +61,10 @@ export function applyDecision(plan, raw) {
   if (d.action === "human") return { ok: true, action: "human", cause, plan };
   const notes = Array.isArray(d.notes) ? d.notes : [];
   const next = JSON.parse(JSON.stringify(plan));
+  // parsePlan이 채운 null(지정 없음)은 원래 계획처럼 키를 빼야 검증·Issue 본문 재작성이 통과한다(#379).
+  const dropNull = (o) => { for (const k of ["model", "context", "try"]) if (o[k] === null) delete o[k]; };
+  dropNull(next);
+  next.steps.forEach(dropNull);
   let applied = 0;
   for (const n of notes) {
     const step = next.steps.find((s) => s.id === Number(n?.step));
