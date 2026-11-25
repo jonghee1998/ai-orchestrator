@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
+import { PATCH_NOTES } from "../patchnotes";
 
 const ROOT = process.cwd();
 const read = (p: string): string => fs.readFileSync(path.join(ROOT, p), "utf8");
@@ -81,4 +82,42 @@ test("docs F: NEW_PROJECT 1장 9번 main 보호·끝난 기준", () => {
   const done = lines(ch1).filter((l) => l.startsWith("- **끝난 기준**"));
   assert.equal(done.length, 1);
   assert.ok(done[0].includes("필수 검사"));
+});
+
+test("docs G: ORCH_MANUAL 운영 배포 절은 first-parent 기준·단계별 확인 안내", () => {
+  const sec = section(read("docs/ORCH_MANUAL.md"), "## 운영 배포", "## ");
+  assert.ok(sec, "'## 운영 배포' 절을 찾지 못함");
+  assert.ok(sec.includes("--first-parent"));
+  for (const bad of ["머지된 수입니다", "머지 대기", "업데이트(머지)", "마지막으로 배포한 커밋"]) {
+    assert.ok(!sec.includes(bad), `운영 배포 절에 '${bad}' 가 남아 있음`);
+  }
+  const one = (prefix: string): string => {
+    const hit = lines(sec).filter((l) => l.startsWith(prefix));
+    assert.equal(hit.length, 1, `'${prefix}' 로 시작하는 줄이 정확히 1개가 아님`);
+    return hit[0];
+  };
+  const base = one("- 기준점:");
+  for (const k of ["prod-deployed", "--first-parent"]) assert.ok(base.includes(k), `기준점 줄에 ${k} 없음`);
+  const card = one("- 프로젝트 카드 머리의 배포 문구");
+  for (const k of ["404", "대기가 0", "배포 완료", "배포 대기 ?"]) assert.ok(card.includes(k), `카드 문구 줄에 ${k} 없음`);
+  const req = one("- 배포 요청 확인:");
+  for (const k of ["Actions", "`deploy`", "Trigger Vercel deploy hook"]) assert.ok(req.includes(k), `배포 요청 확인 줄에 ${k} 없음`);
+  assert.ok(!req.includes("prod-deployed"), "배포 요청 확인 줄에 태그 이야기가 있음");
+  const tag = one("- 기준 갱신 확인:");
+  for (const k of ["Remember deployed commit", "prod-deployed"]) assert.ok(tag.includes(k), `기준 갱신 확인 줄에 ${k} 없음`);
+  const build = one("- 빌드 확인:");
+  for (const k of ["Vercel", "Deployments"]) assert.ok(build.includes(k), `빌드 확인 줄에 ${k} 없음`);
+});
+
+test("docs H: PM_HANDOFF 현재 상태의 상황판 버전은 PATCH_NOTES 에 있고 2.8.4 이상", () => {
+  const sec = section(read("docs/PM_HANDOFF.md"), "## 현재 상태", "## ");
+  assert.ok(sec, "'## 현재 상태' 절을 찾지 못함");
+  const m = sec.match(/상황판 v(\d+\.\d+\.\d+)/);
+  assert.ok(m, "현재 상태에 '상황판 vX.Y.Z' 가 없음");
+  const v = m[1];
+  assert.ok(PATCH_NOTES.some((n) => n.version === v), `PATCH_NOTES 에 ${v} 가 없음`);
+  const num = (s: string): number[] => s.split(".").map(Number);
+  const [a, b] = [num(v), num("2.8.4")];
+  const cmp = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+  assert.ok(cmp >= 0, `${v} 는 2.8.4 보다 낮음`);
 });
