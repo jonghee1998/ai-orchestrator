@@ -1,0 +1,104 @@
+# Auto mode: a run stopped (blocked). Codex acts as PM right away: reads the stop reason, run log and review
+# findings, then either appends a "[PM 지시]" note to the plan's step and resumes (orch:go via owner PAT), or leaves
+# a "사람 판단 필요" comment. Dispatched by the orchestrator's block(). Never edits code.
+# Shares the orch-usage concurrency group (one encrypted Codex login cache).
+name: pm-unblock
+run-name: "pm-unblock #${{ inputs.issue }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue: { required: true, type: string }
+
+permissions: {}
+
+jobs:
+  unblock:
+    concurrency:
+      group: orch-usage
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: write   # prune old encrypted-login cache entries
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Keep a trusted copy of the orchestrator scripts
+        run: cp -r scripts/orch "$RUNNER_TEMP/orch"
+      - name: Should Codex unblock now?
+        id: prep
+        run: node "$RUNNER_TEMP/orch/pm-unblock.mjs" prepare
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          ISSUE: ${{ inputs.issue }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
+          ORCH_CODEX: ${{ vars.ORCH_CODEX }}
+      - name: Restore encrypted Codex login
+        if: steps.prep.outputs.skip == 'false'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-latest
+          restore-keys: codex-auth-
+      - name: Codex PM decides
+        if: steps.prep.outputs.skip == 'false'
+        continue-on-error: true
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          [ -f ~/.orch/codex-auth.enc ] || { echo "Codex 로그인 없음"; exit 0; }
+          mkdir -p ~/.codex .orch
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:CODEX_AUTH_KEY -in ~/.orch/codex-auth.enc -out ~/.codex/auth.json 2>/dev/null \
+            || { rm -f ~/.codex/auth.json; echo "Codex 로그인 복호화 실패"; exit 0; }
+          sha256sum ~/.codex/auth.json | cut -c1-64 > "$RUNNER_TEMP/codex-before"
+          npm i -g @openai/codex >/dev/null 2>&1
+          codex exec -s workspace-write -c approval_policy=never --skip-git-repo-check -o "$RUNNER_TEMP/codex-pm.md" \
+            "$(cat "$RUNNER_TEMP/pm-unblock-prompt.md")" > "$RUNNER_TEMP/codex-pm.log" 2>&1 || echo "Codex 실행 실패"
+          tail -n 20 "$RUNNER_TEMP/codex-pm.log" || true
+          ls -la .orch || true
+      - name: Keep a refreshed Codex login
+        id: relogin
+        if: always() && steps.prep.outputs.skip == 'false'
+        env:
+          CODEX_AUTH_KEY: ${{ secrets.CODEX_AUTH_KEY }}
+        run: |
+          umask 077
+          { [ -f ~/.codex/auth.json ] && [ -f "$RUNNER_TEMP/codex-before" ]; } || exit 0
+          after=$(sha256sum ~/.codex/auth.json | cut -c1-64)
+          if [ "$(cat "$RUNNER_TEMP/codex-before")" != "$after" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:CODEX_AUTH_KEY -in ~/.codex/auth.json -out ~/.orch/codex-auth.enc
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Remove Codex credentials from the runner
+        if: always()
+        run: rm -rf ~/.codex
+      - name: Save refreshed encrypted login
+        if: always() && steps.relogin.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.orch/codex-auth.enc
+          key: codex-auth-${{ github.run_id }}
+      - name: Prune old login cache entries
+        if: always() && steps.relogin.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: codex-auth-${{ github.run_id }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=codex-auth-&per_page=100" --jq '.actions_caches[] | select(.key != env.KEEP) | .id' \
+            | while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id" --silent || true; done
+      - name: Resume with PM notes, or ask a person
+        if: steps.prep.outputs.skip == 'false'
+        run: node "$RUNNER_TEMP/orch/pm-unblock.mjs" publish
+        env:
+          BOT_PAT: ${{ secrets.BOT_PAT }}
+          ISSUE: ${{ inputs.issue }}
+          ORCH_AUTO: ${{ vars.ORCH_AUTO }}
+          ORCH_CODEX: ${{ vars.ORCH_CODEX }}

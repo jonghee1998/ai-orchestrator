@@ -169,6 +169,12 @@ async function block(run, reason, url, kind = "work") {
   );
   await setLabels(run.n, [C.LABELS.blocked], []);
   await notify(`⛔ Run #${run.n} 중단`, `${run.plan?.goal ?? ""} — ${reason}`, run.issue.html_url);
+  // Auto mode: Codex PM looks at it right away (pm-unblock.yml), instead of waiting for the hourly Claude PM check.
+  const sw = SW();
+  if (sw.auto && sw.codex && kind !== "final") {
+    await ro().post("/actions/workflows/pm-unblock.yml/dispatches", { ref: "main", inputs: { issue: String(run.n) } })
+      .catch((e) => log(`pm-unblock dispatch failed: ${e.message}`));
+  }
 }
 
 // ---------------------------------------------------------------- start / resume / cancel
