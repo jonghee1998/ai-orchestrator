@@ -462,7 +462,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
 }
 
 /** 프로젝트 탭: 프로젝트마다 남은 할 일 · 3칸(계획·개발·통합) · 인프라/확장 한 줄 · 단계 줄 3개 · 추가 검토(아이디어) 줄 (모두 접고 펼 수 있음). */
-const AGENT_NAME: Record<AgentId, string> = { sonnet: "Sonnet", opus: "Opus", codex: "Codex", user: "사용자" };
+const AGENT_NAME: Record<AgentId, string> = { sonnet: "Sonnet", opus: "Opus", fable: "Fable", codex: "Codex", user: "사용자" };
 
 /** AI 팀 탭 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
 function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
@@ -478,6 +478,7 @@ function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
               {row.off ? <span className="text-text-muted">OFF</span>
                 : !row.items.length && <span className="text-text-muted">쉬는 중</span>}
             </div>
+            {row.agent === "fable" && <p className="text-xs text-text-muted">깊은 분석·가설·모델 설계(계획이 지정할 때)</p>}
             {!row.off && row.items.map((it) => (
               <p key={`${it.repo}#${it.number}`} className={`flex min-w-0 items-center gap-1 text-[13px] ${row.agent === "user" ? "text-warn" : "text-text-muted"}`}>
                 <span className="shrink-0">{short(it.repo)} ·</span>
