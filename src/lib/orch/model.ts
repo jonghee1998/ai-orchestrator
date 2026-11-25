@@ -377,6 +377,8 @@ export interface Idea {
   } | null;
 }
 
+export type DeployMode = "batch" | "direct" | "unknown";
+
 export interface RepoView {
   repo: string;
   plans: PendingPlan[];
@@ -394,6 +396,10 @@ export interface RepoView {
   roadmapError: string | null;
   /** Merge commits on main since tag prod-deployed (approximation); null = no tag or read failed. */
   deployPending: number | null;
+  /** compare prod-deployed...main: ok → 'batch', 404 (no tag) → 'direct' (deployed on every merge), other failure → 'unknown'. */
+  deployMode: DeployMode;
+  /** Card app link: ORCH_APP_URLS entry, else roadmap.json app; always null for this dashboard's own repo (isSelf). */
+  app: RoadmapApp | null;
   /** ORCH_DEPLOY_EVERY (default 10). */
   deployEvery: number;
   /** docs/patchnotes.json (other projects' patch notes); null = no file (404) or unreadable (then patchNotesError). */
@@ -512,14 +518,40 @@ function roadmapItem(v: unknown): RoadmapItem | null {
   };
 }
 
-/** roadmap.json "app": { label?, url }. Only a well-formed https:// URL is accepted; anything else → null. Label cut to 12 chars. */
+/**
+ * Shared app-link check (roadmap.json "app" and ORCH_APP_URLS). Only a well-formed https:// URL is accepted; anything
+ * else → null. URL and label are trimmed, label cut to 12 chars, blank/non-string label → null.
+ */
+export function parseAppLink(url: unknown, label: unknown): RoadmapApp | null {
+  const u = str(url)?.trim();
+  if (!u || !u.startsWith("https://")) return null;
+  try { if (new URL(u).protocol !== "https:") return null; } catch { return null; }
+  return { label: str(label)?.trim().slice(0, ROADMAP_APP_LABEL_MAX) || null, url: u };
+}
+
+/** roadmap.json "app": { label?, url } → parseAppLink. */
 function roadmapApp(v: unknown): RoadmapApp | null {
   const o = obj(v);
-  const url = str(o?.url)?.trim();
-  if (!o || !url || !url.startsWith("https://")) return null;
-  try { if (new URL(url).protocol !== "https:") return null; } catch { return null; }
-  const label = str(o.label)?.trim().slice(0, ROADMAP_APP_LABEL_MAX) || null;
-  return { label, url };
+  return o ? parseAppLink(o.url, o.label) : null;
+}
+
+/**
+ * Server variable ORCH_APP_URLS: comma list of 'owner/repo=https://…' or 'owner/repo=label|https://…'.
+ * Entries, repo names, labels and URLs are trimmed; repo names compared case-insensitively; the first well-formed
+ * entry for the repo wins; malformed entries are skipped. No entry → null.
+ */
+export function appFromEnv(repo: string, env: Readonly<Record<string, string | undefined>>): RoadmapApp | null {
+  const want = repo.trim().toLowerCase();
+  for (const raw of (env.ORCH_APP_URLS ?? "").split(",")) {
+    const entry = raw.trim();
+    const eq = entry.indexOf("=");
+    if (eq <= 0 || entry.slice(0, eq).trim().toLowerCase() !== want) continue;
+    const value = entry.slice(eq + 1);
+    const bar = value.indexOf("|");
+    const app = bar >= 0 ? parseAppLink(value.slice(bar + 1), value.slice(0, bar)) : parseAppLink(value, null);
+    if (app) return app;
+  }
+  return null;
 }
 
 /** Parse docs/roadmap.json. Not a JSON object → null; malformed items skipped, long strings cut, unknown status → todo. */
