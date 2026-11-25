@@ -88,6 +88,7 @@ export function githubFixtures(now) {
   ] };
 
   const second = secondRepoFixtures(iso, usage);
+  const connection = connectionFixtures(REPO, { agents: true, wait: true, orchSha: "b".repeat(40) });
   const archOnly = archOnlyFixtures(iso);
   /** @returns {{status:number, body:unknown} | null} */
   return (method, url) => {
@@ -110,7 +111,7 @@ export function githubFixtures(now) {
     if (p === `/repos/${REPO}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
     if (p === `/repos/${REPO}/compare/prod-deployed...main`) return { status: 200, body: compare };
     if (p === `/repos/${REPO}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
-    return null;
+    return connection(p);
   };
 }
 
@@ -167,9 +168,13 @@ function secondRepoFixtures(iso, usage) {
     ],
   };
   const architectureContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(architecture, null, 2)).toString("base64") };
+  // REPO2: AGENTS.md·wait.yml 없음, scripts/orch sha 가 REPO 와 다름 → '빠짐 2' · '엔진 버전 다름'
+  const connection = connectionFixtures(REPO2, { agents: false, wait: false, orchSha: "a".repeat(40) });
   return (method, url) => {
     if (method !== "GET") return null;
     const p = url.pathname, q = url.searchParams;
+    const conn = connection(p);
+    if (conn) return conn;
     if (p === `/repos/${REPO2}/contents/docs/architecture.json`) return { status: 200, body: architectureContent };
     if (p === `/repos/${REPO2}/issues`) {
       const label = q.get("labels");
@@ -207,6 +212,24 @@ function archOnlyFixtures(iso) {
     // third 는 태그 prod-deployed 없음(compare 404) → 프로젝트 카드 '바로 배포', fourth 는 200(배포 대기 0)
     if (p === `/repos/${repo}/compare/prod-deployed...main`) return repo === REPO3 ? { status: 404, body: { message: "Not Found" } } : { status: 200, body: { status: "identical", commits: [] } };
     if (p === `/repos/${repo}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
+    return null;
+  };
+}
+
+// 연결 점검(프로젝트 카드): 루트·docs·workflows·scripts 목록과 라벨 orch:go. 라벨 경로는 인코딩하지 않는다. 그 밖의 경로는 null(404).
+const ENGINE_WF = ["claude-review", "claude-work", "cleanup-branches", "codex-login", "final-sync", "idea-review", "orchestrator", "plan-next", "plan-review", "plan-revise", "pm-unblock", "usage", "wait"];
+function connectionFixtures(repo, { agents, wait, orchSha }) {
+  const file = (name, c = "1") => ({ name, type: "file", sha: c.repeat(40) });
+  const wf = [file("ci.yml", "2"), ...ENGINE_WF.filter((n) => wait || n !== "wait").map((n) => file(`${n}.yml`, "3"))];
+  const lists = {
+    [`/repos/${repo}/contents`]: [file("CLAUDE.md"), ...(agents ? [file("AGENTS.md")] : [])],
+    [`/repos/${repo}/contents/docs`]: [file("roadmap.json"), file("architecture.json"), file("PM_HANDOFF.md")],
+    [`/repos/${repo}/contents/.github/workflows`]: wf,
+    [`/repos/${repo}/contents/scripts`]: [{ name: "orch", type: "dir", sha: orchSha }],
+  };
+  return (p) => {
+    if (lists[p]) return { status: 200, body: lists[p] };
+    if (p === `/repos/${repo}/labels/orch:go`) return { status: 200, body: { name: "orch:go" } };
     return null;
   };
 }

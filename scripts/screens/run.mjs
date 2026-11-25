@@ -459,6 +459,25 @@ try {
       }
       if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
 
+      // 연결 점검 줄(orch-connection): REPO 9/9(엔진 비교 없음), REPO2 빠짐 2·엔진 버전 다름(펼치면 항목·파일명), REPO3 는 404 → 빠짐 9·엔진 비교 표시 없음
+      {
+        const sum = async (c) => ((await c.getByTestId("orch-connection").locator(":scope > summary").textContent()) ?? "").replace(/\s+/g, " ").trim();
+        const s1 = await sum(card);
+        if (!s1.includes("연결 점검 9/9")) problems.push(`[projects] orch-screens 연결 점검 줄에 '연결 점검 9/9' 가 없음 (${s1})`);
+        if (/빠짐|엔진 버전 다름|엔진 같음/.test(s1)) problems.push(`[projects] orch-screens(자기 저장소) 연결 점검 줄에 빠짐·엔진 비교 표시가 있음 (${s1})`);
+        const s2 = await sum(second);
+        for (const want of ["연결 점검 7/9", "빠짐 2", "엔진 버전 다름"]) if (!s2.includes(want)) problems.push(`[projects] orch-second 연결 점검 줄에 '${want}' 이 없음 (${s2})`);
+        const conn2 = second.getByTestId("orch-connection");
+        await conn2.locator(":scope > summary").click();
+        for (const want of ["AGENTS.md", "wait.yml", "scripts/orch"]) {
+          try { await conn2.getByText(want).first().waitFor({ state: "visible", timeout: 5000 }); }
+          catch { problems.push(`[projects] orch-second 연결 점검을 펼쳐도 '${want}' 이 안 보임`); }
+        }
+        const s3 = await sum(page.getByTestId("orch-project-orch-third"));
+        for (const want of ["연결 점검 0/9", "빠짐 9"]) if (!s3.includes(want)) problems.push(`[projects] orch-third 연결 점검 줄에 '${want}' 이 없음 (${s3})`);
+        if (/엔진 버전 다름|엔진 같음/.test(s3)) problems.push(`[projects] orch-third 연결 점검 줄에 엔진 비교가 표시됨 (${s3})`);
+      }
+
       // orch-third: compare 404(태그 prod-deployed 없음) → '바로 배포 · 완료 기록', ORCH_APP_URLS 항목 → '셋째화면 열기' 새 탭 링크
       {
         const third = page.getByTestId("orch-project-orch-third");
