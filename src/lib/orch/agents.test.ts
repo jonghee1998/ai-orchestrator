@@ -3,7 +3,7 @@ import test from "node:test";
 import { activeAgents, pickModel, resolveModel } from "./agents";
 import type { OrchRun, OrchStatus, RunStep, Switches } from "./model";
 
-const sw = (o: Partial<Switches> = {}): Switches => ({ sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "", ...o });
+const sw = (o: Partial<Switches> = {}): Switches => ({ sonnet: true, opus: true, fable: true, codex: true, paused: false, auto: false, codexDev: true, window: "", ...o });
 const step = (id: number, o: Partial<RunStep> = {}): RunStep => ({ id, title: `스텝 ${id}`, state: "current", checks: [], model: null, task: null, ...o });
 function run(o: Partial<OrchRun> = {}): OrchRun {
   return {
@@ -64,6 +64,43 @@ test("pickModel/resolveModel match scripts/orch/core.mjs", async () => {
   }
 });
 
+test("Fable resolveModel matches engine string for string", async () => {
+  const eng = await core();
+  const sets = [sw(), sw({ fable: false }), sw({ fable: false, opus: false }), sw({ fable: false, opus: false, sonnet: false }), sw({ fable: false, sonnet: false })];
+  for (const m of ["fable", "claude-fable-5-2"]) {
+    for (const withPlan of [false, true]) {
+      for (const s of sets) {
+        const plan = withPlan ? { model: "fable", steps: [{ id: 1, title: "t", task: "x" }] } : { steps: [{ id: 1, title: "t", task: "x", model: m }] };
+        const r = run({
+          planModel: withPlan ? "fable" : null,
+          steps: plan.steps.map((p) => step(p.id, { title: p.title, task: p.task, model: (p as PStep).model ?? null })),
+        });
+        const e = eng.pickModel(plan, 1, 0);
+        const er = eng.resolveModel(e, s);
+        const ctx = JSON.stringify({ m, withPlan, s });
+        assert.equal(resolveModel(pickModel(r, 1, 0), s), "hold" in er ? null : er.model, ctx);
+      }
+    }
+  }
+});
+
+test("Fable implementing run goes to fable row, or opus when fable is OFF", () => {
+  const r = run({ steps: [step(1, { model: "fable" })] });
+  const on = activeAgents([r], { "o/a": sw() });
+  assert.equal(row(on, "fable").items.length, 1);
+  assert.equal(row(on, "opus").items.length, 0);
+  assert.equal(row(on, "sonnet").items.length, 0);
+  const off = activeAgents([r], { "o/a": sw({ fable: false }) });
+  assert.equal(row(off, "fable").items.length, 0);
+  assert.equal(row(off, "opus").items.length, 1);
+  assert.equal(row(off, "sonnet").items.length, 0);
+});
+
+test("fable row off only when OFF in every repo read", () => {
+  assert.equal(row(activeAgents([], { a: sw({ fable: false }), b: sw({ fable: false }) }), "fable").off, true);
+  assert.equal(row(activeAgents([], { a: sw({ fable: false }), b: sw() }), "fable").off, false);
+});
+
 // ---- assignment by status
 test("status → agent assignment", () => {
   const mk = (status: OrchStatus, n: number) => run({ status, number: n, url: `u${n}` });
@@ -71,7 +108,7 @@ test("status → agent assignment", () => {
     [mk("implementing", 1), mk("fixing", 2), mk("reviewing", 3), mk("awaiting_merge", 4), mk("blocked", 5), mk("finalizing", 6), mk("waiting", 7), mk("done", 8), mk("cancelled", 9)],
     { "o/a": sw() },
   );
-  assert.deepEqual(rows.map((r) => r.agent), ["sonnet", "opus", "codex", "user"]);
+  assert.deepEqual(rows.map((r) => r.agent), ["sonnet", "opus", "fable", "codex", "user"]);
   assert.deepEqual(row(rows, "sonnet").items.map((i) => [i.number, i.activity]), [[1, "구현 중"], [2, "수정 중"]]);
   assert.deepEqual(row(rows, "codex").items.map((i) => [i.number, i.activity]), [[3, "검수 중"]]);
   assert.deepEqual(row(rows, "user").items.map((i) => [i.number, i.activity]), [[4, "반영 승인 대기"], [5, "멈춤 확인 필요"]]);
@@ -102,7 +139,7 @@ test("multiple repos mix per their own switches; item fields", () => {
 
 test("empty input: four idle rows", () => {
   const rows = activeAgents([], {});
-  assert.deepEqual(rows.map((r) => [r.agent, r.items.length, r.off]), [["sonnet", 0, false], ["opus", 0, false], ["codex", 0, false], ["user", 0, false]]);
+  assert.deepEqual(rows.map((r) => [r.agent, r.items.length, r.off]), [["sonnet", 0, false], ["opus", 0, false], ["fable", 0, false], ["codex", 0, false], ["user", 0, false]]);
 });
 
 // ---- switches
