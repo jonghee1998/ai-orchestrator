@@ -60,7 +60,7 @@ export function githubFixtures(now) {
       quota: { allowed: true, fiveHour: { pct: 10, resetsAt: iso(-200) }, weekly: { pct: 55, resetsAt: iso(-5000) } } },
   };
   const usageIssue = issue(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
-  const variables = [{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
+  const variables = [{ name: "ORCH_FABLE", value: "off" }, { name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
 
   // 로드맵(docs/roadmap.json, contents API base64): 인프라 3개 + 확장 2개
   const roadmap = {
@@ -128,7 +128,7 @@ function secondRepoFixtures(iso, usage) {
     { ...mk(30, "[plan] 둘째저장소 끝난 단계", `${plan("둘째저장소 끝난 단계", 1, "카파")}\n${state({ status: "done", step: 1, passed: { 1: true }, finalPr: 76, updatedAt: iso(90) })}`), state: "closed" },
   ];
   const usageIssue = mk(5, "AI 사용량", `엔진이 갱신하는 AI 사용량입니다.\n\n<!-- orch-usage:v1 ${JSON.stringify(usage)} -->`);
-  const variables = [{ name: "ORCH_CODEX", value: "on" }, { name: "ORCH_PAUSED", value: "off" }];
+  const variables = [{ name: "ORCH_FABLE", value: "off" }, { name: "ORCH_CODEX", value: "on" }, { name: "ORCH_PAUSED", value: "off" }];
   // app: 다른 프로젝트 화면 링크 (label 없음 → '화면 열기')
   // phases 6개: P1 완료 · P2 ref 30(끝난 run) → 자동 완료 · P3 ref 31(구현 중) → 자동 진행(굵게) · P4 는 #32 계획 JSON phase 로 연결
   // · P5(tasks)·P6 은 item 없는 '예정' · #33 은 단계 미지정 → '단계 2/6 완료'
@@ -193,7 +193,7 @@ function secondRepoFixtures(iso, usage) {
 // docs/architecture.json 만 다르다: third 는 404(파일 없음), fourth 는 500(조회 오류). third 는 compare 도 404(배포 완료).
 function archOnlyFixtures(iso) {
   // 다른 탭의 기존 검사에 영향이 없도록 스위치 값은 기준 저장소(orch-screens)와 같게(Codex off), 로드맵은 빈 항목으로 둔다.
-  const variables = [{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
+  const variables = [{ name: "ORCH_FABLE", value: "off" }, { name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify({ version: 1, setup: [], expansion: [] })).toString("base64") };
   return (method, url) => {
     if (method !== "GET") return null;

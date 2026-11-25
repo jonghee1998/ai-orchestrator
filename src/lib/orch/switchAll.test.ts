@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergedSwitches, type RepoView, type Switches } from "./model";
+import { mergedSwitches, switchesFromVars, type RepoView, type Switches } from "./model";
 import { applySwitchAll, type SwitchWriter } from "./switchAll";
 
-const ON: Switches = { sonnet: true, opus: true, codex: true, paused: false, auto: false, codexDev: true, window: "" };
+const ON: Switches = { sonnet: true, opus: true, fable: true, codex: true, paused: false, auto: false, codexDev: true, window: "" };
 const view = (repo: string, switches: Switches | null, isSelf = false): RepoView => ({
   repo, plans: [], plansError: null, ideas: [], ideasError: null, switches, switchesError: switches ? null : "권한 없음 또는 저장소 없음",
   runs: [], runsError: null, roadmap: null, roadmapError: null, deployPending: null, deployMode: "unknown", app: null, deployEvery: 10, isSelf,
@@ -120,4 +120,20 @@ test("applySwitchAll: invalid key/value → invalid, zero writes", async () => {
     assert.equal(out.kind, "invalid", JSON.stringify([k, v]));
   }
   assert.equal(w.calls.length, 0);
+});
+
+test("applySwitchAll: fable writes ORCH_FABLE once per repo in order; value reads back", async () => {
+  const w = fakeWriter();
+  await applySwitchAll(REPOS, "fable", false, w.writer);
+  assert.deepEqual(w.calls, ["o/a ORCH_FABLE=off", "o/b ORCH_FABLE=off", "o/c ORCH_FABLE=off"]);
+  assert.equal(switchesFromVars([{ name: "ORCH_FABLE", value: "off" }]).fable, false);
+  const w2 = fakeWriter();
+  await applySwitchAll(REPOS, "fable", true, w2.writer);
+  assert.ok(w2.calls.every((c) => c.endsWith("ORCH_FABLE=on")));
+  assert.equal(switchesFromVars([{ name: "ORCH_FABLE", value: "on" }]).fable, true);
+});
+
+test("mergedSwitches: fable difference sits after opus and before codex", () => {
+  const m = mergedSwitches([view("o/self", ON, true), view("o/b", { ...ON, fable: false, opus: false, codex: false })]);
+  assert.deepEqual(m.differs, [{ key: "opus", repos: ["o/b"] }, { key: "fable", repos: ["o/b"] }, { key: "codex", repos: ["o/b"] }]);
 });

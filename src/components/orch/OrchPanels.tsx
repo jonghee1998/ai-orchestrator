@@ -645,6 +645,7 @@ export function OrchDecisionsPanel() {
 const FLAG_TEXT: Record<FlagKey, { name: string; off: string }> = {
   sonnet: { name: "Claude Sonnet (구현)", off: "Opus가 대신 구현" },
   opus: { name: "Claude Opus (고난도 구현·대체 검수)", off: "Sonnet이 대신 구현, 대체 검수 없음" },
+  fable: { name: "Claude Fable (깊은 분석·가설·모델 설계)", off: "Fable 스텝을 Opus가 함 (Opus도 꺼지면 Sonnet, 셋 다 꺼지면 대기)" },
   codex: { name: "Codex (독립 검수)", off: "Opus가 바로 검수" },
   codexDev: { name: "Codex 개발 대체 (Claude 한도일 때)", off: "Claude 한도가 풀릴 때까지 대기" },
   paused: { name: "전체 일시정지", off: "" },
