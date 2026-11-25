@@ -201,10 +201,13 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 
 ## 운영 배포 (10개 업데이트마다)
 
-Vercel 자동 배포는 꺼져 있습니다(`vercel.json`). 무료 플랜의 하루 배포 한도를 보호하기 위해서입니다. 대신 `deploy` 워크플로가 main에 업데이트(머지)가 **10개** 쌓일 때마다 Vercel Deploy Hook으로 한 번 배포합니다.
+Vercel 자동 배포는 꺼져 있습니다(`vercel.json`). 무료 플랜의 하루 배포 한도를 보호하기 위해서입니다. 대신 `deploy` 워크플로가 main에 커밋(first-parent 기준)이 **10개** 쌓일 때마다 Vercel Deploy Hook으로 한 번 배포합니다.
 
-- 마지막으로 배포한 커밋은 태그 `prod-deployed`로 기억합니다. 개수는 그 이후 main에 머지된 수입니다.
-- 프로젝트 카드 머리의 배포 문구: 태그 `prod-deployed`가 없을 때(compare 404)와 마지막 배포 뒤 머지 대기가 0일 때는 '배포 완료', 대기가 있으면 '배포 대기 N', 읽기 실패는 '배포 대기 ?'로 표시합니다. 판정 방식은 그대로라서 첫 배포 전 저장소도 기존 판정에 따라 '배포 완료'로 보일 수 있습니다.
+- 기준점: 태그 `prod-deployed`는 배포 대기 수를 세는 기준점입니다(deploy 워크플로가 Hook 요청을 보낸 뒤 그 커밋으로 옮깁니다). 태그 위치가 실제 배포 성공을 뜻하지는 않습니다. 개수는 그 이후 main에 쌓인 커밋 수(first-parent 기준: 머지·squash 머지·직접 커밋 각각 1개, `git rev-list --count --first-parent prod-deployed..HEAD`)입니다.
+- 프로젝트 카드 머리의 배포 문구: 태그 `prod-deployed`가 없을 때(compare 404)와 기준점 뒤 대기가 0일 때는 '배포 완료', 대기가 있으면 '배포 대기 N', 읽기 실패는 '배포 대기 ?'로 표시합니다. 'N'도 위와 같은 first-parent 기준이며, 비교 결과가 너무 길거나(250개 초과) 형식을 읽을 수 없으면 '배포 대기 ?'입니다. '배포 완료'는 카드 표시 조건일 뿐 워크플로가 방금 배포했다는 뜻은 아닙니다. 그래서 첫 배포 전 저장소도 '배포 완료'로 보일 수 있습니다.
+- 배포 요청 확인: 배포 요청이 나갔는지는 GitHub Actions → `deploy` 실행 기록의 'Trigger Vercel deploy hook' 단계가 성공했는지로 확인합니다.
+- 기준 갱신 확인: 대기 수 기준이 갱신됐는지는 같은 실행의 'Remember deployed commit' 단계와 태그 `prod-deployed` 위치로 확인합니다. 이 단계만 실패하면 배포 요청은 이미 나갔어도 카드의 대기 수가 줄지 않습니다.
+- 빌드 확인: Vercel 빌드가 성공했는지는 Vercel 대시보드 → `ai-orchestrator` → Deployments에서 확인합니다.
 - 지금 바로 배포하려면 GitHub 앱 → Actions → `deploy` → **Run workflow**를 누릅니다(기본값이 강제 배포).
 - 기준 개수는 저장소 변수 `ORCH_DEPLOY_EVERY`로 바꿀 수 있습니다(기본 10).
 - 한 번만 설정하면 됩니다: Vercel → `ai-orchestrator` → Settings → Git → **Deploy Hooks**에서 이름 `orch`, 브랜치 `main`으로 만들고, 나온 URL을 GitHub 저장소 Settings → Secrets and variables → Actions → **New repository secret** `VERCEL_DEPLOY_HOOK`에 넣습니다.
