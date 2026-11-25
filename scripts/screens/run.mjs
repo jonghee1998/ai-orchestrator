@@ -347,10 +347,11 @@ try {
       if (!/text-danger/.test((await cardOf("orch-fourth").getByTestId("arch-note").getAttribute("class")) ?? "")) problems.push("[architecture] 구조 읽기 실패 문구가 danger 색이 아님");
       // 자기 카드를 펼친다: 기존 구조 탭 문구 5개 + 구조도
       await tog(SELF).click();
-      for (const text of ["아키텍처", "배포 · 비밀값", "보조 도구", "Impeccable", "Playwright"]) {
+      for (const text of ["아키텍처", "배포 · 비밀값", "보조 도구", "Impeccable", "Playwright", "매시 7·27·47분", "멈추면 바로", "자동 모드·Codex 켜짐일 때 Codex PM", "자동으로 풀 수 있으면", "사람 판단 요청", "최종 PR 문제·3회 소진", "재감사 없이 시작", "deploy 워크플로"]) {
         try { await page.getByText(text, { exact: false }).first().waitFor({ timeout: 15000 }); }
         catch { problems.push(`[architecture] 자기 카드를 펼쳐도 '${text}' 가 보이지 않음`); }
       }
+      if ((await page.getByText("20분마다", { exact: false }).count()) || (await page.getByText("예약 작업", { exact: false }).count())) problems.push("[architecture] 옛 순찰·점검 문구가 남아 있음");
       if (!(await page.getByTestId("arch-diagram").count())) problems.push("[architecture] 자기 카드를 펼쳐도 arch-diagram 이 없음");
       // orch-second 를 펼친다: 섹션 2개, 표, svg, 글자는 같은 g 의 rect 안
       await tog("orch-second").click();
