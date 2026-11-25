@@ -166,8 +166,15 @@ function fake(o: Opts) {
   return { f, calls };
 }
 
-test("readRepo: roadmap read from contents API (base64), deployPending counts merge commits only", async () => {
-  const commits = [{ parents: [{}, {}] }, { parents: [{}] }, { parents: [{}, {}] }, { parents: [{}, {}, {}] }, {}, null];
+test("readRepo: roadmap read from contents API (base64), deployPending counts first-parent commits", async () => {
+  // 가짜 sha: A(부모 집합 밖) → B(머지, 두 번째 부모 F) → C(squash). first-parent 3개, F 는 세지 않음.
+  const h = (n: number) => n.toString(16).padStart(40, "0");
+  const commits = [
+    { sha: h(1), parents: [{ sha: h(0xff) }] },
+    { sha: h(6), parents: [{ sha: h(0xff) }] },
+    { sha: h(2), parents: [{ sha: h(1) }, { sha: h(6) }] },
+    { sha: h(3), parents: [{ sha: h(2) }] },
+  ];
   const g = fake({ compare: { status: 200, body: { commits } }, vars: [{ name: "ORCH_DEPLOY_EVERY", value: "7" }, { name: "ORCH_PAUSED", value: "on" }] });
   const v = await readRepo(REPO, ENV, g.f);
   assert.deepEqual(v.roadmap, { version: 1, setup: [{ id: "0.1", title: "목적", status: "done", note: null, ref: null, tasks: [] }], expansion: [], phases: [], app: null });
@@ -197,7 +204,7 @@ test("readRepo: roadmap 403/500/broken file → roadmapError, everything else in
     [{ status: 200, body: [] }, /내용 없음/],
   ];
   for (const [roadmap, re] of cases) {
-    const v = await readRepo(REPO, ENV, fake({ roadmap, compare: { status: 200, body: { commits: [{ parents: [{}, {}] }] } }, vars: [] }).f);
+    const v = await readRepo(REPO, ENV, fake({ roadmap, compare: { status: 200, body: { commits: [{ sha: "a".repeat(40), parents: [{ sha: "b".repeat(40) }, { sha: "c".repeat(40) }] }] } }, vars: [] }).f);
     assert.equal(v.roadmap, null);
     assert.match(v.roadmapError ?? "", re, JSON.stringify(roadmap));
     assert.ok(v.switches);

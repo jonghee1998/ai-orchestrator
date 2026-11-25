@@ -78,7 +78,7 @@ export function githubFixtures(now) {
     app: { label: "자기화면", url: "https://example.com/self" },
   };
   const roadmapContent = { type: "file", encoding: "base64", content: Buffer.from(JSON.stringify(roadmap, null, 2)).toString("base64") };
-  // compare prod-deployed...main: 머지 커밋(parents 2개) 3개 + 일반 커밋 1개 → 카드 머리 '배포 대기 3' (머지 커밋만 셈).
+  // compare prod-deployed...main: first-parent 커밋 4개(일반 1 + 머지 3) → 카드 머리 배포 대기 4 (deploy.yml 기준)
   const sha = (n) => `${n}`.padStart(40, "0");
   const compare = { status: "ahead", commits: [
     { sha: sha(1), parents: [{ sha: sha(90) }], commit: { message: "docs: 메모 정리" } },

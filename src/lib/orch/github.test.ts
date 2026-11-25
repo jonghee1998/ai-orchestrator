@@ -385,13 +385,18 @@ test("readRepo: switches read across variable pages; a failing page → switches
 
 // ---------------------------------------------------------------- changes not deployed yet
 
-test("readRepo: deployPending from compare merge commits since prod-deployed; no tag / error → null; no pendingPrs field", async () => {
+test("readRepo: deployPending = first-parent commits since prod-deployed (deploy.yml 기준); no tag / error → null; no pendingPrs field", async () => {
+  // 가짜 40자리 sha. OUT* 은 compare 집합 밖(이미 배포된 쪽) 커밋.
+  const h = (n: number) => n.toString(16).padStart(40, "0");
+  const OUT = h(0xfff0), OUT2 = h(0xfff1);
+  const c = (n: number, ...parents: string[]) => ({ sha: h(n), parents: parents.map((s) => ({ sha: s })) });
+  // 직접 커밋 D → squash 커밋 S → 머지 커밋 M(두 번째 부모 B2, 그 안쪽 B1 도 함께 들어 있음)
   const commits = [
-    { parents: [{}, {}], commit: { message: "Merge pull request #12 from o/orch/run-10\n\n본문 (#99)" } },
-    { parents: [{}], commit: { message: "[run #10] Step 1: 무언가 (#11)" } },
-    { parents: [{}], commit: { message: "직접 커밋" } },
-    { parents: [{}, {}] },
-    null,
+    { ...c(1, OUT), commit: { message: "직접 커밋" } },
+    { ...c(11, OUT), commit: { message: "브랜치 커밋 1" } },
+    { ...c(12, h(11)), commit: { message: "브랜치 커밋 2" } },
+    { ...c(2, h(1)), commit: { message: "[run #10] Step 1: 무언가 (#11)" } },
+    { ...c(3, h(2), h(12)), commit: { message: "Merge pull request #12 from o/orch/run-10" } },
   ];
   const fakeRepo = (compare: { status: number; body?: unknown }) => (async (url: string, init?: RequestInit) => {
     const u = new URL(url);
@@ -402,11 +407,12 @@ test("readRepo: deployPending from compare merge commits since prod-deployed; no
     if (u.pathname.endsWith("/issues")) return json(200, []);
     return json(404, {});
   }) as typeof fetch;
-  const ok = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { commits } }));
-  assert.equal(ok.deployPending, 2);
+  const read = (body: unknown) => readRepo(REPO, ENV, fakeRepo({ status: 200, body }));
+  const ok = await read({ commits });
+  assert.equal(ok.deployPending, 3);
   assert.equal(ok.deployMode, "batch");
   assert.ok(!("pendingPrs" in ok));
-  const none = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { commits: [] } }));
+  const none = await read({ commits: [] });
   assert.equal(none.deployPending, 0);
   assert.equal(none.deployMode, "batch");
   const noTag = await readRepo(REPO, ENV, fakeRepo({ status: 404, body: { message: "Not Found" } }));
@@ -415,9 +421,40 @@ test("readRepo: deployPending from compare merge commits since prod-deployed; no
   const err = await readRepo(REPO, ENV, fakeRepo({ status: 500 }));
   assert.equal(err.deployPending, null);
   assert.equal(err.deployMode, "unknown");
-  const noList = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { status: "identical" } }));
+  const noList = await read({ status: "identical" });
   assert.equal(noList.deployPending, null);
   assert.equal(noList.deployMode, "unknown");
+
+  // 250개가 한 줄로 이어진 체인(맨 끝 커밋의 부모는 집합 밖)
+  const chain = Array.from({ length: 250 }, (_, i) => c(i + 1, i === 0 ? OUT : h(i)));
+  const unknown: [string, unknown][] = [
+    ["total_commits > commits.length", { total_commits: 6, commits }],
+    ["total_commits 1, empty commits", { total_commits: 1, commits: [] }],
+    ["250 without total_commits", { commits: chain }],
+    ["element without sha", { commits: [...commits, { parents: [{ sha: h(3) }] }] }],
+    ["null element", { commits: [...commits, null] }],
+    ["head parents missing", { commits: [...commits.slice(0, 4), { sha: h(3) }] }],
+    ["parent without sha", { commits: [{ sha: h(1), parents: [{}] }] }],
+    ["duplicate sha", { commits: [...commits, c(3, h(2), h(12))] }],
+    ["two heads", { commits: [c(1, OUT), c(2, OUT2)] }],
+  ];
+  for (const [name, body] of unknown) {
+    const v = await read(body);
+    assert.equal(v.deployPending, null, name);
+    assert.equal(v.deployMode, "unknown", name);
+  }
+
+  const full = await read({ total_commits: 250, commits: chain });
+  assert.equal(full.deployPending, 250);
+  assert.equal(full.deployMode, "batch");
+  // 별도 루트 이력 병합: M(parents [X, B2]), X(부모는 집합 밖), B2(parents [B1]), B1(parents [] 루트)
+  const rootMerge = await read({ commits: [c(0xa, h(0xc), h(0xb2)), c(0xc, OUT), c(0xb2, h(0xb1)), c(0xb1)] });
+  assert.equal(rootMerge.deployPending, 2);
+  assert.equal(rootMerge.deployMode, "batch");
+  // main 쪽 경로가 루트에서 끝남: Y(parents [R]), R(parents [])
+  const rootEnd = await read({ commits: [c(0xe, h(0xf)), c(0xf)] });
+  assert.equal(rootEnd.deployPending, 2);
+  assert.equal(rootEnd.deployMode, "batch");
 });
 
 test("readRepo app: ORCH_APP_URLS beats roadmap.json app; missing there → roadmap app; own repo (isSelf) → null", async () => {
