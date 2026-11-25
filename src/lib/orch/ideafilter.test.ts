@@ -71,6 +71,7 @@ test("screens fixtures: two repos give the 지금 일하는 AI example rows", as
   assert.deepEqual(got, {
     sonnet: [false, ["example/orch-screens#11 구현 중", "example/orch-second#31 구현 중"]],
     opus: [false, []],
+    fable: [true, []],
     codex: [false, ["example/orch-second#32 검수 중"]],
     user: [false, ["example/orch-screens#12 반영 승인 대기", "example/orch-second#33 반영 승인 대기"]],
   });

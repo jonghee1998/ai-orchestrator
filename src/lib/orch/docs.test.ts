@@ -153,3 +153,13 @@ test("docs I: ORCH_MANUAL 10장 프로젝트 행은 지금 카드 화면 기준"
   assert.ok(!sec.includes("0·6단계"), "10장에 '0·6단계' 가 남음");
   assert.ok(sec.includes("인프라·확장 체크리스트"), "10장에 '인프라·확장 체크리스트' 없음");
 });
+
+test("docs H: ORCH_MANUAL 4장 ORCH_FABLE 행 1개·대체 순서, Architecture Variables 순서", () => {
+  const rows = lines(read("docs/ORCH_MANUAL.md")).filter((l) => l.startsWith("| `ORCH_FABLE`"));
+  assert.equal(rows.length, 1);
+  const cells = rows[0].split("|").map((c) => c.trim());
+  assert.equal(cells[3], "on");
+  for (const w of ["Opus", "Sonnet", "대기"]) assert.ok(cells[4].includes(w), w);
+  const arch = read("src/components/workspace/ArchitectureScreen.tsx");
+  assert.ok(arch.includes("ORCH_OPUS · ORCH_FABLE"));
+});

@@ -205,6 +205,7 @@ try {
       for (const [id, name, wants] of [
         ["sonnet", "Sonnet", ["orch-screens", "#11", "상황판 시험 작업", "Step 2/3", "구현 중", "orch-second", "#31", "둘째저장소 구현 작업", "Step 1/2"]],
         ["opus", "Opus", ["쉬는 중"]],
+        ["fable", "Fable", ["깊은 분석·가설·모델 설계(계획이 지정할 때)", "OFF"]],
         ["codex", "Codex", ["orch-second", "#32", "둘째저장소 검수 작업", "Step 2/2", "검수 중"]],
         ["user", "사용자", ["#12", "승인 대기 시험 작업", "#33", "둘째저장소 승인 작업", "반영 승인 대기"]],
       ]) {
@@ -212,6 +213,7 @@ try {
         if (!t.startsWith(name)) problems.push(`[agents] '지금 일하는 AI' ${name} 줄이 없음 (${t.slice(0, 80)})`);
         for (const want of wants) if (!t.includes(want)) problems.push(`[agents] '지금 일하는 AI' ${name} 줄에 '${want}' 이 없음 (${t.slice(0, 200)})`);
       }
+      if (!(await page.locator('[data-testid="orch-agent-opus"] + [data-testid="orch-agent-fable"]').count())) problems.push("[agents] orch-agent-fable 행이 orch-agent-opus 바로 다음이 아님");
       if (!agentsText.includes("쉬는 중")) problems.push("[agents] '지금 일하는 AI' 에 '쉬는 중' 이 없음");
       if (!(await agentsCard.locator('a[href$="/issues/31"][target="_blank"]').count())) problems.push("[agents] '지금 일하는 AI' #31 Issue 링크가 없음");
       // 맨 위: 'AI 사용량' 보다 위

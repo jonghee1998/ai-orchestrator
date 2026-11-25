@@ -71,7 +71,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 | --- | --- | --- | --- |
 | `ORCH_SONNET` | `on` / `off` | on | Sonnet이 할 일을 Opus가 함 (Opus도 꺼지면 대기) |
 | `ORCH_OPUS` | `on` / `off` | on | Opus가 할 일을 Sonnet이 함. Codex를 못 쓸 때 대체 검수자가 없어 검수 대기 |
-| `ORCH_FABLE` | `on` / `off` | on | `model: "fable"` 스텝을 Opus가 함 |
+| `ORCH_FABLE` | `on` / `off` | on | `model: "fable"` 스텝을 Opus가 함 (Opus도 꺼지면 Sonnet, 셋 다 꺼지면 대기) |
 | `ORCH_CODEX` | `on` / `off` | on | Codex를 기다리지 않고 Opus가 바로 검수. Codex가 남긴 결과는 무시 |
 | `ORCH_PAUSED` | `on` / `off` | off | `on`이면 새 작업(구현·수정·대체 검수)을 전부 멈춤 |
 | `ORCH_CODEX_DEV` | `on` / `off` | on | Claude 사용량 한도일 때 Codex가 구현·수정·PM을 대신하지 않고 한도가 풀릴 때까지 대기 (6장) |
