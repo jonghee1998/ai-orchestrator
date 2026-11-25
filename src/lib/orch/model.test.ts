@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { STATUS_LABEL, approveMessage, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
+import { STATUS_LABEL, approveMessage, deployLabel, configuredRepos, parseRun, planReviewBadge, sortRuns, switchChange, switchesFromVars } from "./model";
 import { readRepo, writeSwitch } from "./github";
 
 const planBlock = (steps = 2) => "```json\n" + JSON.stringify({
@@ -271,4 +271,11 @@ test("parsePatchNotes: valid entries only, newest first; array or {notes}; nothi
   assert.equal(parsePatchNotes("not json"), null);
   assert.equal(parsePatchNotes("[]"), null);
   assert.equal(parsePatchNotes(JSON.stringify([{ version: "1.0.0" }])), null);
+});
+
+test("deployLabel: direct / batch 0 → 배포 완료, batch N → 배포 대기 N, unknown·null → 배포 대기 ?", () => {
+  assert.equal(deployLabel("direct", null), "배포 완료");
+  assert.equal(deployLabel("batch", 0), "배포 완료");
+  assert.equal(deployLabel("batch", 3), "배포 대기 3");
+  assert.equal(deployLabel("unknown", null), "배포 대기 ?");
 });

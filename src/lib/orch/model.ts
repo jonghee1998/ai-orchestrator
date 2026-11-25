@@ -379,6 +379,14 @@ export interface Idea {
 
 export type DeployMode = "batch" | "direct" | "unknown";
 
+/** Card header deploy text: everything merged is deployed ('direct', or 'batch' with 0 pending) → '배포 완료'; pending → '배포 대기 N'; unknown/unreadable → '배포 대기 ?'. */
+export function deployLabel(mode: DeployMode, pending: number | null): string {
+  if (mode === "direct") return "배포 완료";
+  if (mode === "batch" && pending === 0) return "배포 완료";
+  if (mode === "batch" && typeof pending === "number" && pending > 0) return `배포 대기 ${pending}`;
+  return "배포 대기 ?";
+}
+
 export interface RepoView {
   repo: string;
   plans: PendingPlan[];
