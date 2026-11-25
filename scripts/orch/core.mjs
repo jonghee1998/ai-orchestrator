@@ -407,6 +407,26 @@ export function touchesProtected(files) {
   return (files ?? []).filter((f) => PROTECTED_PATHS.some((re) => re.test(f)));
 }
 
+// ---------------------------------------------------------------- plan lint (deterministic checks before review)
+
+/** 구현 AI가 실행할 수 없는 명령 형태: 환경변수 앞붙임(FOO=1 npm …), env/bash -c 래퍼. */
+const BLOCKED_CMD_RE = /(?:^|[\s`'"(])((?:[A-Z][A-Z0-9_]*=\S*\s+)+(?:npm|npx|node|python3?|pytest)\b[^`'"\n]*|(?:env|bash\s+-c|sh\s+-c)\s+[^`'"\n]*)/;
+
+/**
+ * 계획에서 구현 AI 권한으로 실행할 수 없는 명령을 찾는다(#379 재발 방지).
+ * @returns {{step:number, severity:"medium", body:string}[]}
+ */
+export function lintPlan(plan) {
+  const out = [];
+  for (const s of plan?.steps ?? []) {
+    for (const [field, text] of [["task", s.task], ...(s.done_when ?? []).map((x) => ["done_when", x])]) {
+      const m = BLOCKED_CMD_RE.exec(String(text ?? ""));
+      if (m) out.push({ step: s.id, severity: "medium", body: `[자동 검사] ${field}의 \`${m[1].trim().slice(0, 80)}\`는 구현 AI 권한상 실행이 거부된다(허용: npm·npx·node·python3·ls·cat·mkdir·git 일부, 환경변수 앞붙임·env·bash -c 불가). package.json scripts에 넣고 \`npm run <이름>\`으로 바꿔라.` });
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- prompts
 
 const RULES = (step) => [
@@ -416,6 +436,7 @@ const RULES = (step) => [
   "- `.github/`와 `scripts/orch/`는 수정하지 않는다.",
   "- git push, 브랜치 생성, PR 생성은 하지 않는다. 커밋·푸시·PR은 오케스트레이터가 한다.",
   "- 파일을 지워야 하면 `git rm <경로>`를 쓴다 (`rm`은 허용되지 않음).",
+  "- 셸 명령은 `npm`·`npx`·`node`·`python3`·`ls`·`cat`·`mkdir`·`git status/diff/log/add/rm/commit`으로 시작해야 허용된다. 환경변수를 앞에 붙인 명령(`FOO=1 npm …`)이나 `env`·`bash -c`는 거부되므로, 필요하면 `package.json` scripts에 넣고 `npm run <이름>`으로 실행한다.",
   "- 저장소에 `.claude/skills/`·`.claude/agents/`가 있으면 활용한다: 끝내기 전 `verification-loop` 스킬이 있으면 Skill 도구로 실행하고, 빌드·타입 오류는 해당 보조 에이전트(예: `build-error-resolver`)에 Task 도구로 맡길 수 있다. 스킬 지시가 이 규칙과 충돌하면 이 규칙이 우선한다.",
   "- 작업이 끝나면 `.orch/SUMMARY.md`에 다음 형식으로 적는다:",
   "  - `## 변경 요약` 3~5줄",
