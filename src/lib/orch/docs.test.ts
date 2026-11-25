@@ -244,3 +244,25 @@ test("docs K: ORCH_MANUAL 10장 AI 팀 행은 AGENT_ORDER·FLAG_KEYS 순서", ()
   for (const w of ["모두 맞추기", "n개 프로젝트에 적용", "일부 실패", "읽지 못함", "관리자 로그인"]) assert.ok(row.includes(w), w);
   for (const w of ["Sonnet / Opus / Codex / 전체 일시정지", "Sonnet·Opus·Codex·사용자"]) assert.ok(!row.includes(w), `옛 목록: ${w}`);
 });
+
+test("docs L: ORCH_MANUAL 4장·7장 Fable 대체 순서 일치", () => {
+  const manual = read("docs/ORCH_MANUAL.md");
+  const ch7 = section(manual, "## 7.", "## 8.");
+  assert.ok(ch7, "7장을 찾지 못함");
+  const fableLines = lines(ch7).filter((l) => l.startsWith('2. `"fable"`'));
+  assert.equal(fableLines.length, 1, "7장 fable 2번 줄은 정확히 1개");
+  const l7 = fableLines[0];
+  for (const w of ["claude-fable-5-2", "ORCH_FABLE", "처음부터 Opus"]) assert.ok(l7.includes(w), w);
+  const a = l7.indexOf("처음부터 Opus");
+  const b = l7.indexOf("Opus도 꺼져 있으면 Sonnet");
+  const c = l7.indexOf("셋 다 꺼져 있으면 대기");
+  assert.ok(a >= 0 && b >= 0 && c >= 0 && a < b && b < c, `7장 순서 ${a} ${b} ${c}`);
+
+  const rows = lines(manual).filter((l) => l.startsWith("| `ORCH_FABLE`"));
+  assert.equal(rows.length, 1, "4장 ORCH_FABLE 행은 1개");
+  const cell = rows[0].split("|").map((s) => s.trim())[4] ?? "";
+  const o = cell.indexOf("Opus");
+  const s = cell.indexOf("Sonnet");
+  const w = cell.indexOf("대기");
+  assert.ok(o >= 0 && s >= 0 && w >= 0 && o < s && s < w, `4장 순서 ${o} ${s} ${w}`);
+});
