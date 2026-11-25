@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
-import { ROADMAP_APP_LABEL_MAX, ROADMAP_NOTE_MAX, ROADMAP_TITLE_MAX, SELF_REPO, phaseStatus, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, roadmapCount, type OrchRun, type OrchStatus, type RoadmapItem } from "./model";
+import { ROADMAP_APP_LABEL_MAX, appFromEnv, ROADMAP_NOTE_MAX, ROADMAP_TITLE_MAX, SELF_REPO, phaseStatus, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, roadmapCount, type OrchRun, type OrchStatus, type RoadmapItem } from "./model";
 import { readRepo } from "./github";
 
 const REPO = "o/r";
@@ -42,6 +42,35 @@ test("parseRoadmap app: https URL only, label cut to 12, missing/odd → null", 
     { url: "https://" }, { url: "https:// bad host" }, { url: "ftp://example.com/" }, { url: 42 }, { url: "" },
   ]) assert.equal(app(bad), null, JSON.stringify(bad));
   assert.equal(parseRoadmap("{}")!.app, null);
+});
+
+test("appFromEnv: ORCH_APP_URLS 'owner/repo=url' or 'owner/repo=label|url', same https rule as roadmap app", () => {
+  const at = (v: string | undefined, repo = "o/app") => appFromEnv(repo, v === undefined ? {} : { ORCH_APP_URLS: v });
+  // 정상 · 라벨
+  assert.deepEqual(at("o/app=https://app.example.invalid/"), { label: null, url: "https://app.example.invalid/" });
+  assert.deepEqual(at("o/app=가계부|https://app.example.invalid/x?y=1"), { label: "가계부", url: "https://app.example.invalid/x?y=1" });
+  assert.equal(at("o/app=" + "가".repeat(30) + "|https://app.example.invalid/")!.label, "가".repeat(ROADMAP_APP_LABEL_MAX));
+  assert.deepEqual(at("o/app= |https://app.example.invalid/"), { label: null, url: "https://app.example.invalid/" });
+  // http:// · 다른 스킴 거부
+  assert.equal(at("o/app=http://app.example.invalid/"), null);
+  assert.equal(at("o/app=앱|javascript:alert(1)"), null);
+  // 다른 저장소 · 빈 값 · 변수 없음
+  assert.equal(at("o/other=https://app.example.invalid/"), null);
+  assert.equal(at(""), null);
+  assert.equal(at("  ,  "), null);
+  assert.equal(at(undefined), null);
+  // 깨진 항목은 건너뛰고 다음 올바른 항목
+  assert.deepEqual(at("o/app, =https://x.example.invalid/, o/app=, o/app=http://bad.example.invalid/, o/app=좋음|https://ok.example.invalid/"),
+    { label: "좋음", url: "https://ok.example.invalid/" });
+  assert.equal(at("o/app"), null);
+  // 대소문자 무시
+  assert.deepEqual(at("O/App=https://app.example.invalid/"), { label: null, url: "https://app.example.invalid/" });
+  assert.deepEqual(at("o/app=https://app.example.invalid/", "O/APP"), { label: null, url: "https://app.example.invalid/" });
+  // 같은 저장소 두 번 → 첫 올바른 항목
+  assert.deepEqual(at("o/app=첫째|https://one.example.invalid/,o/app=둘째|https://two.example.invalid/"), { label: "첫째", url: "https://one.example.invalid/" });
+  // 앞뒤 공백 trim (항목 · 저장소 이름 · 라벨 · 주소)
+  assert.deepEqual(at("  o/b=https://b.example.invalid/ ,   o/app  =  셋째화면  |  https://app.example.invalid/third  "),
+    { label: "셋째화면", url: "https://app.example.invalid/third" });
 });
 
 test("parseRoadmap: malformed items skipped, unknown status → todo, odd ref dropped", () => {

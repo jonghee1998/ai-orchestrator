@@ -171,7 +171,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 | 패치노트 | 버전·날짜·PR 번호와 핵심 변경 (최신순) |
 
 - 프로젝트 탭의 0·6단계 체크리스트는 각 저장소의 `docs/roadmap.json`을 읽습니다. 이 파일은 **PM이 관리**합니다(항목 상태 done·doing·todo·na, 제목 24자·메모 80자까지). 파일이 없으면 '로드맵 없음', 읽지 못하면 '로드맵 읽기 실패'로 표시됩니다.
-  - 선택 필드 `"app": { "label": "가계부", "url": "https://…" }` — 그 프로젝트의 앱 화면 주소. 카드에 '{label} 열기'(label 없으면 '화면 열기') 링크가 생깁니다. `url`은 `https://`로 시작해야 하고(아니면 무시), `label`은 12자까지. 상황판 자기 저장소(서버 변수 `ORCH_SELF_REPO`, 없으면 jonghee1998/ai-orchestrator) 카드에는 링크를 두지 않습니다.
+  - 선택 필드 `"app": { "label": "가계부", "url": "https://…" }` — 그 프로젝트의 앱 화면 주소. 카드에 '{label} 열기'(label 없으면 '화면 열기') 링크가 생깁니다. `url`은 `https://`로 시작해야 하고(아니면 무시), `label`은 12자까지. 상황판 자기 저장소(서버 변수 `ORCH_SELF_REPO`, 없으면 jonghee1998/ai-orchestrator) 카드에는 링크를 두지 않습니다. 서버 변수 `ORCH_APP_URLS`에 그 저장소가 있으면 그 값이 우선합니다.
   - 선택 필드 `"phases": [{ "id": "3", "title": "…", "status": "todo", "note": null, "ref": 2 }]` — 프로젝트 진행 단계(형식은 `setup`과 같음). `ref`가 양의 정수면 그 저장소의 계획/run Issue 번호로 연결되어, 그 run이 끝나면(done) 자동 완료, 진행 중이면 자동 '진행 중'으로 표시됩니다(취소된 run은 파일 값 그대로).
   - `phases`가 있으면 프로젝트 카드의 계획·개발·통합 줄을 펼쳤을 때 안쪽이 단계 묶음('{id} {제목}' 머리 · 항목 줄 · 세부 할 일)으로 보이고, 칸 숫자 아래에 '{n}단계'가 붙습니다. item이 없는 미완료 단계는 계획 줄에 '예정'으로, 어느 단계에도 안 이어진 항목은 '단계 미지정'으로 보이며, 끝난 단계는 통합 줄 아래 '완료' 줄에 끝난 run 번호와 함께 모입니다. `phases`가 없는 저장소는 이전 화면 그대로입니다.
   - 선택 필드 `phases[].tasks`: `[{ "title": "…", "owner": "me", "status": "todo" }]` — PM이 관리하는 세부 할 일(`title` 40자까지, `owner` me=사람('나' 칩)·ai('AI' 칩), `status` done·todo). 미완료(todo)만 그 단계 묶음에 보입니다.
@@ -182,6 +182,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 - 상황판 스위치는 4장의 저장소 변수를 등록된 모든 저장소에 저장하고 저장소마다 엔진을 바로 깨웁니다(한 저장소가 실패해도 나머지는 계속, 실패한 저장소는 따로 표시). 그래서 대기 작업이 다음 순찰(매시 7·27·47분)을 기다리지 않고 이어집니다.
 - 상황판이 꺼져 있거나 고장 나도 엔진은 GitHub 변수만 보고 움직입니다.
 - 서버 설정(Vercel): `ORCH_REPOS`(보여줄 저장소, 쉼표 구분), `ORCH_GITHUB_TOKEN`(해당 저장소 Issues 읽기, Variables 읽기·쓰기, Actions 읽기·쓰기, **등록 저장소 Contents 읽기(docs/architecture.json)** — roadmap.json·patchnotes.json도 같은 권한). 토큰이 없으면 읽기만 됩니다.
+  - `ORCH_APP_URLS`(선택): 프로젝트 카드 '화면 열기' 주소, 쉼표 구분 `owner/repo=라벨|https://주소`(라벨 생략 가능, 예: `owner/repo=가계부|https://app.example.invalid`). 공개 저장소는 운영 주소를 `roadmap.json` 대신 여기에 둡니다. `https://`만 받고, 상황판 자기 저장소 항목은 무시합니다.
 
   | 토큰 권한 | 용도 |
   | --- | --- |
@@ -203,6 +204,7 @@ GitHub 저장소 **Settings → Secrets and variables → Actions → Variables*
 Vercel 자동 배포는 꺼져 있습니다(`vercel.json`). 무료 플랜의 하루 배포 한도를 보호하기 위해서입니다. 대신 `deploy` 워크플로가 main에 업데이트(머지)가 **10개** 쌓일 때마다 Vercel Deploy Hook으로 한 번 배포합니다.
 
 - 마지막으로 배포한 커밋은 태그 `prod-deployed`로 기억합니다. 개수는 그 이후 main에 머지된 수입니다.
+- 태그 `prod-deployed`가 없으면(compare 404) 프로젝트 카드에 '배포 대기' 대신 '바로 배포'로 표시합니다. 첫 배포 전 저장소도 같게 보입니다.
 - 지금 바로 배포하려면 GitHub 앱 → Actions → `deploy` → **Run workflow**를 누릅니다(기본값이 강제 배포).
 - 기준 개수는 저장소 변수 `ORCH_DEPLOY_EVERY`로 바꿀 수 있습니다(기본 10).
 - 한 번만 설정하면 됩니다: Vercel → `ai-orchestrator` → Settings → Git → **Deploy Hooks**에서 이름 `orch`, 브랜치 `main`으로 만들고, 나온 URL을 GitHub 저장소 Settings → Secrets and variables → Actions → **New repository secret** `VERCEL_DEPLOY_HOOK`에 넣습니다.

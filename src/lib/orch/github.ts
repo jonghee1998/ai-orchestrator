@@ -9,7 +9,7 @@
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
 import type { PatchNote } from "@/lib/patchnotes";
-import { ARCH_MAX_BYTES, USAGE_RETRY_MS, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
+import { ARCH_MAX_BYTES, USAGE_RETRY_MS, appFromEnv, type DeployMode, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -134,18 +134,21 @@ export async function readArchitecture(repo: string, env: Env, f: Fetch = fetch)
 type CompareCommit = { parents?: unknown[] } | null | undefined;
 
 /**
- * Merge commits (parents > 1) between tag prod-deployed and main. null when the tag is missing or the read fails.
+ * Merge commits (parents > 1) between tag prod-deployed and main → { mode: 'batch', count }.
  * Approximation: deploy.yml counts `git rev-list --count --first-parent prod-deployed..HEAD`, which also counts
  * direct (non-merge) commits on main and ignores merges inside merged branches; compare also caps at 250 commits.
+ * 404 는 태그 prod-deployed 가 없다는 뜻으로 보고 바로 배포로 표시한다(mode 'direct'). 첫 배포 전인 배치 저장소,
+ * 기본 브랜치가 main 이 아니거나 토큰이 접근 못 하는 저장소도 404 라 같게 보인다(구별하려고 API 를 더 부르지 않는다).
+ * Any other failure or a response without a commits array → mode 'unknown'. count is null unless mode is 'batch'.
  */
-async function readDeployPending(f: Fetch, token: string, repo: string): Promise<{ count: number } | null> {
+async function readDeployPending(f: Fetch, token: string, repo: string): Promise<{ mode: DeployMode; count: number | null }> {
   try {
     const j = (await call(f, token, "GET", `/repos/${repo}/compare/prod-deployed...main`)) as { commits?: CompareCommit[] } | null;
-    if (!Array.isArray(j?.commits)) return null;
+    if (!Array.isArray(j?.commits)) return { mode: "unknown", count: null };
     const isMerge = (c: CompareCommit) => Array.isArray(c?.parents) && c.parents.length > 1;
-    return { count: j.commits.filter(isMerge).length };
-  } catch {
-    return null;
+    return { mode: "batch", count: j.commits.filter(isMerge).length };
+  } catch (e) {
+    return { mode: e instanceof GitHubError && e.status === 404 ? "direct" : "unknown", count: null };
   }
 }
 
@@ -192,6 +195,7 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
   const notesMissing = notes.status === "rejected" && notes.reason instanceof GitHubError && notes.reason.status === 404;
   // 404 = this project has no roadmap file (not an error). describe() lumps 403 and 404 together, so compare directly.
   const roadmapMissing = roadmap.status === "rejected" && roadmap.reason instanceof GitHubError && roadmap.reason.status === 404;
+  const isSelf = isSelfRepo(repo, env);
   return {
     repo,
     usage: usage.status === "fulfilled" ? usage.value : null,
@@ -206,12 +210,15 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
     roadmap: roadmap.status === "fulfilled" ? roadmap.value : null,
     roadmapError: roadmap.status === "fulfilled" || roadmapMissing ? null
       : roadmap.reason instanceof RoadmapFormatError ? roadmap.reason.message : describe(roadmap.reason),
-    deployPending: pending.status === "fulfilled" ? pending.value?.count ?? null : null,
+    deployPending: pending.status === "fulfilled" ? pending.value.count : null,
+    deployMode: pending.status === "fulfilled" ? pending.value.mode : "unknown",
+    // App link: ORCH_APP_URLS > roadmap.json app; never on this dashboard's own card.
+    app: isSelf ? null : appFromEnv(repo, env) ?? (roadmap.status === "fulfilled" ? roadmap.value.app : null),
     deployEvery: sw.status === "fulfilled" ? sw.value.deployEvery : 10,
     patchNotes: notes.status === "fulfilled" ? notes.value : null,
     patchNotesError: notes.status === "fulfilled" || notesMissing ? null
       : notes.reason instanceof PatchNotesFormatError ? notes.reason.message : describe(notes.reason),
-    isSelf: isSelfRepo(repo, env),
+    isSelf,
   };
 }
 

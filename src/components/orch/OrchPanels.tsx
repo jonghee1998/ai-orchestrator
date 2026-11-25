@@ -371,13 +371,14 @@ function StageCell({ c, phaseCount }: { c: BoardColumn; phaseCount?: number }) {
 /**
  * 프로젝트 카드. 머리(저장소 이름 · [단계 a/b 완료] · 남은 할 일 · 확인 필요)는 접기 버튼이고, 본문([진행 단계] · 남은 할 일 요약 · 칸 · 인프라/확장 · 단계 줄)이 접힌다.
  * [ ] 는 roadmap.json 'phases' 가 있을 때만.
- * 다른 프로젝트는 roadmap.json 'app' 이 있으면 머리 오른쪽에 '화면 열기' 링크 (버튼 밖, 새 탭). 자기 저장소(isSelf, 서버 판정)는 링크 없음.
+ * 다른 프로젝트는 앱 주소(서버 변수 ORCH_APP_URLS > roadmap.json 'app', 서버가 v.app 으로 줌)가 있으면 머리 오른쪽에 '화면 열기' 링크 (버튼 밖, 새 탭).
+ * 자기 저장소(isSelf, 서버 판정)는 링크 없음. 태그 prod-deployed 가 없는 저장소(deployMode 'direct')는 '배포 대기' 대신 '바로 배포'.
  */
 function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onToggle: () => void }) {
   const bodyId = useId();
   const board = stageBoard({ runs: v.runs, plans: v.plans ?? [], ideas: v.ideas ?? [] });
   const needs = board.reduce((n, c) => n + boardNeedsUser(c), 0);
-  const app = !v.isSelf ? v.roadmap?.app ?? null : null;
+  const app = v.app;
   // 검토(아이디어)는 개발할지 정하기 전이라 본 흐름(계획·개발·통합)과 따로 보인다
   const flow = board.filter((c) => c.n > 1);
   const review = board[0];
@@ -415,7 +416,7 @@ function ProjectCard({ v, open, onToggle }: { v: RepoView; open: boolean; onTogg
               </a>
             )}
             <span className={app ? "" : "pt-1.5"} data-testid="orch-deploy-pending">
-              배포 대기 {v.deployPending ?? "?"} ·{" "}
+              {v.deployMode === "direct" ? "바로 배포" : `배포 대기 ${v.deployPending ?? "?"}`} ·{" "}
               <Link href="/patch-notes" className="-my-3 inline-flex min-h-11 items-center gap-0.5 text-accent">완료 기록<ArrowRightIcon className="h-3 w-3" /></Link>
             </span>
           </div>
