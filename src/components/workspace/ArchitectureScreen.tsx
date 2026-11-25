@@ -56,10 +56,10 @@ type Stage = { name: string; owner: string; out: string; control: string };
 const PROCESS: Stage[] = [
   { name: "대화 · 로드맵", owner: "사용자 → PM", out: "roadmap.json 단계 · PM_HANDOFF", control: "방향과 단계 순서는 사용자와 대화로 결정" },
   { name: "다음 계획", owner: "Codex 분석 → PM", out: "계획 Issue (스텝 · 완료 기준 · 위험)", control: "Claude 한도면 Codex가 작성 · 하루 8개 상한" },
-  { name: "감사 · 시작", owner: "Codex → PM", out: "감사 의견 · 자동 orch:go", control: "최대 3회, 지적은 PM이 반영 · 자동 모드 OFF면 사용자 승인" },
+  { name: "감사 · 시작", owner: "Codex → PM", out: "감사 의견 · 자동 orch:go", control: "최대 3회, 지적은 PM이 반영 · 자동 모드면 OK·고칠 것 없음 판단·마지막 라운드(반영 결과와 상관없이) 때 재감사 없이 시작 · OFF면 사용자 승인" },
   { name: "스텝 실행", owner: "엔진 → 구현 AI", out: "스텝 PR", control: "독립 검수 + CI, 실패 시 최대 3회 자동 수정 · 2회 실패 시 Opus 승격" },
   { name: "통합", owner: "엔진", out: "최종 PR + 완공 보고서", control: "충돌 자동 정리(패치노트) · 위험 판정" },
-  { name: "반영 · 배포", owner: "엔진", out: "main 반영 → Vercel", control: "임시 통과 스텝은 Claude 재검수 · 자동 모드면 자동 반영 · 10건마다 배포" },
+  { name: "반영 · 배포", owner: "엔진 → deploy 워크플로", out: "main 반영 → (10건마다) Vercel", control: "엔진은 main 반영까지(임시 통과는 Claude 재검수 · 자동 모드면 자동 반영) · 운영 배포는 deploy 워크플로가 main 10건마다(수동 즉시 가능)" },
   { name: "단계 넘기기", owner: "Codex → PM", out: "단계 통합 검수", control: "빠진 것이 있으면 그것부터 계획, 없을 때만 다음 단계" },
 ];
 
@@ -69,12 +69,12 @@ const ROLES: Role[] = [
   { who: "PM · Claude", does: "로드맵, 다음 계획 작성, 감사 지적 반영, 막힘 진단, 엔진 수정 PR", not: "운영 배포 · 비밀값 변경" },
   { who: "Claude Sonnet", does: "일반 구현 (기본)", not: ".github · 엔진 파일 수정" },
   { who: "Claude Opus", does: "위험 작업 구현, 2회 실패 시 승격, Codex 대신 검수, 임시 통과 재검수", not: "자기 작업 검수" },
-  { who: "Codex", does: "독립 검수 · 계획 감사 (기본), Claude 한도면 구현 · 수정 · 계획, 반복 실패 원인 분석, 단계 통합 검수", not: "임시 통과를 main에 바로 반영" },
+  { who: "Codex", does: "독립 검수 · 계획 감사 (기본), Claude 한도면 구현 · 수정 · 계획, 반복 실패 원인 분석, 단계 통합 검수 · 멈춘 작업 즉시 진단·가능하면 재개(PM 대리, 자동 모드)", not: "임시 통과를 main에 바로 반영" },
   { who: "GitHub Actions", does: "엔진 · CI · 사용량 확인 · 배포 호출 (PC 꺼져도 동작)", not: "판단 (규칙대로만 실행)" },
 ];
 
 const CONTROLS: [string, string][] = [
-  ["자동 모드", "켜면 감사 통과 시 자동 시작 · 최종 자동 반영(CI 필수). 끄면 계획 승인과 위험 변경 반영을 사용자가."],
+  ["자동 모드", "켜면 감사 OK·고칠 것 없음 판단·마지막 라운드 때 자동 시작 · 최종 자동 반영(CI 필수). 끄면 계획 승인과 위험 변경 반영을 사용자가."],
   ["독립 검수", "만든 AI와 다른 AI가 검수. Codex가 만들고 Codex가 검수한 스텝은 임시 통과 → main 반영 전 Claude 재검수."],
   ["한도 대응", "Claude 한도면 Codex가 이어서 개발(스위치로 끄면 풀리는 시각까지 대기). 중단하지 않음."],
   ["재시도 · 승격", "스텝마다 최대 3회 자동 수정, 2회 실패하면 Opus로 올림. 그래도 안 되면 멈추고 PM이 원인 보고."],
@@ -88,7 +88,7 @@ const CONTROLS: [string, string][] = [
 const ROUTINES: [string, string][] = [
   ["이벤트 즉시", "PR · 검수 · CI · 머지 결과가 나오면 엔진이 바로 다음 단계로, run이 끝나면 다음 계획"],
   ["매시 7·27·47분", "엔진 순찰: 멈춘 작업 재시도 · 최종 PR 충돌 확인 · 할 일 없으면 다음 계획 요청"],
-  ["매시 3분", "PM 점검 (Claude 예약 작업): 막힌 작업 진단 · 일시 문제는 스스로 재개"],
+  ["멈추면 바로", "자동 모드·Codex 켜짐일 때 Codex PM 이 바로 원인 진단 → 자동으로 풀 수 있으면 계획에 [PM 지시]를 붙여 재개(run당 3회), 아니면 Issue 에 사람 판단 요청. 최종 PR 문제·3회 소진·모드 꺼짐은 사람 판단"],
   ["한도 해제 시각", "wait가 그 시각에 엔진을 깨워 이어감 (재검수 · Codex 대체 OFF일 때)"],
   ["사용량", "Claude · Codex 남은 사용량 자동 확인, 상황판에서 즉시 확인 가능"],
   ["10건마다", "main에 10건 쌓이면 Vercel 운영 배포 (수동 즉시 배포도 가능)"],
@@ -100,7 +100,7 @@ const REPO_SETTINGS: [string, string][] = [
   ["필수 검사", "ai-orchestrator: test · screens / Personal-dashboard: test · screens · db · pii"],
   ["main 규칙", "자동 머지 허용 · 필수 검사 통과해야 반영 · 브랜치 삭제 금지 · 강제 push 금지"],
   ["Codex 앱", "저장소 Code review 켜짐. Actions의 Codex는 로그인을 캐시에 암호화해 씀"],
-  ["PM 예약 작업", "Claude 예약 작업이 1시간마다 orch-sandbox · ai-orchestrator · Personal-dashboard 점검"],
+  ["멈춤 해제", "pm-unblock 워크플로: 중단되면 바로 Codex 가 PM 대리로 진단, 풀 수 있으면 재개 (자동 모드·Codex 켜짐, 최종 PR 문제 제외)"],
 ];
 type Tool = { name: string; role: string; where: string; how: string[]; files: string };
 const TOOLS: Tool[] = [

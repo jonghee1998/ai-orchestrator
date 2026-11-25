@@ -18,7 +18,7 @@
     {"id": "0.15", "title": "모바일 알림", "status": "done", "note": "ntfy + PM 점검 알림"},
     {"id": "0.16", "title": "통합 상황판 연결", "status": "done", "note": "ORCH_REPOS·ORCH_GITHUB_TOKEN"},
     {"id": "0.17", "title": "사용량·시간·배포 정책", "status": "done", "note": "ON/OFF·시간대·10개 단위 배포"},
-    {"id": "0.18", "title": "보안 검증", "status": "doing", "note": "비밀값 점검 완료, 정식 점검표 남음"},
+    {"id": "0.18", "title": "보안 검증", "status": "done", "note": "정식 점검표 docs/SECURITY_CHECKLIST.md", "ref": "docs/SECURITY_CHECKLIST.md"},
     {"id": "0.19", "title": "실제 E2E 테스트", "status": "done", "note": "실제 작업 10건+ 완주", "ref": 209},
     {"id": "0.20", "title": "개발 가능 상태", "status": "done"}
   ],
