@@ -121,3 +121,24 @@ test("docs H: PM_HANDOFF 현재 상태의 상황판 버전은 PATCH_NOTES 에 �
   const cmp = a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
   assert.ok(cmp >= 0, `${v} 는 2.8.4 보다 낮음`);
 });
+
+test("docs I: ORCH_MANUAL 10장 프로젝트 행은 지금 카드 화면 기준", () => {
+  const sec = section(read("docs/ORCH_MANUAL.md"), "## 10.", "## ");
+  assert.ok(sec, "10장을 찾지 못함");
+  const cond = "단계 묶음('단계 미지정' 제외)이 하나 이상 있을 때만";
+  const rows = lines(sec).filter((l) => l.startsWith("| 프로젝트 |"));
+  assert.equal(rows.length, 1, "'| 프로젝트 |' 줄이 정확히 1개가 아님");
+  const row = rows[0];
+  for (const k of [
+    "완료 기록", "패치노트", "배포 완료", "배포 대기", "인프라", "확장", "계획", "개발", "통합",
+    "추가 검토", "확인 필요", "남은 할 일 없음", "열기", "로드맵을 읽었을 때", cond, "'진행'·'할 일' 항목만",
+  ]) assert.ok(row.includes(k), `프로젝트 행에 ${k} 없음`);
+  for (const k of ["5 완료", "다음 배포까지", "0 인프라", "6 확장", "1 검토·2 계획"]) {
+    assert.ok(!row.includes(k), `프로젝트 행에 옛 문구 ${k} 가 남음`);
+  }
+  const ph = lines(sec).filter((l) => l.startsWith("  - `phases`가 있으면 프로젝트 카드의"));
+  assert.equal(ph.length, 1, "phases 하위 항목 줄이 정확히 1개가 아님");
+  assert.ok(ph[0].includes(cond), "phases 줄에 단계 묶음 조건 문구 없음");
+  assert.ok(!sec.includes("0·6단계"), "10장에 '0·6단계' 가 남음");
+  assert.ok(sec.includes("인프라·확장 체크리스트"), "10장에 '인프라·확장 체크리스트' 없음");
+});
