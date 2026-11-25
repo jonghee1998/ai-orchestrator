@@ -165,3 +165,22 @@ test("docs H: ORCH_MANUAL 4장 ORCH_FABLE 행 1개·대체 순서, Architecture 
   const arch = read("src/components/workspace/ArchitectureScreen.tsx");
   assert.ok(arch.includes("ORCH_OPUS · ORCH_FABLE"));
 });
+
+test("docs J: ORCH_MANUAL 7장 결과 화면 테스트 명령은 npm 스크립트", () => {
+  const doc = read("docs/ORCH_MANUAL.md");
+  const ls = lines(doc).filter((l) => l.startsWith("**결과 화면 테스트"));
+  assert.equal(ls.length, 1);
+  const l = ls[0];
+  for (const w of [
+    "`npm run build && npm run screens`",
+    "`npm run build && npm run screens:ok`",
+    "`npm run build && npm run screens:partial`",
+    "switch-ok.png",
+    "switch-partial.png",
+    "가짜 GitHub 서버에만",
+    "실제 저장소 설정은 바꾸지 않",
+  ]) assert.ok(l.includes(w), w);
+  assert.ok(!/SCREENS_SWITCH=\S*\s+npm/.test(doc), "옛 환경변수 앞붙임 명령이 남음");
+  const scripts = JSON.parse(read("package.json")).scripts as Record<string, string>;
+  for (const k of ["screens", "screens:ok", "screens:partial"]) assert.ok(k in scripts, k);
+});
