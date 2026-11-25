@@ -404,13 +404,45 @@ test("readRepo: deployPending from compare merge commits since prod-deployed; no
   }) as typeof fetch;
   const ok = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { commits } }));
   assert.equal(ok.deployPending, 2);
+  assert.equal(ok.deployMode, "batch");
   assert.ok(!("pendingPrs" in ok));
   const none = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { commits: [] } }));
   assert.equal(none.deployPending, 0);
+  assert.equal(none.deployMode, "batch");
   const noTag = await readRepo(REPO, ENV, fakeRepo({ status: 404, body: { message: "Not Found" } }));
   assert.equal(noTag.deployPending, null);
+  assert.equal(noTag.deployMode, "direct");
   const err = await readRepo(REPO, ENV, fakeRepo({ status: 500 }));
   assert.equal(err.deployPending, null);
+  assert.equal(err.deployMode, "unknown");
+  const noList = await readRepo(REPO, ENV, fakeRepo({ status: 200, body: { status: "identical" } }));
+  assert.equal(noList.deployPending, null);
+  assert.equal(noList.deployMode, "unknown");
+});
+
+test("readRepo app: ORCH_APP_URLS beats roadmap.json app; missing there → roadmap app; own repo (isSelf) → null", async () => {
+  const roadmapApp = { label: "로드맵앱", url: "https://roadmap.example.invalid/" };
+  const fakeRepo = (async (url: string, init?: RequestInit) => {
+    const u = new URL(url);
+    const json = (s: number, b: unknown) => new Response(JSON.stringify(b ?? {}), { status: s });
+    if ((init?.method ?? "GET") !== "GET") return json(500, {});
+    if (u.pathname.endsWith("/contents/docs/roadmap.json")) {
+      return json(200, { encoding: "base64", content: Buffer.from(JSON.stringify({ setup: [], app: roadmapApp })).toString("base64") });
+    }
+    if (u.pathname.endsWith("/actions/variables")) return json(200, { variables: [] });
+    if (u.pathname.endsWith("/issues")) return json(200, []);
+    return json(404, {});
+  }) as typeof fetch;
+  const fromEnv = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: "o/self", ORCH_APP_URLS: `${REPO}=환경앱|https://app.example.invalid/r` }, fakeRepo);
+  assert.deepEqual(fromEnv.app, { label: "환경앱", url: "https://app.example.invalid/r" });
+  assert.deepEqual(fromEnv.roadmap!.app, roadmapApp);
+  const fallback = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: "o/self", ORCH_APP_URLS: "o/other=https://app.example.invalid/x" }, fakeRepo);
+  assert.deepEqual(fallback.app, roadmapApp);
+  const noVar = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: "o/self" }, fakeRepo);
+  assert.deepEqual(noVar.app, roadmapApp);
+  const self = await readRepo(REPO, { ...ENV, ORCH_SELF_REPO: REPO, ORCH_APP_URLS: `${REPO}=https://app.example.invalid/self` }, fakeRepo);
+  assert.equal(self.isSelf, true);
+  assert.equal(self.app, null);
 });
 
 // ---------------------------------------------------------------- docs/architecture.json (readArchitecture + GET /api/architecture)

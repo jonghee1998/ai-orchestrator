@@ -87,6 +87,8 @@ const app = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start",
     CONTROL_READ_TOKEN: readToken, // 읽기 세션 확인용 (일회용)
     ORCH_REPOS: [REPO, REPO2, REPO3, REPO4].join(","), ORCH_GITHUB_TOKEN: "fixture-token", ORCH_GITHUB_API: `http://127.0.0.1:${ghPort}`,
     ORCH_SELF_REPO: REPO, // 자기 저장소 판정(서버): orch-screens 카드에는 '화면 열기' 링크가 없어야 함
+    // 앱 링크 환경변수: 자기 저장소 항목은 무시돼야 하고, orch-third(로드맵 app 없음)에는 라벨 링크가 생겨야 함. orch-second 는 넣지 않음(roadmap app 그대로)
+    ORCH_APP_URLS: `${REPO}=https://app.example.invalid/self, ${REPO3}=셋째화면|https://app.example.invalid/third`,
   },
 });
 
@@ -456,6 +458,22 @@ try {
         if (!(await appLink.isVisible())) problems.push("[projects] '화면 열기' 링크가 보이지 않음");
       }
       if (await card.getByTestId("orch-app-link").count()) problems.push("[projects] 자기 저장소(orch-screens) 카드에 '화면 열기' 링크가 있음");
+
+      // orch-third: compare 404(태그 prod-deployed 없음) → '바로 배포 · 완료 기록', ORCH_APP_URLS 항목 → '셋째화면 열기' 새 탭 링크
+      {
+        const third = page.getByTestId("orch-project-orch-third");
+        const head3 = ((await third.getByTestId("orch-deploy-pending").textContent()) ?? "").replace(/\s+/g, " ").trim();
+        if (!head3.startsWith("바로 배포 · 완료 기록")) problems.push(`[projects] orch-third 카드 머리가 '바로 배포 · 완료 기록' 이 아님 (${head3})`);
+        const link3 = third.getByTestId("orch-app-link");
+        if ((await link3.count()) !== 1) problems.push(`[projects] orch-third 카드에 ORCH_APP_URLS 링크가 1개가 아님 (${await link3.count()})`);
+        else {
+          const [href, target, rel, text] = [await link3.getAttribute("href"), await link3.getAttribute("target"), (await link3.getAttribute("rel")) ?? "", ((await link3.textContent()) ?? "").trim()];
+          if (href !== "https://app.example.invalid/third") problems.push(`[projects] orch-third 링크 href 가 https://app.example.invalid/third 가 아님 (${href})`);
+          if (text !== "셋째화면 열기") problems.push(`[projects] orch-third 링크 글자가 '셋째화면 열기' 가 아님 (${text})`);
+          if (target !== "_blank" || !/noreferrer/.test(rel)) problems.push("[projects] orch-third 링크가 새 탭(_blank, noreferrer)이 아님");
+          if (!(await link3.isVisible())) problems.push("[projects] orch-third 링크가 보이지 않음");
+        }
+      }
 
       // 진행 단계(roadmap.json phases): orch-second 는 P1 완료 + P2(ref 30, 끝난 run) 자동 완료 → '단계 2/4 완료', P3(ref 31, 구현 중) 자동 진행(굵게).
       // orch-screens 는 phases 가 없으므로 블록도 머리 문구도 없음(위 머리 요약 '남은 할 일 46과정 · 확인 필요 1' 그대로).

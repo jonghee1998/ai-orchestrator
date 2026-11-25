@@ -190,7 +190,7 @@ function secondRepoFixtures(iso, usage) {
 }
 
 // 구조 탭 전용 가짜 저장소 둘(example/orch-third · example/orch-fourth): 작업·계획·변수는 모두 빈 응답이라 다른 탭에는 보이는 게 없다.
-// docs/architecture.json 만 다르다: third 는 404(파일 없음), fourth 는 500(조회 오류).
+// docs/architecture.json 만 다르다: third 는 404(파일 없음), fourth 는 500(조회 오류). third 는 compare 도 404(바로 배포).
 function archOnlyFixtures(iso) {
   // 다른 탭의 기존 검사에 영향이 없도록 스위치 값은 기준 저장소(orch-screens)와 같게(Codex off), 로드맵은 빈 항목으로 둔다.
   const variables = [{ name: "ORCH_CODEX", value: "off" }, { name: "ORCH_PAUSED", value: "off" }];
@@ -204,7 +204,8 @@ function archOnlyFixtures(iso) {
     if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(p)) return { status: 200, body: [] };
     if (p === `/repos/${repo}/actions/variables`) return { status: 200, body: { total_count: variables.length, variables } };
     if (p === `/repos/${repo}/contents/docs/roadmap.json`) return { status: 200, body: roadmapContent };
-    if (p === `/repos/${repo}/compare/prod-deployed...main`) return { status: 200, body: { status: "identical", commits: [] } };
+    // third 는 태그 prod-deployed 없음(compare 404) → 프로젝트 카드 '바로 배포', fourth 는 200(배포 대기 0)
+    if (p === `/repos/${repo}/compare/prod-deployed...main`) return repo === REPO3 ? { status: 404, body: { message: "Not Found" } } : { status: 200, body: { status: "identical", commits: [] } };
     if (p === `/repos/${repo}/actions/workflows/usage.yml/runs`) return { status: 200, body: { workflow_runs: [{ created_at: iso(5) }] } };
     return null;
   };
