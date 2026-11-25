@@ -11,7 +11,7 @@
 import { NextResponse } from "next/server";
 import { authorize } from "@/lib/session/guard";
 import { requireRead, NOSTORE } from "../_auth";
-import { configuredRepos, switchChange } from "@/lib/orch/model";
+import { configuredRepos, markEngineDrift, switchChange } from "@/lib/orch/model";
 import { applySwitchAll } from "@/lib/orch/switchAll";
 import { GitHubError, approvePlan, checkIdea, createIdea, describeGitHubError, readRepo, readToken, refreshUsageIfStale, requestUsageRun, writeSwitch, writeToken } from "@/lib/orch/github";
 
@@ -28,7 +28,7 @@ export async function GET(req: Request): Promise<Response> {
     return v.usage ? { ...v, usageRefresh: await refreshUsageIfStale(r, v.usage, process.env) } : v;
   }));
   return NextResponse.json(
-    { mode: "live", generatedAt: new Date().toISOString(), canWrite: Boolean(writeToken(process.env)), repos: views },
+    { mode: "live", generatedAt: new Date().toISOString(), canWrite: Boolean(writeToken(process.env)), repos: markEngineDrift(views) },
     { headers: NOSTORE },
   );
 }
