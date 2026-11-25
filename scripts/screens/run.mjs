@@ -27,6 +27,7 @@ const listen = (srv) => new Promise((ok) => srv.listen(0, "127.0.0.1", () => ok(
 // 스위치 쓰기 시나리오 (머지 전 확인용, 기본 읽기 전용 실행과 분리): SCREENS_SWITCH=ok|partial
 //   ok      = 가짜 GitHub 가 두 저장소의 변수 PATCH·dispatch 를 모두 받아들임 → '4개 프로젝트에 적용'
 //   partial = 두 번째 저장소 PATCH 만 403 → '일부 실패: orch-second · …'
+//   Codex 다음에 Fable 토글도 검사: 저장 값 'on'(ghWrites·varOverrides), partial 은 orch-second 403·off 유지, 결과 문구 요소가 지워지고 새로 들어오는지(MutationObserver)
 // 쓰기는 이 프로세스 안의 가짜 서버에만 간다 (운영 저장소 설정은 바꾸지 않음).
 const SWITCH = process.env.SCREENS_SWITCH || "";
 if (SWITCH && SWITCH !== "ok" && SWITCH !== "partial") { console.error(`SCREENS_SWITCH 는 ok 또는 partial (${SWITCH})`); process.exit(2); }
@@ -34,6 +35,8 @@ if (SWITCH && SWITCH !== "ok" && SWITCH !== "partial") { console.error(`SCREENS_
 // ---- fake GitHub API
 const gh = githubFixtures(new Date());
 const ghCalls = [];
+/** switch 시나리오의 쓰기 요청 결과: { call: "METHOD /path", status, value? } (응답 상태가 정해진 뒤 기록) */
+const ghWrites = [];
 /** switch 시나리오에서 저장된 변수: repo → { NAME: value }. GET variables 응답에 덮어쓴다. */
 const varOverrides = new Map();
 const setVar = (repo, name, value) => { const m = varOverrides.get(repo) ?? {}; m[name] = value; varOverrides.set(repo, m); };
@@ -54,7 +57,8 @@ const ghServer = http.createServer((req, res) => {
   req.on("data", (c) => { raw += c; });
   req.on("end", () => {
     let hit = null;
-    if (SWITCH && req.method !== "GET") { let b = null; try { b = JSON.parse(raw || "null"); } catch {} hit = fakeWrite(req.method, url.pathname, b); }
+    if (SWITCH && req.method !== "GET") { let b = null; try { b = JSON.parse(raw || "null"); } catch {} hit = fakeWrite(req.method, url.pathname, b);
+      ghWrites.push({ call: `${req.method} ${url.pathname}`, status: hit?.status ?? 404, ...(b && typeof b === "object" && "value" in b ? { value: b.value } : {}) }); }
     else hit = gh(req.method, url);
     const vm = /^\/repos\/([^/]+\/[^/]+)\/actions\/variables$/.exec(url.pathname);
     if (hit?.status === 200 && vm && req.method === "GET" && varOverrides.has(vm[1])) {
@@ -672,13 +676,136 @@ try {
       if (SWITCH === "ok") for (const r of [REPO2, REPO3, REPO4]) want.push(`POST /repos/${r}/actions/workflows/orchestrator.yml/dispatches`);
       for (const w of want) if (!writes.includes(w)) problems.push(`[switch-${SWITCH}] 가짜 GitHub 에 '${w}' 가 없음 (${writes.join(", ")})`);
       if (SWITCH === "partial" && writes.some((w) => w.startsWith(`POST /repos/${REPO2}/actions/workflows`))) problems.push("[switch-partial] 저장 실패한 저장소에 dispatch 를 보냄");
-      if (!ghCalls.slice(before).some((c) => c.startsWith(`GET /repos/${REPO}/actions/variables`))) problems.push(`[switch-${SWITCH}] 저장 뒤 다시 읽지 않음`);
+      // 재조회 GET 은 결과 문구 뒤(reload)에 오므로 기록될 때까지 최대 10초 기다린 뒤 검사한다 (단언 내용은 그대로)
+      const reread = () => ghCalls.slice(before).some((c) => c.startsWith(`GET /repos/${REPO}/actions/variables`));
+      for (let i = 0; i < 100 && !reread(); i++) await new Promise((r) => setTimeout(r, 100));
+      if (!reread()) problems.push(`[switch-${SWITCH}] 저장 뒤 다시 읽지 않음`);
       // 다시 읽은 뒤: Codex 는 기준 값(ON), ok 는 시간대 입력도 새 기준값으로 갱신
       try { await page.waitForFunction(() => document.querySelector('[data-testid="orch-switches"] [role="switch"][aria-label="Codex (독립 검수)"]')?.getAttribute("aria-checked") === "true", null, { timeout: 10000 }); }
       catch { problems.push(`[switch-${SWITCH}] 다시 읽은 뒤 Codex 가 ON 이 아님`); }
       if (SWITCH === "ok") {
         try { await page.waitForFunction(() => document.querySelector("input#win-all")?.value === "09:00-21:00", null, { timeout: 10000 }); }
         catch { problems.push(`[switch-ok] 기준값이 바뀌었는데 작업 시간대 입력이 갱신되지 않음 (${await win.inputValue()})`); }
+      }
+      // Fable 토글 (Codex 다음): 네 저장소 모두 off → on. 결과 문구·색이 Codex 와 같으므로 이전 요소 제거·새 요소 삽입을 DOM 관찰로 확인한다.
+      {
+        const P = `[switch-${SWITCH}-fable]`;
+        const FABLE = "Claude Fable (깊은 분석·가설·모델 설계)";
+        const ALL = [REPO, REPO2, REPO3, REPO4];
+        // ① 구간 시작
+        const beforeFable = ghCalls.length;
+        const beforeWrites = ghWrites.length;
+        let clicked = false;
+        // ② Codex 재조회가 끝나 busy 가 풀려야 활성
+        let enabled = true;
+        try { await page.waitForFunction((n) => { const b = document.querySelector(`[data-testid="orch-switches"] [role="switch"][aria-label="${n}"]`); return !!b && !b.disabled; }, FABLE, { timeout: 15000 }); }
+        catch { enabled = false; problems.push(`${P} 버튼이 활성화되지 않음`); }
+        if (enabled) {
+          // ②-1 클릭 전에 이전 결과 문구(Codex) 요소를 잡고, 항상 마운트된 section 에 관찰 시작
+          let observing = false;
+          try {
+            observing = await page.evaluate(() => {
+              const old = document.querySelector('[data-testid="orch-switch-msg"]');
+              const sec = document.querySelector('[data-testid="orch-switches"]');
+              if (!old || !sec) return false;
+              const SEL = '[data-testid="orch-switch-msg"]';
+              const st = { old, removed: false, added: false, addedNode: null, observer: null };
+              const msgIn = (n) => (n.nodeType !== 1 ? null : n.matches(SEL) ? n : n.querySelector(SEL));
+              st.observer = new MutationObserver((records) => {
+                for (const rec of records) {
+                  for (const n of rec.removedNodes) if (n === old || (n.nodeType === 1 && n.contains(old))) st.removed = true;
+                  if (st.removed) for (const n of rec.addedNodes) { const m = msgIn(n); if (m && m !== old) { st.added = true; st.addedNode = m; } }
+                }
+              });
+              st.observer.observe(sec, { childList: true, subtree: true });
+              window.__fableMsg = st;
+              return true;
+            });
+          } catch (e) { problems.push(`${P} 결과 문구 관찰을 시작하지 못함 (${e?.message ?? e})`); }
+          if (!observing) problems.push(`${P} 클릭 전 이전 결과 문구가 없음`);
+          // ③ 관찰 시작 뒤 응답 대기 등록 (거부는 같은 식에서 처리)
+          const resp = page.waitForResponse((r) => r.url().endsWith("/api/orch") && r.request().method() === "POST", { timeout: 15000 })
+            .catch((e) => { problems.push(`${P} /api/orch POST 응답 없음 (${e?.message ?? e})`); return null; });
+          // ④ 클릭 (fixture 네 저장소 모두 off → on)
+          try { await sc.sec.getByRole("switch", { name: FABLE, exact: true }).click({ timeout: 10000 }); clicked = true; }
+          catch (e) { problems.push(`${P} 클릭 실패 (${e?.message ?? e})`); await resp; }
+          if (clicked) {
+            // ⑤ 응답 (서버는 모든 PATCH·dispatch 를 await 한 뒤 응답)
+            const res = await resp;
+            if (res) {
+              let body = null;
+              try { body = await res.json(); } catch (e) { problems.push(`${P} /api/orch 응답 JSON 을 읽지 못함 (${e?.message ?? e})`); }
+              if (body) {
+                const results = Array.isArray(body.results) ? body.results : [];
+                if (results.length !== ALL.length) problems.push(`${P} 응답 results 가 ${ALL.length}건이 아님 (${results.length})`);
+                for (const r of ALL) {
+                  const got = results.find((x) => x?.repo === r);
+                  const want = !(SWITCH === "partial" && r === REPO2);
+                  if (!got) problems.push(`${P} 응답 results 에 ${r} 가 없음 (${JSON.stringify(body).slice(0, 300)})`);
+                  else if (got.saved !== want) problems.push(`${P} 응답 results 의 ${r} saved 가 ${want} 가 아님 (${JSON.stringify(got)})`);
+                }
+              }
+            }
+            // ⑥ 이전 문구 요소 제거 → 그 뒤 새 요소 삽입을 확인한 다음에만 문구·색 검사
+            if (observing) {
+              let swapped = false;
+              try {
+                await page.waitForFunction(() => {
+                  const st = window.__fableMsg;
+                  const cur = document.querySelector('[data-testid="orch-switch-msg"]');
+                  return !!st && st.removed === true && st.added === true && st.old.isConnected === false && !!cur && cur !== st.old && cur === st.addedNode;
+                }, null, { timeout: 10000 });
+                swapped = true;
+              } catch {
+                const st = await page.evaluate(() => ({ removed: window.__fableMsg?.removed, added: window.__fableMsg?.added })).catch(() => ({}));
+                problems.push(`${P} 이전 결과 문구가 지워지고 새 문구가 들어오지 않음 (removed=${st.removed}, added=${st.added})`);
+              }
+              await page.evaluate(() => window.__fableMsg?.observer?.disconnect()).catch(() => {});
+              if (swapped) {
+                const got = await page.evaluate(() => { const n = window.__fableMsg.addedNode; return { text: (n.textContent ?? "").trim(), cls: n.getAttribute("class") ?? "" }; }).catch(() => null);
+                if (!got) problems.push(`${P} 새 결과 문구를 읽지 못함`);
+                else if (SWITCH === "ok") {
+                  if (got.text !== "4개 프로젝트에 적용") problems.push(`${P} 결과 문구가 '4개 프로젝트에 적용' 이 아님 (${got.text})`);
+                  if (/text-warn/.test(got.cls)) problems.push(`${P} 전체 성공 문구가 warn 색`);
+                } else {
+                  if (!got.text.startsWith("일부 실패: orch-second · ")) problems.push(`${P} 결과 문구가 '일부 실패: orch-second · …' 이 아님 (${got.text})`);
+                  if (/프로젝트에 적용/.test(got.text)) problems.push(`${P} 일부 실패인데 전체 성공 문구가 보임 (${got.text})`);
+                  if (!/text-warn/.test(got.cls)) problems.push(`${P} 일부 실패 문구가 warn 색이 아님`);
+                }
+              }
+            }
+            // ⑦ 재조회 뒤 Fable ON
+            try { await page.waitForFunction((n) => document.querySelector(`[data-testid="orch-switches"] [role="switch"][aria-label="${n}"]`)?.getAttribute("aria-checked") === "true", FABLE, { timeout: 10000 }); }
+            catch { problems.push(`${P} 다시 읽은 뒤 Fable 이 ON 이 아님`); }
+          } else await page.evaluate(() => window.__fableMsg?.observer?.disconnect()).catch(() => {});
+        }
+        if (clicked) {
+          // ⑧ 요청 수: 모든 기다림이 끝난 뒤에만 센다
+          const calls = ghCalls.slice(beforeFable);
+          const fw = calls.filter((c) => !c.startsWith("GET"));
+          const count = (c) => fw.filter((x) => x === c).length;
+          for (const r of ALL) {
+            const pc = count(`PATCH /repos/${r}/actions/variables/ORCH_FABLE`);
+            if (pc !== 1) problems.push(`${P} ${r} ORCH_FABLE PATCH 가 1회가 아님 (${pc})`);
+            const wantD = SWITCH === "partial" && r === REPO2 ? 0 : 1;
+            const dc = count(`POST /repos/${r}/actions/workflows/orchestrator.yml/dispatches`);
+            if (dc !== wantD) problems.push(`${P} ${r} orchestrator.yml dispatch 가 ${wantD}회가 아님 (${dc})`);
+          }
+          const codexN = fw.filter((c) => c.endsWith("/actions/variables/ORCH_CODEX")).length;
+          if (codexN) problems.push(`${P} Fable 구간에 ORCH_CODEX PATCH 가 있음 (${codexN})`);
+          if (!calls.some((c) => c.startsWith(`GET /repos/${REPO}/actions/variables`))) problems.push(`${P} 저장 뒤 다시 읽지 않음`);
+          // (3) 저장 값: Fable 기본값이 on 이라 화면 표시만으로는 잘못된 값을 못 잡으므로 저장된 값 자체를 본다
+          const writes = ghWrites.slice(beforeWrites).filter((w) => /\/actions\/variables\/ORCH_FABLE$/.test(w.call));
+          for (const w of writes) if (w.value !== "on") problems.push(`${P} ${w.call} 의 value 가 'on' 이 아님 (${JSON.stringify(w.value)})`);
+          for (const r of ALL) {
+            const fail = SWITCH === "partial" && r === REPO2;
+            const wantS = fail ? 403 : 204;
+            const w = writes.filter((x) => x.call === `PATCH /repos/${r}/actions/variables/ORCH_FABLE`);
+            if (w.length !== 1 || w[0].status !== wantS) problems.push(`${P} ${r} ORCH_FABLE PATCH status 가 ${wantS} 가 아님 (${w.map((x) => x.status).join(",") || "없음"})`);
+            const saved = varOverrides.get(r)?.ORCH_FABLE;
+            if (fail ? saved !== undefined : saved !== "on") problems.push(`${P} ${r} 저장된 ORCH_FABLE 이 ${fail ? "없어야 함(off 유지)" : "'on' 이 아님"} (${JSON.stringify(saved)})`);
+          }
+        }
       }
       for (const w of WIDTHS) {
         await page.setViewportSize({ width: w, height: 844 });
@@ -697,7 +824,7 @@ try {
   if (external.length) problems.push(`외부 요청 차단됨: ${[...new Set(external)].slice(0, 3).join(", ")}`);
   if (!SWITCH && ghCalls.some((c) => c.startsWith("POST") || c.startsWith("PATCH"))) problems.push(`화면 조회 중 GitHub 쓰기 요청: ${ghCalls.filter((c) => !c.startsWith("GET")).join(", ")}`);
   if (SWITCH) {
-    const allowed = /^(PATCH \/repos\/[^/]+\/[^/]+\/actions\/variables\/ORCH_CODEX|POST \/repos\/[^/]+\/[^/]+\/actions\/workflows\/orchestrator\.yml\/dispatches)$/;
+    const allowed = /^(PATCH \/repos\/[^/]+\/[^/]+\/actions\/variables\/ORCH_(CODEX|FABLE)|POST \/repos\/[^/]+\/[^/]+\/actions\/workflows\/orchestrator\.yml\/dispatches)$/;
     const odd = ghCalls.filter((c) => !c.startsWith("GET") && !allowed.test(c));
     if (odd.length) problems.push(`쓰기 시나리오에서 예상 밖 GitHub 쓰기: ${odd.join(", ")}`);
   }
