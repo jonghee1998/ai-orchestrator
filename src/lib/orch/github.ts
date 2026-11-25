@@ -1,7 +1,7 @@
 // GitHub REST I/O for the orchestrator dashboard. Server-only.
 //   reads : run Issues (labels orch:run open, orch:done recent), repository variables (ORCH_*),
 //           pending '[plan]' Issues + their plan-review comments, recent '[idea]' Issues + their idea-review comments,
-//           docs/roadmap.json · docs/patchnotes.json · docs/architecture.json (contents API) and merge commits since tag prod-deployed (compare API; Contents: Read)
+//           docs/roadmap.json · docs/patchnotes.json · docs/architecture.json (contents API) and first-parent commits since tag prod-deployed (compare API; Contents: Read)
 //   writes: one repository variable per switch change, then wakes the engine (orchestrator.yml dispatch);
 //           'orch:go' label on plan approval; one '[idea]' Issue per idea
 // Token: ORCH_GITHUB_TOKEN (fine-grained: Issues read and write, Variables read/write, Actions read/write).
@@ -131,22 +131,65 @@ export async function readArchitecture(repo: string, env: Env, f: Fetch = fetch)
   return arch;
 }
 
-type CompareCommit = { parents?: unknown[] } | null | undefined;
+type CompareCommit = { sha?: unknown; parents?: unknown } | null | undefined;
+
+/** Unpaged compare returns at most this many commits. */
+const COMPARE_MAX_COMMITS = 250;
 
 /**
- * Merge commits (parents > 1) between tag prod-deployed and main → { mode: 'batch', count }.
- * Approximation: deploy.yml counts `git rev-list --count --first-parent prod-deployed..HEAD`, which also counts
- * direct (non-merge) commits on main and ignores merges inside merged branches; compare also caps at 250 commits.
- * 404 는 태그 prod-deployed 가 없다는 뜻으로 보고 바로 배포로 표시한다(mode 'direct'). 첫 배포 전인 배치 저장소,
- * 기본 브랜치가 main 이 아니거나 토큰이 접근 못 하는 저장소도 404 라 같게 보인다(구별하려고 API 를 더 부르지 않는다).
+ * First-parent commits between tag prod-deployed and main → { mode: 'batch', count } — the same count as deploy.yml
+ * (`git rev-list --count --first-parent prod-deployed..HEAD`): each squash merge, direct commit and merge commit on main
+ * counts once; commits inside merged branches (including their root commits) do not.
+ * The walk starts at the only commit no other commit in the set names as a parent and follows parents[0] while it stays
+ * in the set; an empty parents array is a root commit and ends the walk.
+ * mode 'unknown' when the list may be incomplete or malformed: total_commits not a non-negative integer or different from
+ * commits.length (cut at 250, or total_commits > 0 with an empty list), 250 commits without total_commits, no single head,
+ * an element that is not an object, a missing/empty sha, a duplicate sha, parents missing or not an array, a parent
+ * without a sha, or a cycle.
+ * 404 는 태그 prod-deployed 가 없다는 뜻으로 보고 mode 'direct' 로 돌려준다(카드에는 deployLabel 이 '배포 완료'로 표시).
+ * 첫 배포 전인 배치 저장소, 기본 브랜치가 main 이 아니거나 토큰이 접근 못 하는 저장소도 404 라 같게 보인다
+ * (구별하려고 API 를 더 부르지 않는다).
  * Any other failure or a response without a commits array → mode 'unknown'. count is null unless mode is 'batch'.
  */
 async function readDeployPending(f: Fetch, token: string, repo: string): Promise<{ mode: DeployMode; count: number | null }> {
+  const unknown = { mode: "unknown" as const, count: null };
   try {
-    const j = (await call(f, token, "GET", `/repos/${repo}/compare/prod-deployed...main`)) as { commits?: CompareCommit[] } | null;
-    if (!Array.isArray(j?.commits)) return { mode: "unknown", count: null };
-    const isMerge = (c: CompareCommit) => Array.isArray(c?.parents) && c.parents.length > 1;
-    return { mode: "batch", count: j.commits.filter(isMerge).length };
+    const j = (await call(f, token, "GET", `/repos/${repo}/compare/prod-deployed...main`)) as
+      | { commits?: CompareCommit[]; total_commits?: unknown }
+      | null;
+    if (!Array.isArray(j?.commits)) return unknown;
+    const commits = j.commits;
+    const total = j.total_commits;
+    if (total !== undefined) {
+      if (typeof total !== "number" || !Number.isInteger(total) || total < 0 || total !== commits.length) return unknown;
+    } else if (commits.length >= COMPARE_MAX_COMMITS) {
+      return unknown;
+    }
+    if (commits.length === 0) return { mode: "batch", count: 0 };
+    const isSha = (v: unknown): v is string => typeof v === "string" && v !== "";
+    const bySha = new Map<string, string[]>();
+    for (const c of commits) {
+      if (typeof c !== "object" || c === null || !isSha(c.sha) || bySha.has(c.sha) || !Array.isArray(c.parents)) return unknown;
+      const parents: string[] = [];
+      for (const p of c.parents as unknown[]) {
+        if (typeof p !== "object" || p === null || !isSha((p as { sha?: unknown }).sha)) return unknown;
+        parents.push((p as { sha: string }).sha);
+      }
+      bySha.set(c.sha, parents);
+    }
+    const named = new Set<string>();
+    for (const parents of bySha.values()) for (const p of parents) named.add(p);
+    const heads = [...bySha.keys()].filter((s) => !named.has(s));
+    if (heads.length !== 1) return unknown;
+    const seen = new Set<string>();
+    let cur: string | undefined = heads[0];
+    while (cur !== undefined && bySha.has(cur)) {
+      if (seen.has(cur) || seen.size >= commits.length) return unknown;
+      seen.add(cur);
+      const parents: string[] = bySha.get(cur)!;
+      cur = parents.length === 0 ? undefined : parents[0];
+    }
+    return { mode: "batch", count: seen.size };
   } catch (e) {
     return { mode: e instanceof GitHubError && e.status === 404 ? "direct" : "unknown", count: null };
   }

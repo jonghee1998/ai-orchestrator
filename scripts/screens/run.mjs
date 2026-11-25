@@ -131,7 +131,7 @@ try {
 
   /** Each tab: path, nav label, texts that must appear (from fixtures), texts that must not. */
   const TABS = [
-    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 3", "완료 기록", "인프라", "확장", "추가 검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포", "바로 배포"] },
+    { name: "projects", path: "/projects", nav: "프로젝트", expect: ["남은 할 일", "배포 대기 4", "완료 기록", "인프라", "확장", "추가 검토", "계획", "개발", "통합"], forbid: ["설정되지 않았습니다", "로드맵 없음", "로드맵 읽기 실패", "흐름 보기", "5 완료", "다음 배포까지", "끝난 시험 작업", "배포된 시험 작업", "Vercel에 배포", "바로 배포"] },
     { name: "agents", path: "/agents", nav: "AI 팀", expect: ["AI 사용량", "42% 사용", "AI ON/OFF"], forbid: ["확인 불가"] },
     { name: "briefing", path: "/briefing", nav: "PM 브리핑", expect: ["결정 필요", "승인 대기 시험 작업", "orch-screens #12", "승인 대기 계획", "승인 기다리는 시험 계획", "감사 OK 2/3", "아이디어함", "상황판 채팅", "알림 모아보기", "묻고 답하는 흐름을 먼저 붙이면 효과가 큽니다", "의견 수집 중", "아이디어 적기"], forbid: ["승인 대기 계획 없음"] },
     { name: "architecture", path: "/architecture", nav: "구조", expect: ["요청만 하면 AI 팀이 계획부터 반영까지 알아서 개발", "둘째 프로젝트의 시험용 구조 문서", "구조 문서 없음", "구조 읽기 실패"], forbid: [] }, // 기존 문구 5개(아키텍처…Playwright)는 자기 카드를 펼친 뒤 검사
@@ -229,9 +229,9 @@ try {
       }
       const card = page.getByTestId("orch-project-orch-screens");
       const flat = async (loc) => ((await loc.textContent()) ?? "").replace(/\s+/g, " ").trim();
-      // 카드 머리: '배포 대기 3 · 완료 기록' (compare 머지 커밋 3개), '완료 기록' 은 /patch-notes 링크
+      // 카드 머리: '배포 대기 4 · 완료 기록' (compare first-parent 커밋 4개), '완료 기록' 은 /patch-notes 링크
       const head = await flat(card.getByTestId("orch-deploy-pending"));
-      if (!head.startsWith("배포 대기 3 · 완료 기록")) problems.push(`[projects] 카드 머리가 '배포 대기 3 · 완료 기록' 이 아님 (${head})`);
+      if (!head.startsWith("배포 대기 4 · 완료 기록")) problems.push(`[projects] 카드 머리가 '배포 대기 4 · 완료 기록' 이 아님 (${head})`);
       const doneLink = card.getByRole("link", { name: "완료 기록" });
       if (!(await doneLink.isVisible()) || !/\/patch-notes$/.test((await doneLink.getAttribute("href")) ?? "")) problems.push("[projects] '완료 기록' 이 /patch-notes 로 가는 링크가 아님");
       // 남은 할 일 (fixtures, 지금 과정도 남은 것으로 셈, 아이디어는 '추가 검토'라 제외): 계획 #13 2.8→2+16+8=26, #11 3.7→10+8=18, #12 4.7→2 = 46

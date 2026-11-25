@@ -402,7 +402,7 @@ export interface RepoView {
   /** docs/roadmap.json; null = no file in this repo (404) or it could not be read (then roadmapError is set). */
   roadmap: Roadmap | null;
   roadmapError: string | null;
-  /** Merge commits on main since tag prod-deployed (approximation); null = no tag or read failed. */
+  /** First-parent commits on main since tag prod-deployed (same count as deploy.yml); null = no tag or read failed. */
   deployPending: number | null;
   /** compare prod-deployed...main: ok → 'batch', 404 (no tag) → 'direct' (deployed on every merge), other failure → 'unknown'. */
   deployMode: DeployMode;
