@@ -563,3 +563,53 @@ test("route GET /api/architecture: no read token → every repo gets an error an
     assert.equal(g.calls.length, 0);
   });
 });
+
+// ---------------------------------------------------------------- readRepo aiJobs: 한 상태 요청이 실패해도 나머지는 남는다
+
+test("readRepo aiJobs: partial failure keeps the other status, both fail → [], dedupe by url", async () => {
+  type Run = { path: string; status: string; display_title?: string; html_url?: string };
+  const run = (file: string, status: string, display_title: string, html_url?: string): Run => ({ path: `.github/workflows/${file}`, status, display_title, ...(html_url ? { html_url } : {}) });
+  type Side = { status: number; runs?: Run[] };
+  const fake = (inProgress: Side, queued: Side) => (async (url: string, init?: RequestInit) => {
+    const u = new URL(url);
+    const json = (s: number, b: unknown) => new Response(JSON.stringify(b), { status: s });
+    if ((init?.method ?? "GET") !== "GET") return json(500, {});
+    if (u.pathname === `/repos/${REPO}/actions/runs` && u.searchParams.has("status")) {
+      const side = u.searchParams.get("status") === "in_progress" ? inProgress : queued;
+      return side.status === 200 ? json(200, { workflow_runs: side.runs ?? [] }) : json(side.status, { message: "err" });
+    }
+    if (u.pathname.endsWith("/actions/variables")) return json(200, { variables: [] });
+    if (u.pathname.endsWith("/issues")) return json(200, []);
+    return json(404, {});
+  }) as typeof fetch;
+  const U = "https://github.example.invalid/runs/1";
+
+  const a = await readRepo(REPO, ENV, fake({ status: 200, runs: [run("lab-fable.yml", "in_progress", "x", U)] }, { status: 500 }));
+  assert.equal(a.aiJobs?.length, 1);
+  assert.equal(a.aiJobs?.[0].workflow, "lab-fable.yml");
+
+  const b = await readRepo(REPO, ENV, fake({ status: 500 }, { status: 200, runs: [run("brief.yml", "queued", "x", U)] }));
+  assert.equal(b.aiJobs?.length, 1);
+  assert.equal(b.aiJobs?.[0].agent, "opus");
+
+  const c = await readRepo(REPO, ENV, fake({ status: 500 }, { status: 500 }));
+  assert.deepEqual(c.aiJobs, []);
+
+  const d = await readRepo(REPO, ENV, fake(
+    { status: 200, runs: [run("lab-idea.yml", "in_progress", "진행 쪽", U)] },
+    { status: 200, runs: [run("lab-idea.yml", "queued", "대기 쪽", U)] },
+  ));
+  assert.equal(d.aiJobs?.length, 1);
+  assert.equal(d.aiJobs?.[0].title, "진행 쪽");
+
+  const e = await readRepo(REPO, ENV, fake({ status: 200, runs: [run("lab-forecast.yml", "in_progress", "x", U)] }, { status: 200, runs: [] }));
+  assert.deepEqual(e.aiJobs, []);
+
+  const f = await readRepo(REPO, ENV, fake(
+    { status: 200, runs: [run("brief.yml", "in_progress", "빈 진행")] },
+    { status: 200, runs: [run("brief.yml", "queued", "빈 대기")] },
+  ));
+  assert.equal(f.aiJobs?.length, 2);
+  assert.deepEqual(f.aiJobs?.map((j) => j.url), ["", ""]);
+  assert.deepEqual(f.aiJobs?.map((j) => j.title), ["빈 진행", "빈 대기"]);
+});
