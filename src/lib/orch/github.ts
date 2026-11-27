@@ -231,8 +231,22 @@ export async function readIdeas(f: Fetch, token: string, repo: string): Promise<
 
 /** 진행 중·대기 중인 Actions 실행에서 AI 작업만(한 번씩, 최근 30개). */
 async function readAiJobs(f: Fetch, token: string, repo: string): Promise<AiJob[]> {
-  const [a, b] = await Promise.all(["in_progress", "queued"].map((s) => call(f, token, "GET", `/repos/${repo}/actions/runs?status=${s}&per_page=30`)));
-  return [...parseAiJobs(a), ...parseAiJobs(b)];
+  const res = await Promise.allSettled(["in_progress", "queued"].map((s) => call(f, token, "GET", `/repos/${repo}/actions/runs?status=${s}&per_page=30`)));
+  const failed = res.find((r): r is PromiseRejectedResult => r.status === "rejected");
+  if (failed && res.every((r) => r.status === "rejected")) throw failed.reason;
+  const seen = new Set<string>();
+  const out: AiJob[] = [];
+  for (const r of res) {
+    if (r.status !== "fulfilled") continue;
+    for (const j of parseAiJobs(r.value)) {
+      if (j.url) {
+        if (seen.has(j.url)) continue;
+        seen.add(j.url);
+      }
+      out.push(j);
+    }
+  }
+  return out;
 }
 
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
