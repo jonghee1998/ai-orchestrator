@@ -234,7 +234,7 @@ test("docs K: ORCH_MANUAL 10장 AI 팀 행은 AGENT_ORDER·FLAG_KEYS 순서", ()
   // 상태 문구 (AI 목록 구절 안).
   const agentPart = row.slice(a, c);
   for (const w of [
-    "깊은 분석·가설·모델 설계(계획이 지정할 때)",
+    "실험실 설계·판정 · 깊은 분석(계획이 지정할 때)",
     "스위치를 한 곳 이상 읽었고 읽은 모든 프로젝트에서 그 AI가 꺼져 있으면 'OFF'",
     "스위치를 하나도 읽지 못하면 OFF 로 표시하지 않음",
     "사용자 행에는 OFF 가 없음",
