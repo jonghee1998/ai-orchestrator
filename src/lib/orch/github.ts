@@ -9,7 +9,7 @@
 //   (화면은 저장소 소유자가 쓴 '[idea]' Issue만 보여 준다).
 // Reads fall back to GITHUB_READ_TOKEN / GITHUB_TOKEN; writes never do.
 import type { PatchNote } from "@/lib/patchnotes";
-import { ARCH_MAX_BYTES, USAGE_RETRY_MS, appFromEnv, type DeployMode, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes } from "./model";
+import { ARCH_MAX_BYTES, USAGE_RETRY_MS, appFromEnv, type DeployMode, parseArchitecture, type Architecture, deployEveryFromVars, isSelfRepo, parseRoadmap, parseRun, parseUsage, sortRuns, switchesFromVars, usageStale, type Idea, type OrchRun, type PendingPlan, type RepoView, type Roadmap, type UsageRefresh, type UsageView, parsePatchNotes, parseAiJobs, type AiJob } from "./model";
 import { isPlanCandidate, parsePendingPlan, type PlanComment, type PlanIssue } from "./plans";
 import { IDEA_PREFIX, MAX_MINE, isIdeaCandidate, parseIdea, type IdeaComment, type IdeaIssue } from "./ideas";
 
@@ -229,11 +229,17 @@ export async function readIdeas(f: Fetch, token: string, repo: string): Promise<
   return list.filter((x): x is Idea => x !== null);
 }
 
+/** 진행 중·대기 중인 Actions 실행에서 AI 작업만(한 번씩, 최근 30개). */
+async function readAiJobs(f: Fetch, token: string, repo: string): Promise<AiJob[]> {
+  const [a, b] = await Promise.all(["in_progress", "queued"].map((s) => call(f, token, "GET", `/repos/${repo}/actions/runs?status=${s}&per_page=30`)));
+  return [...parseAiJobs(a), ...parseAiJobs(b)];
+}
+
 export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promise<RepoView> {
   const token = readToken(env);
-  const [runs, sw, usage, plans, ideas, roadmap, pending, notes] = await Promise.allSettled([
+  const [runs, sw, usage, plans, ideas, roadmap, pending, notes, jobs] = await Promise.allSettled([
     readRuns(f, token, repo), readVars(f, token, repo), readUsageIssue(f, token, repo), readPendingPlans(f, token, repo), readIdeas(f, token, repo),
-    readRoadmap(f, token, repo), readDeployPending(f, token, repo), readPatchNotes(f, token, repo),
+    readRoadmap(f, token, repo), readDeployPending(f, token, repo), readPatchNotes(f, token, repo), readAiJobs(f, token, repo),
   ]);
   const notesMissing = notes.status === "rejected" && notes.reason instanceof GitHubError && notes.reason.status === 404;
   // 404 = this project has no roadmap file (not an error). describe() lumps 403 and 404 together, so compare directly.
@@ -241,6 +247,7 @@ export async function readRepo(repo: string, env: Env, f: Fetch = fetch): Promis
   const isSelf = isSelfRepo(repo, env);
   return {
     repo,
+    aiJobs: jobs.status === "fulfilled" ? jobs.value : [],
     usage: usage.status === "fulfilled" ? usage.value : null,
     runs: runs.status === "fulfilled" ? runs.value : [],
     runsError: runs.status === "rejected" ? describe(runs.reason) : null,
