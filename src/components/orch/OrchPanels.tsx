@@ -466,7 +466,8 @@ const AGENT_NAME: Record<AgentId, string> = { sonnet: "Sonnet", opus: "Opus", fa
 
 /** AI 팀 탭 맨 위: 지금 어떤 AI가 어떤 일을 맡고 있는지 (엔진과 같은 규칙으로 화면에서 계산). 작업 제목·상태만 보인다. */
 function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
-  const rows = activeAgents(repos.flatMap((v) => v.runs), Object.fromEntries(repos.map((v) => [v.repo, v.switches])));
+  const rows = activeAgents(repos.flatMap((v) => v.runs), Object.fromEntries(repos.map((v) => [v.repo, v.switches])),
+    repos.flatMap((v) => (v.aiJobs ?? []).map((j) => ({ ...j, repo: v.repo }))));
   return (
     <Card>
       <h2 className={CARD_TITLE}>지금 일하는 AI</h2>
@@ -478,12 +479,12 @@ function ActiveAgentsCard({ repos }: { repos: RepoView[] }) {
               {row.off ? <span className="text-text-muted">OFF</span>
                 : !row.items.length && <span className="text-text-muted">쉬는 중</span>}
             </div>
-            {row.agent === "fable" && <p className="text-xs text-text-muted">깊은 분석·가설·모델 설계(계획이 지정할 때)</p>}
+            {row.agent === "fable" && <p className="text-xs text-text-muted">실험실 설계·판정 · 깊은 분석(계획이 지정할 때)</p>}
             {!row.off && row.items.map((it) => (
-              <p key={`${it.repo}#${it.number}`} className={`flex min-w-0 items-center gap-1 text-[13px] ${row.agent === "user" ? "text-warn" : "text-text-muted"}`}>
+              <p key={`${it.repo}#${it.number}#${it.url}`} className={`flex min-w-0 items-center gap-1 text-[13px] ${row.agent === "user" ? "text-warn" : "text-text-muted"}`}>
                 <span className="shrink-0">{short(it.repo)} ·</span>
                 <a href={it.url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 min-w-0 items-center gap-1 underline">
-                  <span className="shrink-0">#{it.number}</span><span className="truncate">{it.goal}</span>
+                  <span className="shrink-0">{it.label ?? `#${it.number}`}</span><span className="truncate">{it.goal}</span>
                 </a>
                 <span className="shrink-0">· {it.step ? `Step ${it.step}/${it.total} ` : ""}{it.activity}</span>
               </p>

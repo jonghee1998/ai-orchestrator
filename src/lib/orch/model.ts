@@ -389,8 +389,30 @@ export function deployLabel(mode: DeployMode, pending: number | null): string {
   return "배포 대기 ?";
 }
 
+/** 오케스트레이터 계획 밖에서 AI가 도는 GitHub Actions 작업(실험실 설계·판정, 아이디어 검토, AI 브리프). */
+export interface AiJob { workflow: string; title: string; url: string; agent: "fable" | "opus"; activity: string; startedAt: string }
+
+/** 진행 중인 Actions 실행 → AI 작업. 알려진 AI 워크플로만(코드만 도는 실험 실행 lab-forecast 등은 뺀다). */
+export function parseAiJobs(json: unknown): AiJob[] {
+  const runs = (json as { workflow_runs?: unknown[] })?.workflow_runs;
+  if (!Array.isArray(runs)) return [];
+  const out: AiJob[] = [];
+  for (const r of runs as { path?: string; display_title?: string; name?: string; html_url?: string; run_started_at?: string; status?: string }[]) {
+    if (r.status !== "in_progress" && r.status !== "queued") continue;
+    const file = (r.path ?? "").split("/").pop() ?? "";
+    const title = (r.display_title ?? r.name ?? file).slice(0, 80);
+    const base = { workflow: file, title, url: r.html_url ?? "", startedAt: r.run_started_at ?? "" };
+    if (file === "lab-fable.yml") out.push({ ...base, agent: "fable", activity: /design/.test(title) ? "실험 설계 중" : "실험 판정 중" });
+    else if (file === "lab-idea.yml") out.push({ ...base, agent: "fable", activity: "실험 아이디어 검토 중" });
+    else if (file === "brief.yml") out.push({ ...base, agent: "opus", activity: "AI 브리프 작성 중" });
+  }
+  return out;
+}
+
 export interface RepoView {
   repo: string;
+  /** 계획 밖 AI 작업(진행 중). 못 읽으면 빈 배열. */
+  aiJobs?: AiJob[];
   plans: PendingPlan[];
   plansError: string | null;
   ideas: Idea[];

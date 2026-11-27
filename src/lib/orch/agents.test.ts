@@ -167,3 +167,25 @@ test("held runs are excluded", () => {
   const rows = activeAgents([run({ held: "Sonnet·Opus가 모두 OFF" }), run({ status: "reviewing", held: "x", number: 2 })], { "o/a": sw() });
   assert.ok(rows.every((r) => r.items.length === 0));
 });
+
+test("Actions AI jobs: lab-fable·lab-idea → Fable (OFF면 Opus), brief → Opus, 코드 실행(lab-forecast)은 빠짐", async () => {
+  const { parseAiJobs } = await import("./model");
+  const json = { workflow_runs: [
+    { path: ".github/workflows/lab-fable.yml", display_title: "lab-fable design", html_url: "https://example.com/1", status: "in_progress", run_started_at: "t" },
+    { path: ".github/workflows/lab-fable.yml", display_title: "lab-fable judge", html_url: "https://example.com/2", status: "queued" },
+    { path: ".github/workflows/lab-idea.yml", display_title: "합성 아이디어", html_url: "https://example.com/3", status: "in_progress" },
+    { path: ".github/workflows/brief.yml", display_title: "brief", html_url: "https://example.com/4", status: "in_progress" },
+    { path: ".github/workflows/lab-forecast.yml", display_title: "lab-forecast dev", html_url: "https://example.com/5", status: "in_progress" },
+    { path: ".github/workflows/lab-fable.yml", display_title: "done", html_url: "https://example.com/6", status: "completed" },
+  ] };
+  const jobs = parseAiJobs(json).map((j) => ({ ...j, repo: "o/a" }));
+  assert.deepEqual(jobs.map((j) => j.activity), ["실험 설계 중", "실험 판정 중", "실험 아이디어 검토 중", "AI 브리프 작성 중"]);
+  const on = activeAgents([], { "o/a": sw() }, jobs);
+  assert.equal(row(on, "fable").items.length, 3);
+  assert.equal(row(on, "opus").items.length, 1);
+  assert.equal(row(on, "fable").items[0].label, "Actions");
+  const off = activeAgents([], { "o/a": sw({ fable: false }) }, jobs);
+  assert.equal(row(off, "fable").items.length, 0);
+  assert.equal(row(off, "opus").items.length, 4);
+  assert.deepEqual(parseAiJobs({}), []);
+});

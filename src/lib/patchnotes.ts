@@ -17,6 +17,7 @@ export function groupByMajor(notes: PatchNote[]): { major: number; notes: PatchN
 }
 
 export const PATCH_NOTES: PatchNote[] = [
+  { version: "2.8.7", date: "2026-11-27", title: "지금 일하는 AI에 Actions 작업", items: ["실험실 설계·판정·아이디어 검토(Fable)와 AI 브리프(Opus)처럼 계획 밖에서 도는 AI 작업도 'AI 팀 > 지금 일하는 AI'에 표시", "Fable이 꺼져 있으면 그 작업은 Opus 줄에"] },
   { version: "2.8.6", date: "2026-11-25", pr: 378, title: "Fable 스위치", items: ["AI 팀 탭에서 Fable(ORCH_FABLE)을 보고 모든 프로젝트에 한 번에 켜고 끔", "꺼지면 Fable 스텝을 Opus가 함 (Opus도 꺼지면 Sonnet, 셋 다 꺼지면 대기)"] },
   { version: "2.8.5", date: "2026-11-25", title: "배포 대기 수 기준 통일", items: ["프로젝트 카드의 '배포 대기 N'을 deploy 워크플로와 같은 기준(main 에 쌓인 커밋 수, squash·직접 커밋 포함)으로 셈"] },
   { version: "2.8.4", date: "2026-11-25", title: "배포 문구 통일", items: ["프로젝트 카드 머리: 반영된 것이 모두 배포된 상태는 '배포 완료', 대기가 있으면 '배포 대기 N', 읽기 실패는 '배포 대기 ?'"] },

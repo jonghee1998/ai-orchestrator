@@ -209,7 +209,7 @@ try {
       for (const [id, name, wants] of [
         ["sonnet", "Sonnet", ["orch-screens", "#11", "상황판 시험 작업", "Step 2/3", "구현 중", "orch-second", "#31", "둘째저장소 구현 작업", "Step 1/2"]],
         ["opus", "Opus", ["쉬는 중"]],
-        ["fable", "Fable", ["깊은 분석·가설·모델 설계(계획이 지정할 때)", "OFF"]],
+        ["fable", "Fable", ["실험실 설계·판정 · 깊은 분석(계획이 지정할 때)", "OFF"]],
         ["codex", "Codex", ["orch-second", "#32", "둘째저장소 검수 작업", "Step 2/2", "검수 중"]],
         ["user", "사용자", ["#12", "승인 대기 시험 작업", "#33", "둘째저장소 승인 작업", "반영 승인 대기"]],
       ]) {

@@ -1,4 +1,4 @@
-import type { OrchRun, Switches } from "./model";
+import type { AiJob, OrchRun, Switches } from "./model";
 
 // Which AI is working on what right now. Pure: no I/O.
 // The engine does not store "the model in use", so it is recomputed here with a copy of
@@ -12,7 +12,7 @@ import type { OrchRun, Switches } from "./model";
 //    switch, so we show Codex. If codex and opus are both off nobody can review, so the run is left out.
 
 export type AgentId = "sonnet" | "opus" | "fable" | "codex" | "user";
-export interface AgentItem { repo: string; number: number; url: string; goal: string; step: number | null; total: number; activity: string }
+export interface AgentItem { repo: string; number: number; url: string; goal: string; step: number | null; total: number; activity: string; label?: string }
 /** off: this AI is OFF in every repo whose switches were read (user: always false). */
 export interface AgentRow { agent: AgentId; off: boolean; items: AgentItem[] }
 
@@ -55,7 +55,8 @@ export function resolveModel(model: string, sw: Pick<Switches, "sonnet" | "opus"
   return null;
 }
 
-export function activeAgents(runs: OrchRun[], switchesByRepo: Record<string, Switches | null>): AgentRow[] {
+export function activeAgents(runs: OrchRun[], switchesByRepo: Record<string, Switches | null>,
+  jobs: (AiJob & { repo: string })[] = []): AgentRow[] {
   const rows: AgentRow[] = AGENT_ORDER.map((agent) => ({ agent, off: false, items: [] }));
   const byId = (id: AgentId) => rows.find((r) => r.agent === id)!;
 
@@ -74,6 +75,13 @@ export function activeAgents(runs: OrchRun[], switchesByRepo: Record<string, Swi
       if (sw.opus) byId("opus").items.push({ ...base, activity: "재검수 중" });
     } else if (r.status === "awaiting_merge") byId("user").items.push({ ...base, activity: "반영 승인 대기" });
     else if (r.status === "blocked") byId("user").items.push({ ...base, activity: "멈춤 확인 필요" });
+  }
+
+  // 계획 밖 AI 작업(실험실 설계·판정 등). Fable이 꺼져 있으면 워크플로가 Opus로 돌므로 Opus 줄에.
+  for (const j of jobs) {
+    const sw = switchesByRepo[j.repo] ?? DEFAULT_SWITCHES;
+    const who: AgentId = j.agent === "fable" && sw.fable ? "fable" : "opus";
+    byId(who).items.push({ repo: j.repo, number: 0, url: j.url, goal: j.title, step: null, total: 0, activity: j.activity, label: "Actions" });
   }
 
   // off: OFF in every repo whose switches were read; none read → not off.
